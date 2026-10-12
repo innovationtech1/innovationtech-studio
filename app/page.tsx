@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Brand, brandContext, brandVisual, emptyBrand } from "@/lib/brand";
 import { friendlyError } from "@/lib/errors";
+import { fileToResizedDataUrl } from "@/lib/resize";
 
 type Tab = "texto" | "imagen" | "video" | "galeria" | "marca" | "config";
 
@@ -13,6 +14,8 @@ type Settings = {
   cfAccountId: string;
   cfToken: string;
   cfImageModel: string;
+  cfRefModel: string;
+  editModel: string;
   textModel: string;
   imageModel: string;
   videoModel: string;
@@ -27,6 +30,8 @@ const defaultSettings: Settings = {
   cfAccountId: "",
   cfToken: "",
   cfImageModel: "@cf/black-forest-labs/flux-1-schnell",
+  cfRefModel: "@cf/black-forest-labs/flux-2-klein-4b",
+  editModel: "black-forest-labs/flux-kontext-pro",
   textModel: "claude-sonnet-5-5",
   imageModel: "black-forest-labs/flux-schnell",
   videoModel: "minimax/video-01",
@@ -304,9 +309,29 @@ function ImageStudio({
   const [ratio, setRatio] = useState("1:1");
   const [count, setCount] = useState(1);
   const [useBrand, setUseBrand] = useState(true);
+  const [refs, setRefs] = useState<string[]>([]);
   const [urls, setUrls] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const cfProvider = settings.imageProvider === "cloudflare";
+  const maxRefs = cfProvider ? 4 : 1;
+
+  async function addFiles(files: FileList | null) {
+    if (!files?.length) return;
+    setError("");
+    try {
+      // Cloudflare exige referencias menores a 512×512; Replicate acepta más grandes.
+      const side = cfProvider ? 500 : 1280;
+      const room = maxRefs - refs.length;
+      const picked = Array.from(files).slice(0, Math.max(room, 0));
+      if (picked.length < files.length) setError(`Puedes usar hasta ${maxRefs} imagen(es) con este proveedor.`);
+      const urls = await Promise.all(picked.map((f) => fileToResizedDataUrl(f, side)));
+      setRefs((r) => [...r, ...urls].slice(0, maxRefs));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
 
   async function generate() {
     setLoading(true);
@@ -326,6 +351,9 @@ function ImageStudio({
           count,
           provider: settings.imageProvider,
           model: cf ? settings.cfImageModel : settings.imageModel,
+          refModel: settings.cfRefModel,
+          editModel: settings.editModel,
+          references: refs.slice(0, maxRefs),
         }),
       });
       const data = await res.json();
@@ -347,27 +375,52 @@ function ImageStudio({
         Funciona mejor si describes la imagen en inglés, con estilo, luz y composición. Proveedor:{" "}
         <strong>{settings.imageProvider === "cloudflare" ? "Cloudflare (gratis)" : "Replicate"}</strong>
       </p>
-      <label>Descripción de la imagen</label>
+      <label>Imágenes de referencia (opcional)</label>
+      <div className="upload">
+        {refs.map((r, i) => (
+          <div className="thumb" key={i}>
+            <img src={r} alt={`Referencia ${i + 1}`} />
+            <button title="Quitar" onClick={() => setRefs(refs.filter((_, j) => j !== i))}>
+              ×
+            </button>
+          </div>
+        ))}
+        {refs.length < maxRefs && (
+          <label className="pick">
+            <input
+              type="file"
+              accept="image/*"
+              multiple={maxRefs > 1}
+              onChange={(e) => (addFiles(e.target.files), (e.target.value = ""))}
+            />
+            <span>＋ Subir foto</span>
+          </label>
+        )}
+      </div>
+      <p className="hint" style={{ marginTop: 8 }}>
+        {refs.length > 0
+          ? "La IA usará tus fotos como base. Describe qué quieres: por ejemplo, «put this product on a wooden table with warm light» o «same person, now in a professional studio portrait»."
+          : `Sube hasta ${maxRefs} foto(s) de tu producto, local o logo para crear imágenes a partir de ellas, o déjalo vacío para crear desde cero.`}
+      </p>
+      <label>{refs.length > 0 ? "¿Qué hacer con tus imágenes?" : "Descripción de la imagen"}</label>
       <textarea
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
-        placeholder="Ej.: appetizing Mexican torta on a rustic wooden table, warm light, food photography, close-up"
+        placeholder={
+          refs.length > 0
+            ? "Ej.: place this torta on a rustic wooden table, warm restaurant light, food photography"
+            : "Ej.: appetizing Mexican torta on a rustic wooden table, warm light, food photography, close-up"
+        }
       />
       <div className="row">
         <div>
           <label>Formato</label>
-          {settings.imageProvider === "cloudflare" ? (
-            <select disabled value="1:1">
-              <option value="1:1">Cuadrado 1:1 (único formato en Cloudflare)</option>
-            </select>
-          ) : (
-            <select value={ratio} onChange={(e) => setRatio(e.target.value)}>
-              <option value="1:1">Cuadrado 1:1 (post)</option>
-              <option value="4:5">Vertical 4:5 (feed)</option>
-              <option value="9:16">Historia / Reel 9:16</option>
-              <option value="16:9">Horizontal 16:9 (YouTube, web)</option>
-            </select>
-          )}
+          <select value={ratio} onChange={(e) => setRatio(e.target.value)}>
+            <option value="1:1">Cuadrado 1:1 (post)</option>
+            <option value="4:5">Vertical 4:5 (feed)</option>
+            <option value="9:16">Historia / Reel 9:16</option>
+            <option value="16:9">Horizontal 16:9 (YouTube, web)</option>
+          </select>
         </div>
         <div>
           <label>Cantidad</label>
@@ -499,21 +552,41 @@ function VideoStudio({
         onChange={(e) => setPrompt(e.target.value)}
         placeholder="Ej.: slow cinematic dolly-in on a sizzling torta being assembled, steam rising, warm restaurant light"
       />
-      <label>Imagen inicial (opcional, URL)</label>
-      {firstFrame.startsWith("data:") ? (
-        <div className="actions" style={{ alignItems: "center" }}>
-          <img src={firstFrame} alt="Imagen inicial" style={{ width: 96, borderRadius: 8 }} />
-          <button className="btn ghost small" onClick={() => setFirstFrame("")}>
-            Quitar imagen
-          </button>
-        </div>
-      ) : (
-        <input
-          value={firstFrame}
-          onChange={(e) => setFirstFrame(e.target.value)}
-          placeholder="Pega la URL de una imagen para animarla"
-        />
-      )}
+      <label>Imagen inicial (opcional)</label>
+      <div className="upload">
+        {firstFrame ? (
+          <div className="thumb">
+            <img src={firstFrame} alt="Imagen inicial" />
+            <button title="Quitar" onClick={() => setFirstFrame("")}>
+              ×
+            </button>
+          </div>
+        ) : (
+          <label className="pick">
+            <input
+              type="file"
+              accept="image/*"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (!file) return;
+                try {
+                  setError("");
+                  setFirstFrame(await fileToResizedDataUrl(file, 1280));
+                } catch (err) {
+                  setError((err as Error).message);
+                }
+              }}
+            />
+            <span>＋ Subir foto</span>
+          </label>
+        )}
+      </div>
+      <p className="hint" style={{ marginTop: 8 }}>
+        {firstFrame
+          ? "El video empezará con esta imagen. Describe el movimiento: por ejemplo, «slow camera zoom in, steam rising, people smiling»."
+          : "Sube una foto de tu producto o local para darle vida, o déjalo vacío para crear el video solo con la descripción."}
+      </p>
       <button className="btn" disabled={loading || !prompt} onClick={generate}>
         {loading ? "Generando…" : "Generar video"}
       </button>
@@ -689,8 +762,16 @@ function Config({ settings, onSave }: { settings: Settings; onSave: (s: Settings
           <input {...f("cfImageModel")} />
         </div>
         <div>
+          <label>Imagen con fotos (Cloudflare)</label>
+          <input {...f("cfRefModel")} />
+        </div>
+        <div>
           <label>Modelo de imagen (Replicate)</label>
           <input {...f("imageModel")} />
+        </div>
+        <div>
+          <label>Imagen con foto (Replicate)</label>
+          <input {...f("editModel")} />
         </div>
         <div>
           <label>Modelo de video</label>
