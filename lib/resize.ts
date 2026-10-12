@@ -2,7 +2,12 @@
 // Así las fotos del celular (que pesan varios MB) viajan ligeras y caben
 // en los límites de Vercel y de los proveedores.
 
-export async function fileToResizedDataUrl(file: File, maxSide: number, quality = 0.88): Promise<string> {
+export async function fileToResizedDataUrl(
+  file: File,
+  maxSide: number,
+  quality = 0.88,
+  keepTransparency = false
+): Promise<string> {
   if (!file.type.startsWith("image/")) throw new Error("El archivo no es una imagen.");
 
   const src = await new Promise<string>((resolve, reject) => {
@@ -28,6 +33,11 @@ export async function fileToResizedDataUrl(file: File, maxSide: number, quality 
   canvas.height = h;
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Tu navegador no permite procesar la imagen.");
+  if (keepTransparency) {
+    // Para logos: conservamos el fondo transparente.
+    ctx.drawImage(img, 0, 0, w, h);
+    return canvas.toDataURL("image/png");
+  }
   ctx.fillStyle = "#ffffff"; // fondo blanco para PNG con transparencia
   ctx.fillRect(0, 0, w, h);
   ctx.drawImage(img, 0, 0, w, h);

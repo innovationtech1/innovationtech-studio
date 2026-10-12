@@ -16,9 +16,12 @@ Cada persona usa **sus propias claves de API** y paga solo lo que genera. El có
 |---|---|---|
 | ✍️ Textos | Copys para redes, ganchos, hashtags, llamadas a la acción, ideas visuales | **Cloudflare Workers AI (gratis, Llama 3.3 70B)** o Claude de Anthropic (de pago) |
 | 🖼️ Imágenes | Posts, historias, banners, fotos de producto; desde cero o **a partir de tus fotos** (hasta 4 con Cloudflare) | **Cloudflare Workers AI (gratis)** o Replicate (de pago). Formatos 1:1, 4:5, 9:16 y 16:9 |
-| 🎬 Videos | Clips cortos para reels y anuncios, desde texto o **animando una foto de tu dispositivo** | Modelos de video en Replicate |
+| 🎞️ Reels (gratis) | Reels animados con tus imágenes: zoom y movimiento, transiciones, textos en pantalla, cierre con tu marca y logo, **voz en off con IA**. Se crean en el navegador, sin costo ni límite. Exporta MP4 (o WebM en algunos navegadores) | Navegador + Cloudflare Workers AI (textos, imágenes y voz gratis) |
+| 🎬 Video con IA (opcional) | Clips generados por IA desde texto o animando una foto | Modelos de video en Replicate (de pago) |
 | 🎨 Mi marca | Guarda nombre, giro, público, tono y colores; se aplican en todo | — |
 | 📁 Galería | Historial de lo que creaste para descargarlo | — |
+
+**Flujo 100% gratis:** en *Videos → Reel con mis imágenes*, escribe el tema y presiona **✨ Crear todo con IA**: la IA escribe los textos de cada escena, el cierre y el guion de voz, y crea las imágenes. Luego genera la voz y presiona **🎬 Crear reel**.
 
 El flujo ideal: escribes la idea en **Textos**, la IA te da el copy y las descripciones visuales, y con un clic pasas a **Imágenes** y luego a **Videos** (incluso puedes animar la imagen que generaste).
 

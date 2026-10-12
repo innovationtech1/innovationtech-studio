@@ -4,26 +4,10 @@ import { useEffect, useState } from "react";
 import { Brand, brandContext, brandVisual, emptyBrand } from "@/lib/brand";
 import { friendlyError } from "@/lib/errors";
 import { fileToResizedDataUrl } from "@/lib/resize";
+import type { Item, Settings } from "@/lib/types";
+import ReelStudio from "./reel-studio";
 
 type Tab = "texto" | "imagen" | "video" | "galeria" | "marca" | "config";
-
-type Settings = {
-  anthropicKey: string;
-  textProvider: "cloudflare" | "anthropic";
-  cfTextModel: string;
-  replicateKey: string;
-  imageProvider: "cloudflare" | "replicate";
-  cfAccountId: string;
-  cfToken: string;
-  cfImageModel: string;
-  cfRefModel: string;
-  editModel: string;
-  textModel: string;
-  imageModel: string;
-  videoModel: string;
-};
-
-type Item = { kind: "imagen" | "video"; url: string; prompt: string; date: string };
 
 const defaultSettings: Settings = {
   anthropicKey: "",
@@ -90,6 +74,7 @@ export default function Home() {
   const [imagePrompt, setImagePrompt] = useState("");
   const [videoPrompt, setVideoPrompt] = useState("");
   const [ready, setReady] = useState(false);
+  const [videoMode, setVideoMode] = useState<"reel" | "ia">("reel");
 
   useEffect(() => {
     setSettings(load("its-settings", defaultSettings));
@@ -171,18 +156,37 @@ export default function Home() {
           onAnimate={(url, p) => {
             setVideoPrompt(p);
             setTab("video");
-            sessionStorage.setItem("its-first-frame", url);
+            try {
+              sessionStorage.setItem("its-first-frame", url);
+              sessionStorage.setItem("its-reel-image", url);
+            } catch {
+              /* imagen demasiado grande para guardarla temporalmente */
+            }
           }}
         />
       )}
       {tab === "video" && (
-        <VideoStudio
-          settings={settings}
-          brand={brand}
-          prompt={videoPrompt}
-          setPrompt={setVideoPrompt}
-          onDone={addToGallery}
-        />
+        <>
+          <div className="mode-switch" role="tablist">
+            <button className={videoMode === "reel" ? "active" : ""} onClick={() => setVideoMode("reel")}>
+              🎞️ Reel con mis imágenes · gratis
+            </button>
+            <button className={videoMode === "ia" ? "active" : ""} onClick={() => setVideoMode("ia")}>
+              🤖 Video con IA · Replicate (de pago)
+            </button>
+          </div>
+          {videoMode === "reel" ? (
+            <ReelStudio settings={settings} brand={brand} gallery={gallery} onImages={addToGallery} />
+          ) : (
+            <VideoStudio
+              settings={settings}
+              brand={brand}
+              prompt={videoPrompt}
+              setPrompt={setVideoPrompt}
+              onDone={addToGallery}
+            />
+          )}
+        </>
       )}
       {tab === "galeria" && <Gallery items={gallery} onClear={() => setGallery([])} />}
       {tab === "marca" && (

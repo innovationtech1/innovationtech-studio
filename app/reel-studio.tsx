@@ -1,0 +1,461 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { Brand, brandContext, brandVisual } from "@/lib/brand";
+import { friendlyError } from "@/lib/errors";
+import { fileToResizedDataUrl } from "@/lib/resize";
+import { ReelFormat, renderReel, supportedRecording } from "@/lib/reel";
+import type { Item, Settings } from "@/lib/types";
+
+type Scene = { image: string; caption: string; prompt: string; loading?: boolean };
+
+const emptyScene = (): Scene => ({ image: "", caption: "", prompt: "" });
+
+function load(key: string): string {
+  try {
+    return localStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+}
+function save(key: string, value: string) {
+  try {
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+  } catch {
+    /* sin almacenamiento */
+  }
+}
+
+export default function ReelStudio({
+  settings,
+  brand,
+  gallery,
+  onImages,
+}: {
+  settings: Settings;
+  brand: Brand;
+  gallery: Item[];
+  onImages: (items: Item[]) => void;
+}) {
+  const [topic, setTopic] = useState("");
+  const [count, setCount] = useState(4);
+  const [format, setFormat] = useState<ReelFormat>("9:16");
+  const [scenes, setScenes] = useState<Scene[]>(() => Array.from({ length: 4 }, emptyScene));
+  const [seconds, setSeconds] = useState(3);
+  const [brandName, setBrandName] = useState(brand.name);
+  const [cta, setCta] = useState("");
+  const [accent, setAccent] = useState("#e5243b");
+  const [logo, setLogo] = useState("");
+  const [script, setScript] = useState("");
+  const [voice, setVoice] = useState("");
+  const [picking, setPicking] = useState<number | null>(null);
+  const [busy, setBusy] = useState("");
+  const [progress, setProgress] = useState(0);
+  const [result, setResult] = useState<{ url: string; ext: string; seconds: number } | null>(null);
+  const [error, setError] = useState("");
+  const preview = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    setLogo(load("its-logo"));
+    setAccent(load("its-accent") || "#e5243b");
+    // Imagen enviada desde «Animar en video» en la pestaña Imágenes
+    try {
+      const img = sessionStorage.getItem("its-reel-image");
+      if (img) {
+        sessionStorage.removeItem("its-reel-image");
+        setScenes((s) => s.map((sc, i) => (i === 0 ? { ...sc, image: img } : sc)));
+      }
+    } catch {
+      /* nada */
+    }
+  }, []);
+  useEffect(() => setBrandName((b) => b || brand.name), [brand.name]);
+
+  const canRecord = typeof window === "undefined" ? true : supportedRecording() !== null;
+  const galleryImages = gallery.filter((g) => g.kind === "imagen");
+  const cfHeaders = { "x-cf-account": settings.cfAccountId, "x-cf-token": settings.cfToken };
+
+  const setScene = (i: number, patch: Partial<Scene>) =>
+    setScenes((s) => s.map((sc, j) => (j === i ? { ...sc, ...patch } : sc)));
+
+  function resize(n: number) {
+    setCount(n);
+    setScenes((s) => (s.length >= n ? s.slice(0, n) : [...s, ...Array.from({ length: n - s.length }, emptyScene)]));
+  }
+
+  async function writeWithAi(): Promise<{ captions: string[]; imagePrompts: string[] } | null> {
+    const res = await fetch("/api/text", {
+      method: "POST",
+      headers:
+        settings.textProvider === "cloudflare"
+          ? { "content-type": "application/json", ...cfHeaders }
+          : { "content-type": "application/json", "x-anthropic-key": settings.anthropicKey },
+      body: JSON.stringify({
+        mode: "reel",
+        scenes: scenes.length,
+        prompt: topic,
+        brand: brandContext(brand),
+        provider: settings.textProvider,
+        model: settings.textProvider === "cloudflare" ? settings.cfTextModel : settings.textModel,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    setScenes((s) =>
+      s.map((sc, i) => ({ ...sc, caption: data.captions[i] ?? sc.caption, prompt: data.imagePrompts?.[i] ?? sc.prompt }))
+    );
+    if (data.cta) setCta(data.cta);
+    if (data.voiceover) setScript(data.voiceover);
+    return data;
+  }
+
+  async function makeImage(i: number, promptText: string) {
+    if (!promptText.trim()) throw new Error("Escribe primero el tema del reel o los textos.");
+    setScene(i, { loading: true });
+    try {
+      const cf = settings.imageProvider === "cloudflare";
+      const res = await fetch("/api/image", {
+        method: "POST",
+        headers: cf
+          ? { "content-type": "application/json", ...cfHeaders }
+          : { "content-type": "application/json", "x-replicate-key": settings.replicateKey },
+        body: JSON.stringify({
+          prompt: promptText + brandVisual(brand),
+          aspectRatio: format,
+          count: 1,
+          provider: settings.imageProvider,
+          model: cf ? settings.cfImageModel : settings.imageModel,
+          refModel: settings.cfRefModel,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      const url = data.urls[0];
+      setScene(i, { image: url, loading: false });
+      onImages([{ kind: "imagen", url, prompt: promptText, date: new Date().toISOString() }]);
+    } catch (e) {
+      setScene(i, { loading: false });
+      throw e;
+    }
+  }
+
+  async function run(label: string, fn: () => Promise<unknown>) {
+    setBusy(label);
+    setError("");
+    try {
+      await fn();
+    } catch (e) {
+      setError(friendlyError((e as Error).message));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  const createAll = () =>
+    run("Escribiendo y creando imágenes…", async () => {
+      if (!topic.trim()) throw new Error("Escribe de qué trata el reel.");
+      const data = await writeWithAi();
+      if (!data) return;
+      // Solo crea imágenes para las escenas que aún no tienen una.
+      const jobs = scenes.map((sc, i) =>
+        sc.image ? Promise.resolve() : makeImage(i, data.imagePrompts?.[i] || `${topic}, ${data.captions[i] || ""}`)
+      );
+      const results = await Promise.allSettled(jobs);
+      const failed = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
+      if (failed) throw failed.reason;
+    });
+
+  const makeVoice = () =>
+    run("Generando voz…", async () => {
+      if (!script.trim()) throw new Error("Escribe el guion de la voz en off.");
+      if (!settings.cfAccountId || !settings.cfToken) throw new Error("La voz usa Cloudflare: agrega tu Account ID y token en Configuración.");
+      const res = await fetch("/api/voice", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...cfHeaders },
+        body: JSON.stringify({ text: script, lang: "es" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setVoice(data.audio);
+    });
+
+  const buildReel = () =>
+    run("Grabando tu reel…", async () => {
+      const ready = scenes.filter((s) => s.image);
+      if (ready.length === 0) throw new Error("Agrega al menos una imagen a las escenas.");
+      setResult(null);
+      setProgress(0);
+      if (result) URL.revokeObjectURL(result.url);
+      const r = await renderReel({
+        images: ready.map((s) => s.image),
+        captions: ready.map((s) => s.caption),
+        secondsPerSlide: seconds,
+        format,
+        accent,
+        brandName,
+        cta,
+        logo: logo || undefined,
+        voice: voice || undefined,
+        onProgress: setProgress,
+        previewCanvas: preview.current || undefined,
+      });
+      setResult({ url: r.url, ext: r.ext, seconds: r.seconds });
+    });
+
+  const ratioStyle = format === "9:16" ? "9 / 16" : format === "1:1" ? "1 / 1" : "16 / 9";
+
+  return (
+    <section className="card">
+      <h2>Creador de Reels · gratis</h2>
+      <p className="hint">
+        Arma un video con tus imágenes animadas, textos en pantalla, tu marca y voz en off. Se crea en tu navegador: sin
+        costo y sin límite.
+      </p>
+      {!canRecord && (
+        <div className="error">Este navegador no puede grabar video. Usa Chrome, Edge o Safari actualizados.</div>
+      )}
+
+      {/* 1. Tema */}
+      <h3 className="step">1. ¿De qué trata el reel?</h3>
+      <textarea
+        value={topic}
+        onChange={(e) => setTopic(e.target.value)}
+        placeholder="Ej.: Promoción 2x1 en tortas los martes en Tortas Tortuga"
+        style={{ minHeight: 80 }}
+      />
+      <div className="row">
+        <div>
+          <label>Escenas</label>
+          <select value={count} onChange={(e) => resize(Number(e.target.value))}>
+            {[2, 3, 4, 5, 6].map((n) => (
+              <option key={n} value={n}>
+                {n} escenas
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label>Formato</label>
+          <select value={format} onChange={(e) => setFormat(e.target.value as ReelFormat)}>
+            <option value="9:16">Vertical 9:16 (Reels, TikTok, Historias)</option>
+            <option value="1:1">Cuadrado 1:1 (feed)</option>
+            <option value="16:9">Horizontal 16:9 (YouTube, web)</option>
+          </select>
+        </div>
+        <div>
+          <label>Segundos por escena</label>
+          <select value={seconds} onChange={(e) => setSeconds(Number(e.target.value))}>
+            {[2, 3, 4, 5, 6].map((n) => (
+              <option key={n} value={n}>
+                {n} s
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div className="actions">
+        <button className="btn" disabled={!!busy || !topic.trim()} onClick={createAll}>
+          ✨ Crear todo con IA
+        </button>
+        <button
+          className="btn ghost"
+          disabled={!!busy || !topic.trim()}
+          onClick={() => run("Escribiendo textos…", writeWithAi)}
+        >
+          Solo escribir textos
+        </button>
+      </div>
+      <p className="hint" style={{ marginTop: 8 }}>
+        «Crear todo» escribe los textos, el cierre y el guion de voz, y crea una imagen para cada escena vacía.
+      </p>
+
+      {/* 2. Escenas */}
+      <h3 className="step">2. Escenas</h3>
+      <div className="scenes">
+        {scenes.map((sc, i) => (
+          <div className="scene" key={i}>
+            <div className="scene-img" style={{ aspectRatio: ratioStyle }}>
+              {sc.loading ? (
+                <span className="muted">Creando…</span>
+              ) : sc.image ? (
+                <img src={sc.image} alt={`Escena ${i + 1}`} />
+              ) : (
+                <span className="muted">Escena {i + 1}</span>
+              )}
+            </div>
+            <input
+              value={sc.caption}
+              onChange={(e) => setScene(i, { caption: e.target.value })}
+              placeholder={`Texto en pantalla ${i + 1}`}
+            />
+            <div className="actions">
+              <label className="btn ghost small" style={{ margin: 0 }}>
+                Subir
+                <input
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={async (e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = "";
+                    if (f) run("Cargando foto…", async () => setScene(i, { image: await fileToResizedDataUrl(f, 1280) }));
+                  }}
+                />
+              </label>
+              <button className="btn ghost small" onClick={() => setPicking(picking === i ? null : i)}>
+                Galería
+              </button>
+              <button
+                className="btn ghost small"
+                disabled={!!busy || sc.loading}
+                onClick={() =>
+                  run("Creando imagen…", () => makeImage(i, sc.prompt || `${topic}, ${sc.caption}, advertising photography`))
+                }
+              >
+                Crear con IA
+              </button>
+              {sc.image && (
+                <button className="btn ghost small" onClick={() => setScene(i, { image: "" })}>
+                  Quitar
+                </button>
+              )}
+            </div>
+            {picking === i && (
+              <div className="picker">
+                {galleryImages.length === 0 && <span className="muted">Tu galería está vacía.</span>}
+                {galleryImages.slice(0, 24).map((g, k) => (
+                  <img
+                    key={g.url + k}
+                    src={g.url}
+                    alt={g.prompt}
+                    onClick={() => (setScene(i, { image: g.url }), setPicking(null))}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* 3. Cierre */}
+      <h3 className="step">3. Cierre con tu marca</h3>
+      <div className="row">
+        <div>
+          <label>Nombre del negocio</label>
+          <input value={brandName} onChange={(e) => setBrandName(e.target.value)} placeholder="Ej.: Tortas Tortuga" />
+        </div>
+        <div>
+          <label>Llamada a la acción</label>
+          <input value={cta} onChange={(e) => setCta(e.target.value)} placeholder="Ej.: Te esperamos este martes" />
+        </div>
+      </div>
+      <div className="row">
+        <div>
+          <label>Color de acento</label>
+          <input
+            type="color"
+            value={accent}
+            onChange={(e) => (setAccent(e.target.value), save("its-accent", e.target.value))}
+            style={{ height: 44, padding: 4 }}
+          />
+        </div>
+        <div>
+          <label>Logo (opcional, PNG con fondo transparente es ideal)</label>
+          <div className="actions" style={{ alignItems: "center" }}>
+            {logo && <img src={logo} alt="Logo" style={{ height: 44, borderRadius: 6 }} />}
+            <label className="btn ghost small" style={{ margin: 0 }}>
+              {logo ? "Cambiar" : "Subir logo"}
+              <input
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!f) return;
+                  const url = await fileToResizedDataUrl(f, 512, 0.9, true).catch(() => "");
+                  setLogo(url);
+                  save("its-logo", url);
+                }}
+              />
+            </label>
+            {logo && (
+              <button className="btn ghost small" onClick={() => (setLogo(""), save("its-logo", ""))}>
+                Quitar
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* 4. Voz */}
+      <h3 className="step">4. Voz en off (opcional, gratis con Cloudflare)</h3>
+      <textarea
+        value={script}
+        onChange={(e) => (setScript(e.target.value), setVoice(""))}
+        placeholder="Lo que dirá la voz. «Crear todo con IA» lo escribe por ti."
+        style={{ minHeight: 70 }}
+      />
+      <div className="actions" style={{ alignItems: "center" }}>
+        <button className="btn ghost small" disabled={!!busy || !script.trim()} onClick={makeVoice}>
+          🎙️ Generar voz
+        </button>
+        {voice && (
+          <>
+            <audio src={voice} controls style={{ height: 36, marginTop: 8 }} />
+            <button className="btn ghost small" onClick={() => setVoice("")}>
+              Sin voz
+            </button>
+          </>
+        )}
+      </div>
+      {voice && <p className="hint" style={{ marginTop: 6 }}>El reel durará lo necesario para que la voz se escuche completa.</p>}
+
+      {/* 5. Crear */}
+      <h3 className="step">5. Crear el video</h3>
+      <button className="btn" disabled={!!busy || !canRecord || !scenes.some((s) => s.image)} onClick={buildReel}>
+        🎬 Crear reel
+      </button>
+      {busy && (
+        <div className="notice">
+          {busy}
+          {busy.startsWith("Grabando") && (
+            <>
+              {" "}
+              {Math.round(progress * 100)}% · Mantén esta pantalla abierta hasta que termine.
+              <div className="bar">
+                <div style={{ width: `${Math.round(progress * 100)}%` }} />
+              </div>
+            </>
+          )}
+        </div>
+      )}
+      {error && <div className="error">{error}</div>}
+
+      <div className="reel-output">
+        <canvas
+          ref={preview}
+          className="reel-canvas"
+          style={{ aspectRatio: ratioStyle, display: busy.startsWith("Grabando") ? "block" : "none" }}
+        />
+        {result && !busy && (
+          <div className="media" style={{ maxWidth: format === "16:9" ? 640 : 360 }}>
+            <video src={result.url} controls playsInline />
+            <div className="meta actions">
+              <a href={result.url} download={`reel-innovationtech.${result.ext}`}>
+                ⬇️ Descargar video ({result.seconds} s, {result.ext.toUpperCase()})
+              </a>
+            </div>
+          </div>
+        )}
+      </div>
+      {result && result.ext === "webm" && !busy && (
+        <p className="hint" style={{ marginTop: 8 }}>
+          Este navegador graba en formato WebM. Instagram y TikTok lo aceptan desde la computadora; si tu celular no lo
+          abre, crea el reel desde Safari o desde Chrome actualizado, que graban en MP4.
+        </p>
+      )}
+    </section>
+  );
+}
