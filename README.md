@@ -15,8 +15,8 @@ Cada persona usa **sus propias claves de API** y paga solo lo que genera. El có
 | Módulo | Qué crea | Con qué |
 |---|---|---|
 | ✍️ Textos | Copys para redes, ganchos, hashtags, llamadas a la acción, ideas visuales | Claude (Anthropic) |
-| 🖼️ Imágenes | Posts, historias, banners, fotos de producto | **Cloudflare Workers AI (gratis, cuadradas)** o Replicate (de pago, 1:1, 4:5, 9:16, 16:9) |
-| 🎬 Videos | Clips cortos para reels y anuncios, desde texto o animando una imagen | Modelos de video en Replicate |
+| 🖼️ Imágenes | Posts, historias, banners, fotos de producto; desde cero o **a partir de tus fotos** (hasta 4 con Cloudflare) | **Cloudflare Workers AI (gratis)** o Replicate (de pago). Formatos 1:1, 4:5, 9:16 y 16:9 |
+| 🎬 Videos | Clips cortos para reels y anuncios, desde texto o **animando una foto de tu dispositivo** | Modelos de video en Replicate |
 | 🎨 Mi marca | Guarda nombre, giro, público, tono y colores; se aplican en todo | — |
 | 📁 Galería | Historial de lo que creaste para descargarlo | — |
 
@@ -46,6 +46,16 @@ Luego, dentro de la app, ve a **⚙️ Configuración**, elige el proveedor de i
 4. En un par de minutos tendrás tu enlace (por ejemplo `innovationtech-studio.vercel.app`) para compartir.
 
 > En el plan gratuito de Vercel las funciones tienen un límite de tiempo. Las imágenes y los videos funcionan porque el video se consulta por partes, pero si una imagen tarda demasiado, vuelve a intentarlo.
+
+## Instalar la app en tu dispositivo
+
+InnovationTECH Studio es una **app web instalable (PWA)**: se instala desde el navegador, con su propio ícono, y se abre en su ventana como cualquier app. No necesita tienda de aplicaciones.
+
+- **Android (Chrome):** aparece el aviso *Instala InnovationTECH Studio* → **Instalar**. También: menú ⋮ → *Instalar app*.
+- **iPhone / iPad (Safari):** botón **Compartir** ⬆️ → **Agregar a pantalla de inicio** → *Agregar*.
+- **Windows / Mac (Chrome o Edge):** botón **Instalar** del aviso, o el ícono de instalar en la barra de direcciones. Queda en el menú Inicio / Launchpad.
+
+Incluye íconos para todos los sistemas (favicon, iOS, Android adaptable y mosaico de Windows), accesos directos a Textos, Imágenes y Videos, y una pantalla de aviso si no hay internet.
 
 ## Opción 2: correrla en tu computadora
 

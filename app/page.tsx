@@ -91,6 +91,9 @@ export default function Home() {
     setSettings(load("its-settings", defaultSettings));
     setBrand(load("its-brand", emptyBrand));
     setGallery(loadList<Item>("its-gallery"));
+    // Accesos directos de la app instalada (?tab=imagen, etc.)
+    const t = new URLSearchParams(window.location.search).get("tab");
+    if (t && ["texto", "imagen", "video", "galeria", "marca", "config"].includes(t)) setTab(t as Tab);
     setReady(true);
   }, []);
 
@@ -106,11 +109,14 @@ export default function Home() {
   return (
     <div className="shell">
       <header className="top">
-        <div>
-          <div className="logo">
-            Innovation<span>TECH</span> Studio
+        <div className="brand">
+          <img src="/icons/icon-192.png" alt="InnovationTECH" />
+          <div>
+            <div className="logo">
+              Innovation<span>TECH</span> Studio
+            </div>
+            <div className="tag">Textos, imágenes y videos de marketing con IA · Open source</div>
           </div>
-          <div className="tag">Textos, imágenes y videos de marketing con IA · Open source</div>
         </div>
       </header>
 

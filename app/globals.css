@@ -78,3 +78,26 @@ footer a { color: var(--text); }
 .pick { width: 96px; height: 96px; margin: 0; display: flex; align-items: center; justify-content: center; text-align: center; border: 2px dashed var(--navy-600); border-radius: 10px; cursor: pointer; color: var(--muted); font-size: 13px; padding: 6px; }
 .pick:hover { border-color: var(--red); color: var(--text); }
 .pick input { display: none; }
+
+/* Espacio para la barra de estado y la muesca cuando la app está instalada (iPhone) */
+.shell {
+  padding-top: max(24px, env(safe-area-inset-top));
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
+  padding-bottom: calc(120px + env(safe-area-inset-bottom));
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand img { width: 48px; height: 48px; }
+
+.install-bar {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: max(16px, env(safe-area-inset-bottom)); z-index: 50;
+  width: min(560px, calc(100% - 24px));
+  display: flex; align-items: center; gap: 12px;
+  background: var(--navy-800); border: 1px solid var(--navy-600); border-radius: 14px;
+  padding: 12px 14px; box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+}
+.install-bar .btn { margin-top: 0; white-space: nowrap; }
+.install-text { flex: 1; display: flex; flex-direction: column; font-size: 13px; color: var(--muted); }
+.install-text strong { color: var(--text); font-size: 14px; }
+.install-close { background: transparent; border: 0; color: var(--muted); font-size: 22px; cursor: pointer; padding: 0 4px; }
