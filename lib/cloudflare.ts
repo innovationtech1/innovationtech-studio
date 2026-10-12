@@ -8,10 +8,8 @@ export async function cloudflareImage(
   prompt: string
 ): Promise<string> {
   const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model}`;
-  const body: Record<string, unknown> = {
-    prompt: prompt.slice(0, 2048),
-    seed: Math.floor(Math.random() * 2_000_000_000),
-  };
+  // FLUX Schnell en Cloudflare solo acepta "prompt" y "steps"; cualquier otro campo da error.
+  const body: Record<string, unknown> = { prompt: prompt.slice(0, 2048) };
   if (model.includes("flux-1-schnell")) body.steps = 4;
 
   const res = await fetch(url, {
