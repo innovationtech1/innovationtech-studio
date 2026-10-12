@@ -15,7 +15,7 @@ Cada persona usa **sus propias claves de API** y paga solo lo que genera. El có
 | Módulo | Qué crea | Con qué |
 |---|---|---|
 | ✍️ Textos | Copys para redes, ganchos, hashtags, llamadas a la acción, ideas visuales | Claude (Anthropic) |
-| 🖼️ Imágenes | Posts, historias, banners, fotos de producto (1:1, 4:5, 9:16, 16:9) | Modelos de imagen en Replicate (FLUX por defecto) |
+| 🖼️ Imágenes | Posts, historias, banners, fotos de producto | **Cloudflare Workers AI (gratis, cuadradas)** o Replicate (de pago, 1:1, 4:5, 9:16, 16:9) |
 | 🎬 Videos | Clips cortos para reels y anuncios, desde texto o animando una imagen | Modelos de video en Replicate |
 | 🎨 Mi marca | Guarda nombre, giro, público, tono y colores; se aplican en todo | — |
 | 📁 Galería | Historial de lo que creaste para descargarlo | — |
@@ -30,10 +30,11 @@ El flujo ideal: escribes la idea en **Textos**, la IA te da el copy y las descri
 
 ## Cómo conseguir las claves
 
-1. **Anthropic (textos):** crea una cuenta en <https://console.anthropic.com>, agrega crédito y genera una API key.
-2. **Replicate (imágenes y videos):** crea una cuenta en <https://replicate.com>, agrega un método de pago y copia tu token en *Account → API tokens*.
+1. **Anthropic (textos):** crea una cuenta en <https://console.anthropic.com>, compra crédito en *Plans & Billing* y genera una API key. La suscripción de Claude.ai no incluye crédito de API.
+2. **Cloudflare Workers AI (imágenes gratis):** crea una cuenta gratuita en <https://dash.cloudflare.com>, entra a *AI → Workers AI → Use REST API*, copia tu **Account ID** y crea un **token de Workers AI**. El plan gratuito da una cantidad de uso diaria que se reinicia a medianoche UTC (con FLUX Schnell alcanza para alrededor de 150 imágenes cuadradas al día).
+3. **Replicate (videos, e imágenes de pago):** crea una cuenta en <https://replicate.com>, compra crédito en *Billing* y copia tu token en *Account → API tokens*.
 
-Luego, dentro de la app, ve a **⚙️ Configuración**, pega las dos claves y guarda.
+Luego, dentro de la app, ve a **⚙️ Configuración**, elige el proveedor de imágenes, pega tus claves y guarda.
 
 > Los precios los fija cada proveedor y cambian con el tiempo; revisa sus páginas. Como referencia general, el texto es lo más barato, las imágenes cuestan centavos y el video es lo más caro.
 

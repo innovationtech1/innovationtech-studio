@@ -2,12 +2,17 @@
 
 import { useEffect, useState } from "react";
 import { Brand, brandContext, brandVisual, emptyBrand } from "@/lib/brand";
+import { friendlyError } from "@/lib/errors";
 
 type Tab = "texto" | "imagen" | "video" | "galeria" | "marca" | "config";
 
 type Settings = {
   anthropicKey: string;
   replicateKey: string;
+  imageProvider: "cloudflare" | "replicate";
+  cfAccountId: string;
+  cfToken: string;
+  cfImageModel: string;
   textModel: string;
   imageModel: string;
   videoModel: string;
@@ -18,10 +23,25 @@ type Item = { kind: "imagen" | "video"; url: string; prompt: string; date: strin
 const defaultSettings: Settings = {
   anthropicKey: "",
   replicateKey: "",
+  imageProvider: "cloudflare",
+  cfAccountId: "",
+  cfToken: "",
+  cfImageModel: "@cf/black-forest-labs/flux-1-schnell",
   textModel: "claude-sonnet-5-5",
   imageModel: "black-forest-labs/flux-schnell",
   videoModel: "minimax/video-01",
 };
+
+// Las imágenes de Cloudflare llegan como datos dentro de la página (pesan más),
+// así que la galería guarda solo las más recientes para no llenar el navegador.
+function trimGallery(items: Item[]): Item[] {
+  let embedded = 0;
+  return items.slice(0, 100).filter((it) => {
+    if (!it.url.startsWith("data:")) return true;
+    embedded++;
+    return embedded <= 8;
+  });
+}
 
 // Todo se guarda solo en el navegador de cada persona.
 function load<T>(key: string, fallback: T): T {
@@ -70,11 +90,13 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (ready) save("its-gallery", gallery.slice(0, 100));
+    if (ready) save("its-gallery", trimGallery(gallery));
   }, [gallery, ready]);
 
   const addToGallery = (items: Item[]) => setGallery((g) => [...items, ...g]);
-  const missingKeys = ready && (!settings.anthropicKey || !settings.replicateKey);
+  const imageKeysMissing =
+    settings.imageProvider === "cloudflare" ? !settings.cfAccountId || !settings.cfToken : !settings.replicateKey;
+  const missingKeys = ready && (!settings.anthropicKey || imageKeysMissing);
 
   return (
     <div className="shell">
@@ -205,7 +227,7 @@ function TextStudio({
       if (!res.ok) throw new Error(data.error);
       setResult(data.text);
     } catch (e) {
-      setError((e as Error).message || "Algo salió mal.");
+      setError(friendlyError((e as Error).message));
     } finally {
       setLoading(false);
     }
@@ -292,10 +314,19 @@ function ImageStudio({
     setUrls([]);
     const full = prompt + (useBrand ? brandVisual(brand) : "");
     try {
+      const cf = settings.imageProvider === "cloudflare";
       const res = await fetch("/api/image", {
         method: "POST",
-        headers: { "content-type": "application/json", "x-replicate-key": settings.replicateKey },
-        body: JSON.stringify({ prompt: full, aspectRatio: ratio, count, model: settings.imageModel }),
+        headers: cf
+          ? { "content-type": "application/json", "x-cf-account": settings.cfAccountId, "x-cf-token": settings.cfToken }
+          : { "content-type": "application/json", "x-replicate-key": settings.replicateKey },
+        body: JSON.stringify({
+          prompt: full,
+          aspectRatio: ratio,
+          count,
+          provider: settings.imageProvider,
+          model: cf ? settings.cfImageModel : settings.imageModel,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -303,7 +334,7 @@ function ImageStudio({
       const date = new Date().toISOString();
       onDone(data.urls.map((url: string) => ({ kind: "imagen", url, prompt, date })));
     } catch (e) {
-      setError((e as Error).message || "Algo salió mal.");
+      setError(friendlyError((e as Error).message));
     } finally {
       setLoading(false);
     }
@@ -312,7 +343,10 @@ function ImageStudio({
   return (
     <section className="card">
       <h2>Crear imágenes</h2>
-      <p className="hint">Funciona mejor si describes la imagen en inglés, con estilo, luz y composición.</p>
+      <p className="hint">
+        Funciona mejor si describes la imagen en inglés, con estilo, luz y composición. Proveedor:{" "}
+        <strong>{settings.imageProvider === "cloudflare" ? "Cloudflare (gratis)" : "Replicate"}</strong>
+      </p>
       <label>Descripción de la imagen</label>
       <textarea
         value={prompt}
@@ -322,12 +356,18 @@ function ImageStudio({
       <div className="row">
         <div>
           <label>Formato</label>
-          <select value={ratio} onChange={(e) => setRatio(e.target.value)}>
-            <option value="1:1">Cuadrado 1:1 (post)</option>
-            <option value="4:5">Vertical 4:5 (feed)</option>
-            <option value="9:16">Historia / Reel 9:16</option>
-            <option value="16:9">Horizontal 16:9 (YouTube, web)</option>
-          </select>
+          {settings.imageProvider === "cloudflare" ? (
+            <select disabled value="1:1">
+              <option value="1:1">Cuadrado 1:1 (único formato en Cloudflare)</option>
+            </select>
+          ) : (
+            <select value={ratio} onChange={(e) => setRatio(e.target.value)}>
+              <option value="1:1">Cuadrado 1:1 (post)</option>
+              <option value="4:5">Vertical 4:5 (feed)</option>
+              <option value="9:16">Historia / Reel 9:16</option>
+              <option value="16:9">Horizontal 16:9 (YouTube, web)</option>
+            </select>
+          )}
         </div>
         <div>
           <label>Cantidad</label>
@@ -355,7 +395,7 @@ function ImageStudio({
             <div className="media" key={u}>
               <img src={u} alt={prompt} />
               <div className="meta actions">
-                <a href={u} target="_blank" rel="noreferrer" download>
+                <a href={u} target={u.startsWith("data:") ? undefined : "_blank"} rel="noreferrer" download="innovationtech-imagen">
                   Descargar
                 </a>
                 ·
@@ -442,7 +482,7 @@ function VideoStudio({
       }
       throw new Error("Se agotó el tiempo de espera. Revisa tu panel de Replicate.");
     } catch (e) {
-      setError((e as Error).message || "Algo salió mal.");
+      setError(friendlyError((e as Error).message));
       setStatus("");
     } finally {
       setLoading(false);
@@ -460,11 +500,20 @@ function VideoStudio({
         placeholder="Ej.: slow cinematic dolly-in on a sizzling torta being assembled, steam rising, warm restaurant light"
       />
       <label>Imagen inicial (opcional, URL)</label>
-      <input
-        value={firstFrame}
-        onChange={(e) => setFirstFrame(e.target.value)}
-        placeholder="Pega la URL de una imagen para animarla"
-      />
+      {firstFrame.startsWith("data:") ? (
+        <div className="actions" style={{ alignItems: "center" }}>
+          <img src={firstFrame} alt="Imagen inicial" style={{ width: 96, borderRadius: 8 }} />
+          <button className="btn ghost small" onClick={() => setFirstFrame("")}>
+            Quitar imagen
+          </button>
+        </div>
+      ) : (
+        <input
+          value={firstFrame}
+          onChange={(e) => setFirstFrame(e.target.value)}
+          placeholder="Pega la URL de una imagen para animarla"
+        />
+      )}
       <button className="btn" disabled={loading || !prompt} onClick={generate}>
         {loading ? "Generando…" : "Generar video"}
       </button>
@@ -505,7 +554,7 @@ function Gallery({ items, onClear }: { items: Item[]; onClear: () => void }) {
             <div className="meta">
               {it.prompt.slice(0, 90)}
               <br />
-              <a href={it.url} target="_blank" rel="noreferrer" download>
+              <a href={it.url} target={it.url.startsWith("data:") ? undefined : "_blank"} rel="noreferrer" download={`innovationtech-${it.kind}`}>
                 Descargar
               </a>{" "}
               · {new Date(it.date).toLocaleString("es-MX")}
@@ -584,18 +633,51 @@ function Config({ settings, onSave }: { settings: Settings; onSave: (s: Settings
     <section className="card">
       <h2>Configuración</h2>
       <p className="hint">
-        Cada persona usa sus propias claves y paga solo lo que genera. Las claves se guardan únicamente en este navegador y
-        se envían directo al proveedor en cada pedido; el servidor no las almacena.
+        Cada persona usa sus propias claves. Se guardan únicamente en este navegador y en cada pedido pasan por el
+        servidor de la plataforma hacia el proveedor, sin guardarse ni registrarse.
       </p>
       <label>Clave de Anthropic (textos) — console.anthropic.com</label>
       <input type="password" {...f("anthropicKey")} placeholder="sk-ant-…" autoComplete="off" />
-      <label>Clave de Replicate (imágenes y videos) — replicate.com/account/api-tokens</label>
+
+      <h2 style={{ marginTop: 28 }}>Imágenes</h2>
+      <label>Proveedor de imágenes</label>
+      <select
+        value={s.imageProvider}
+        onChange={(e) => (setS({ ...s, imageProvider: e.target.value as Settings["imageProvider"] }), setSaved(false))}
+      >
+        <option value="cloudflare">Cloudflare Workers AI — gratis (límite diario)</option>
+        <option value="replicate">Replicate — de pago, más modelos y formatos</option>
+      </select>
+      {s.imageProvider === "cloudflare" && (
+        <>
+          <p className="hint" style={{ marginTop: 10 }}>
+            En dash.cloudflare.com entra a AI → Workers AI → «Use REST API»: ahí copias tu Account ID y creas un token
+            de Workers AI.
+          </p>
+          <div className="row">
+            <div>
+              <label>Account ID de Cloudflare</label>
+              <input {...f("cfAccountId")} placeholder="32 caracteres" autoComplete="off" />
+            </div>
+            <div>
+              <label>Token de API de Cloudflare</label>
+              <input type="password" {...f("cfToken")} placeholder="Token de Workers AI" autoComplete="off" />
+            </div>
+          </div>
+        </>
+      )}
+
+      <h2 style={{ marginTop: 28 }}>Videos</h2>
+      <label>
+        Clave de Replicate (videos{s.imageProvider === "replicate" ? " e imágenes" : ""}) —
+        replicate.com/account/api-tokens
+      </label>
       <input type="password" {...f("replicateKey")} placeholder="r8_…" autoComplete="off" />
 
       <h2 style={{ marginTop: 28 }}>Modelos</h2>
       <p className="hint">
-        Puedes cambiar a cualquier modelo de Replicate (por ejemplo, modelos open source nuevos) escribiendo su nombre
-        como aparece en replicate.com.
+        Puedes cambiar de modelo escribiendo su nombre tal como aparece en replicate.com o en el catálogo de Workers AI
+        de Cloudflare (empiezan con @cf/).
       </p>
       <div className="row">
         <div>
@@ -603,7 +685,11 @@ function Config({ settings, onSave }: { settings: Settings; onSave: (s: Settings
           <input {...f("textModel")} />
         </div>
         <div>
-          <label>Modelo de imagen</label>
+          <label>Modelo de imagen (Cloudflare)</label>
+          <input {...f("cfImageModel")} />
+        </div>
+        <div>
+          <label>Modelo de imagen (Replicate)</label>
           <input {...f("imageModel")} />
         </div>
         <div>

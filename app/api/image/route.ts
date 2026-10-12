@@ -1,28 +1,42 @@
 import { createPrediction, getPrediction, jsonError, outputUrls } from "@/lib/replicate";
+import { cloudflareImage } from "@/lib/cloudflare";
 
 export const maxDuration = 60;
 
-// Genera imágenes con el modelo que el usuario elija en Replicate.
+// Genera imágenes con Cloudflare Workers AI (gratis) o con Replicate (de pago).
 export async function POST(req: Request) {
+  const { prompt, aspectRatio, count, model, provider } = await req.json().catch(() => ({}));
+  if (!prompt) return jsonError("Describe la imagen que quieres.");
+  const n = Math.min(Math.max(Number(count) || 1, 1), 4);
+
+  if (provider === "cloudflare") {
+    const accountId = req.headers.get("x-cf-account");
+    const token = req.headers.get("x-cf-token");
+    if (!accountId || !token) {
+      return jsonError("Faltan tu Account ID o tu token de Cloudflare. Agrégalos en Configuración.", 401);
+    }
+    try {
+      const urls = await Promise.all(
+        Array.from({ length: n }, () =>
+          cloudflareImage(accountId, token, model || "@cf/black-forest-labs/flux-1-schnell", prompt)
+        )
+      );
+      return Response.json({ urls });
+    } catch (e) {
+      return jsonError((e as Error).message, 502);
+    }
+  }
+
   const token = req.headers.get("x-replicate-key");
   if (!token) return jsonError("Falta tu clave de Replicate. Agrégala en Configuración.", 401);
-
-  const { prompt, aspectRatio, count, model } = await req.json().catch(() => ({}));
-  if (!prompt) return jsonError("Describe la imagen que quieres.");
 
   try {
     let p = await createPrediction(
       token,
       model || "black-forest-labs/flux-schnell",
-      {
-        prompt,
-        aspect_ratio: aspectRatio || "1:1",
-        num_outputs: Math.min(Math.max(Number(count) || 1, 1), 4),
-        output_format: "png",
-      },
+      { prompt, aspect_ratio: aspectRatio || "1:1", num_outputs: n, output_format: "png" },
       true
     );
-    // Si aún no termina, esperamos un poco más.
     const start = Date.now();
     while (!["succeeded", "failed", "canceled"].includes(p.status) && Date.now() - start < 45000) {
       await new Promise((r) => setTimeout(r, 2000));
