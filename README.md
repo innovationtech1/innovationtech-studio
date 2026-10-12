@@ -4,6 +4,12 @@ Plataforma **open source** para crear contenido de marketing con inteligencia ar
 
 Cada persona usa **sus propias claves de API** y paga solo lo que genera. El código es libre (licencia MIT): cualquiera puede usarlo, instalarlo y mejorarlo.
 
+![Pantalla de textos](docs/vista-textos.png)
+
+| Imágenes | Mi marca |
+|---|---|
+| ![Imágenes](docs/vista-imagenes.png) | ![Mi marca](docs/vista-marca.png) |
+
 ## Qué puede hacer
 
 | Módulo | Qué crea | Con qué |
