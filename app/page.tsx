@@ -9,6 +9,8 @@ type Tab = "texto" | "imagen" | "video" | "galeria" | "marca" | "config";
 
 type Settings = {
   anthropicKey: string;
+  textProvider: "cloudflare" | "anthropic";
+  cfTextModel: string;
   replicateKey: string;
   imageProvider: "cloudflare" | "replicate";
   cfAccountId: string;
@@ -25,6 +27,8 @@ type Item = { kind: "imagen" | "video"; url: string; prompt: string; date: strin
 
 const defaultSettings: Settings = {
   anthropicKey: "",
+  textProvider: "cloudflare",
+  cfTextModel: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
   replicateKey: "",
   imageProvider: "cloudflare",
   cfAccountId: "",
@@ -104,7 +108,9 @@ export default function Home() {
   const addToGallery = (items: Item[]) => setGallery((g) => [...items, ...g]);
   const imageKeysMissing =
     settings.imageProvider === "cloudflare" ? !settings.cfAccountId || !settings.cfToken : !settings.replicateKey;
-  const missingKeys = ready && (!settings.anthropicKey || imageKeysMissing);
+  const usesCf = settings.textProvider === "cloudflare" || settings.imageProvider === "cloudflare";
+  const textKeysMissing = settings.textProvider === "anthropic" && !settings.anthropicKey;
+  const missingKeys = ready && (textKeysMissing || imageKeysMissing || (usesCf && (!settings.cfAccountId || !settings.cfToken)));
 
   return (
     <div className="shell">
@@ -231,8 +237,17 @@ function TextStudio({
     try {
       const res = await fetch("/api/text", {
         method: "POST",
-        headers: { "content-type": "application/json", "x-anthropic-key": settings.anthropicKey },
-        body: JSON.stringify({ prompt, platform, brand: brandContext(brand), model: settings.textModel }),
+        headers:
+          settings.textProvider === "cloudflare"
+            ? { "content-type": "application/json", "x-cf-account": settings.cfAccountId, "x-cf-token": settings.cfToken }
+            : { "content-type": "application/json", "x-anthropic-key": settings.anthropicKey },
+        body: JSON.stringify({
+          prompt,
+          platform,
+          brand: brandContext(brand),
+          provider: settings.textProvider,
+          model: settings.textProvider === "cloudflare" ? settings.cfTextModel : settings.textModel,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -715,8 +730,21 @@ function Config({ settings, onSave }: { settings: Settings; onSave: (s: Settings
         Cada persona usa sus propias claves. Se guardan únicamente en este navegador y en cada pedido pasan por el
         servidor de la plataforma hacia el proveedor, sin guardarse ni registrarse.
       </p>
-      <label>Clave de Anthropic (textos) — console.anthropic.com</label>
-      <input type="password" {...f("anthropicKey")} placeholder="sk-ant-…" autoComplete="off" />
+      <h2 style={{ marginTop: 28 }}>Textos</h2>
+      <label>Proveedor de textos</label>
+      <select
+        value={s.textProvider}
+        onChange={(e) => (setS({ ...s, textProvider: e.target.value as Settings["textProvider"] }), setSaved(false))}
+      >
+        <option value="cloudflare">Cloudflare Workers AI — gratis (límite diario)</option>
+        <option value="anthropic">Claude de Anthropic — de pago, máxima calidad</option>
+      </select>
+      {s.textProvider === "anthropic" && (
+        <>
+          <label>Clave de Anthropic — console.anthropic.com</label>
+          <input type="password" {...f("anthropicKey")} placeholder="sk-ant-…" autoComplete="off" />
+        </>
+      )}
 
       <h2 style={{ marginTop: 28 }}>Imágenes</h2>
       <label>Proveedor de imágenes</label>
@@ -725,13 +753,16 @@ function Config({ settings, onSave }: { settings: Settings; onSave: (s: Settings
         onChange={(e) => (setS({ ...s, imageProvider: e.target.value as Settings["imageProvider"] }), setSaved(false))}
       >
         <option value="cloudflare">Cloudflare Workers AI — gratis (límite diario)</option>
-        <option value="replicate">Replicate — de pago, más modelos y formatos</option>
+        <option value="replicate">Replicate — de pago, más modelos</option>
       </select>
-      {s.imageProvider === "cloudflare" && (
+
+      {(s.textProvider === "cloudflare" || s.imageProvider === "cloudflare") && (
         <>
-          <p className="hint" style={{ marginTop: 10 }}>
-            En dash.cloudflare.com entra a AI → Workers AI → «Use REST API»: ahí copias tu Account ID y creas un token
-            de Workers AI.
+          <h2 style={{ marginTop: 28 }}>Cloudflare (gratis)</h2>
+          <p className="hint">
+            Los mismos datos sirven para textos e imágenes. En dash.cloudflare.com entra a AI → Workers AI → «Use REST
+            API»: ahí copias tu Account ID y creas un token de Workers AI. El límite gratuito diario se comparte entre
+            textos e imágenes.
           </p>
           <div className="row">
             <div>
@@ -760,7 +791,11 @@ function Config({ settings, onSave }: { settings: Settings; onSave: (s: Settings
       </p>
       <div className="row">
         <div>
-          <label>Modelo de texto</label>
+          <label>Modelo de texto (Cloudflare)</label>
+          <input {...f("cfTextModel")} />
+        </div>
+        <div>
+          <label>Modelo de texto (Anthropic)</label>
           <input {...f("textModel")} />
         </div>
         <div>
