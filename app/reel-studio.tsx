@@ -6,6 +6,7 @@ import { friendlyError } from "@/lib/errors";
 import { fileToResizedDataUrl } from "@/lib/resize";
 import { ReelFormat, renderReel, supportedRecording } from "@/lib/reel";
 import type { Item, Settings } from "@/lib/types";
+import { clearDrafts, usePersistentState } from "@/lib/persist";
 
 type Scene = { image: string; caption: string; prompt: string; loading?: boolean };
 
@@ -32,22 +33,30 @@ export default function ReelStudio({
   brand,
   gallery,
   onImages,
+  handoff,
 }: {
   settings: Settings;
   brand: Brand;
   gallery: Item[];
   onImages: (items: Item[]) => void;
+  handoff: { url: string; n: number } | null;
 }) {
-  const [topic, setTopic] = useState("");
-  const [count, setCount] = useState(4);
-  const [format, setFormat] = useState<ReelFormat>("9:16");
-  const [scenes, setScenes] = useState<Scene[]>(() => Array.from({ length: 4 }, emptyScene));
-  const [seconds, setSeconds] = useState(3);
-  const [brandName, setBrandName] = useState(brand.name);
-  const [cta, setCta] = useState("");
+  // Todo lo que escribes se guarda: no se pierde al cambiar de pestaña ni al cerrar la app.
+  const [topic, setTopic] = usePersistentState("reel:tema", "");
+  const [count, setCount] = usePersistentState("reel:escenas", 4);
+  const [format, setFormat] = usePersistentState<ReelFormat>("reel:formato", "9:16");
+  const [scenes, setScenes] = usePersistentState<Scene[]>(
+    "reel:escenas-datos",
+    Array.from({ length: 4 }, emptyScene),
+    // Si las fotos no caben en el navegador, guardamos al menos los textos.
+    (s) => s.map((sc) => ({ ...sc, image: sc.image.startsWith("data:") ? "" : sc.image, loading: false }))
+  );
+  const [seconds, setSeconds] = usePersistentState("reel:segundos", 3);
+  const [brandName, setBrandName] = usePersistentState("reel:negocio", brand.name);
+  const [cta, setCta] = usePersistentState("reel:cta", "");
   const [accent, setAccent] = useState("#e5243b");
   const [logo, setLogo] = useState("");
-  const [script, setScript] = useState("");
+  const [script, setScript] = usePersistentState("reel:guion", "");
   const [voice, setVoice] = useState("");
   const [picking, setPicking] = useState<number | null>(null);
   const [busy, setBusy] = useState("");
@@ -59,17 +68,20 @@ export default function ReelStudio({
   useEffect(() => {
     setLogo(load("its-logo"));
     setAccent(load("its-accent") || "#e5243b");
-    // Imagen enviada desde «Animar en video» en la pestaña Imágenes
-    try {
-      const img = sessionStorage.getItem("its-reel-image");
-      if (img) {
-        sessionStorage.removeItem("its-reel-image");
-        setScenes((s) => s.map((sc, i) => (i === 0 ? { ...sc, image: img } : sc)));
-      }
-    } catch {
-      /* nada */
-    }
+    // Si la app se cerró mientras se creaba una imagen, quitamos el «Creando…».
+    const t = setTimeout(() => setScenes((s) => s.map((sc) => (sc.loading ? { ...sc, loading: false } : sc))), 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Imagen enviada desde «Animar en video»: va a la primera escena libre.
+  useEffect(() => {
+    if (!handoff) return;
+    setScenes((s) => {
+      const free = s.findIndex((sc) => !sc.image);
+      const i = free >= 0 ? free : 0;
+      return s.map((sc, j) => (j === i ? { ...sc, image: handoff.url, loading: false } : sc));
+    });
+  }, [handoff, setScenes]);
   useEffect(() => setBrandName((b) => b || brand.name), [brand.name]);
 
   const canRecord = typeof window === "undefined" ? true : supportedRecording() !== null;
@@ -207,7 +219,26 @@ export default function ReelStudio({
 
   return (
     <section className="card">
-      <h2>Creador de Reels · gratis</h2>
+      <div className="card-head">
+        <h2>Creador de Reels · gratis</h2>
+        <button
+          className="btn ghost small"
+          disabled={!!busy}
+          onClick={() => {
+            if (!confirm("¿Empezar un reel nuevo? Se borrarán el tema, las escenas y el guion actuales.")) return;
+            clearDrafts("reel:");
+            setTopic("");
+            setScenes(Array.from({ length: count }, emptyScene));
+            setCta("");
+            setScript("");
+            setVoice("");
+            setResult(null);
+            setError("");
+          }}
+        >
+          Empezar nuevo
+        </button>
+      </div>
       <p className="hint">
         Arma un video con tus imágenes animadas, textos en pantalla, tu marca y voz en off. Se crea en tu navegador: sin
         costo y sin límite.

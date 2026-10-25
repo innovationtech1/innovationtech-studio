@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Brand, brandContext, brandVisual, emptyBrand } from "@/lib/brand";
 import { friendlyError } from "@/lib/errors";
 import { fileToResizedDataUrl } from "@/lib/resize";
+import { usePersistentState } from "@/lib/persist";
 import type { Item, Settings } from "@/lib/types";
 import ReelStudio from "./reel-studio";
 
@@ -67,14 +68,16 @@ function extract(text: string, label: string): string {
 }
 
 export default function Home() {
-  const [tab, setTab] = useState<Tab>("texto");
+  const [tab, setTab] = usePersistentState<Tab>("tab", "texto");
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [brand, setBrand] = useState<Brand>(emptyBrand);
   const [gallery, setGallery] = useState<Item[]>([]);
-  const [imagePrompt, setImagePrompt] = useState("");
-  const [videoPrompt, setVideoPrompt] = useState("");
+  const [imagePrompt, setImagePrompt] = usePersistentState("imagen:prompt", "");
+  const [videoPrompt, setVideoPrompt] = usePersistentState("video:prompt", "");
+  // Imagen enviada con «Animar en video» desde la pestaña Imágenes
+  const [handoff, setHandoff] = useState<{ url: string; n: number } | null>(null);
   const [ready, setReady] = useState(false);
-  const [videoMode, setVideoMode] = useState<"reel" | "ia">("reel");
+  const [videoMode, setVideoMode] = usePersistentState<"reel" | "ia">("video:mode", "reel");
 
   useEffect(() => {
     setSettings(load("its-settings", defaultSettings));
@@ -82,7 +85,7 @@ export default function Home() {
     setGallery(loadList<Item>("its-gallery"));
     // Accesos directos de la app instalada (?tab=imagen, etc.)
     const t = new URLSearchParams(window.location.search).get("tab");
-    if (t && ["texto", "imagen", "video", "galeria", "marca", "config"].includes(t)) setTab(t as Tab);
+    if (t && ["texto", "imagen", "video", "galeria", "marca", "config"].includes(t)) setTimeout(() => setTab(t as Tab), 0);
     setReady(true);
   }, []);
 
@@ -138,15 +141,16 @@ export default function Home() {
         </div>
       )}
 
-      {tab === "texto" && (
+      {/* Todas las secciones permanecen abiertas en segundo plano: al cambiar de pestaña no se pierde nada. */}
+      <div hidden={tab !== "texto"}>
         <TextStudio
           settings={settings}
           brand={brand}
           onUseImage={(p) => (setImagePrompt(p), setTab("imagen"))}
-          onUseVideo={(p) => (setVideoPrompt(p), setTab("video"))}
+          onUseVideo={(p) => (setVideoPrompt(p), setVideoMode("ia"), setTab("video"))}
         />
-      )}
-      {tab === "imagen" && (
+      </div>
+      <div hidden={tab !== "imagen"}>
         <ImageStudio
           settings={settings}
           brand={brand}
@@ -155,18 +159,12 @@ export default function Home() {
           onDone={addToGallery}
           onAnimate={(url, p) => {
             setVideoPrompt(p);
+            setHandoff((h) => ({ url, n: (h?.n || 0) + 1 }));
             setTab("video");
-            try {
-              sessionStorage.setItem("its-first-frame", url);
-              sessionStorage.setItem("its-reel-image", url);
-            } catch {
-              /* imagen demasiado grande para guardarla temporalmente */
-            }
           }}
         />
-      )}
-      {tab === "video" && (
-        <>
+      </div>
+      <div hidden={tab !== "video"}>
           <div className="mode-switch" role="tablist">
             <button className={videoMode === "reel" ? "active" : ""} onClick={() => setVideoMode("reel")}>
               🎞️ Reel con mis imágenes · gratis
@@ -175,21 +173,30 @@ export default function Home() {
               🤖 Video con IA · Replicate (de pago)
             </button>
           </div>
-          {videoMode === "reel" ? (
-            <ReelStudio settings={settings} brand={brand} gallery={gallery} onImages={addToGallery} />
-          ) : (
+          <div hidden={videoMode !== "reel"}>
+            <ReelStudio
+              settings={settings}
+              brand={brand}
+              gallery={gallery}
+              onImages={addToGallery}
+              handoff={handoff}
+            />
+          </div>
+          <div hidden={videoMode !== "ia"}>
             <VideoStudio
               settings={settings}
               brand={brand}
               prompt={videoPrompt}
               setPrompt={setVideoPrompt}
               onDone={addToGallery}
+              handoff={handoff}
             />
-          )}
-        </>
-      )}
-      {tab === "galeria" && <Gallery items={gallery} onClear={() => setGallery([])} />}
-      {tab === "marca" && (
+          </div>
+      </div>
+      <div hidden={tab !== "galeria"}>
+        <Gallery items={gallery} onClear={() => setGallery([])} />
+      </div>
+      <div hidden={tab !== "marca"}>
         <BrandKit
           brand={brand}
           onSave={(b) => {
@@ -197,8 +204,8 @@ export default function Home() {
             save("its-brand", b);
           }}
         />
-      )}
-      {tab === "config" && (
+      </div>
+      <div hidden={tab !== "config"}>
         <Config
           settings={settings}
           onSave={(s) => {
@@ -206,7 +213,7 @@ export default function Home() {
             save("its-settings", s);
           }}
         />
-      )}
+      </div>
 
       <footer>
         Proyecto open source de InnovationTECH · Licencia MIT · Tus claves se guardan solo en tu navegador.
@@ -228,9 +235,9 @@ function TextStudio({
   onUseImage: (p: string) => void;
   onUseVideo: (p: string) => void;
 }) {
-  const [prompt, setPrompt] = useState("");
-  const [platform, setPlatform] = useState("Instagram");
-  const [result, setResult] = useState("");
+  const [prompt, setPrompt] = usePersistentState("texto:prompt", "");
+  const [platform, setPlatform] = usePersistentState("texto:plataforma", "Instagram");
+  const [result, setResult] = usePersistentState("texto:resultado", "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -268,7 +275,14 @@ function TextStudio({
 
   return (
     <section className="card">
-      <h2>Crear textos de marketing</h2>
+      <div className="card-head">
+        <h2>Crear textos de marketing</h2>
+        {(prompt || result) && (
+          <button className="btn ghost small" disabled={loading} onClick={() => (setPrompt(""), setResult(""), setError(""))}>
+            Limpiar
+          </button>
+        )}
+      </div>
       <p className="hint">Describe tu campaña o publicación. La IA escribe el copy, ganchos, hashtags y las ideas visuales.</p>
       <div className="row">
         <div>
@@ -331,9 +345,9 @@ function ImageStudio({
   onDone: (items: Item[]) => void;
   onAnimate: (url: string, prompt: string) => void;
 }) {
-  const [ratio, setRatio] = useState("1:1");
-  const [count, setCount] = useState(1);
-  const [useBrand, setUseBrand] = useState(true);
+  const [ratio, setRatio] = usePersistentState("imagen:formato", "1:1");
+  const [count, setCount] = usePersistentState("imagen:cantidad", 1);
+  const [useBrand, setUseBrand] = usePersistentState("imagen:marca", true);
   const [refs, setRefs] = useState<string[]>([]);
   const [urls, setUrls] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -497,12 +511,14 @@ function VideoStudio({
   prompt,
   setPrompt,
   onDone,
+  handoff,
 }: {
   settings: Settings;
   brand: Brand;
   prompt: string;
   setPrompt: (p: string) => void;
   onDone: (items: Item[]) => void;
+  handoff: { url: string; n: number } | null;
 }) {
   const [firstFrame, setFirstFrame] = useState("");
   const [status, setStatus] = useState("");
@@ -511,16 +527,8 @@ function VideoStudio({
   const [error, setError] = useState("");
 
   useEffect(() => {
-    try {
-      const f = sessionStorage.getItem("its-first-frame");
-      if (f) {
-        setFirstFrame(f);
-        sessionStorage.removeItem("its-first-frame");
-      }
-    } catch {
-      /* nada */
-    }
-  }, []);
+    if (handoff) setFirstFrame(handoff.url);
+  }, [handoff]);
 
   async function generate() {
     setLoading(true);
