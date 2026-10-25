@@ -135,6 +135,7 @@ export type Doc = {
   width: number;
   height: number;
   background: string;
+  transparent?: boolean; // fondo transparente (logos sin fondo, se descarga en PNG)
   photo: Photo | null;
   adjust: Adjust;
   overlay: { on: boolean; color: string; strength: number }; // degradado inferior para leer textos

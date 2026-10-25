@@ -35,6 +35,7 @@ import {
 import { usePersistentState } from "@/lib/persist";
 import { fileToResizedDataUrl } from "@/lib/resize";
 import type { Item } from "@/lib/types";
+import BgRemover from "./bg-remover";
 
 type Tool = "ajustes" | "filtros" | "texto" | "stickers" | "formas" | "imagen" | "marco" | "capas";
 
@@ -202,6 +203,8 @@ export default function ImageEditor({
   const [showGallery, setShowGallery] = useState(false);
   const [exportFmt, setExportFmt] = useState<"png" | "jpg">("jpg");
   const [notice, setNotice] = useState("");
+  // Quitar fondo: a qué se aplica (la foto de fondo o una capa de imagen)
+  const [cutout, setCutout] = useState<string | null>(null);
   const [, force] = useState(0);
 
   const past = useRef<Doc[]>([]);
@@ -421,7 +424,9 @@ export default function ImageEditor({
       const bg = bgLayer.current!;
       bg.destroyChildren();
       photoNode.current = null;
-      bg.add(new Konva.Rect({ name: "bgrect", width: doc.width, height: doc.height, fill: doc.background }));
+      bg.add(
+        new Konva.Rect({ name: "bgrect", width: doc.width, height: doc.height, fill: doc.transparent ? "rgba(0,0,0,0)" : doc.background })
+      );
       if (doc.photo && images.current.get(doc.photo.src)) {
         const p = doc.photo;
         const im = images.current.get(p.src)!;
@@ -636,6 +641,38 @@ export default function ImageEditor({
     }
   }
 
+  // JPG no admite transparencia: con fondo transparente siempre se exporta PNG.
+  const outFmt: "png" | "jpg" = doc.transparent ? "png" : exportFmt;
+
+  async function applyCutout(target: string, png: string, size: { w: number; h: number }) {
+    try {
+      const im = await loadImg(png);
+      images.current.set(png, im);
+      if (target === "photo") {
+        setDoc((d) => {
+          const photo = { ...d.photo!, src: png, naturalW: size.w, naturalH: size.h, rotation: 0 };
+          // En «original», el lienzo toma el tamaño del objeto recortado (ideal para descargar el logo solo).
+          const [W, H] = sizeFor(d.format, photo);
+          const fit = Math.min(W / size.w, H / size.h) * (d.format === "original" ? 1 : 0.9);
+          return { ...d, width: W, height: H, transparent: true, photo: { ...photo, cx: W / 2, cy: H / 2, scale: fit } };
+        });
+        setNotice("Fondo quitado. Activé el fondo transparente: se descargará en PNG (puedes cambiarlo en «Fondo y marco»).");
+      } else {
+        setDoc((d) => ({
+          ...d,
+          layers: d.layers.map((l) =>
+            l.id === target && l.type === "image" ? { ...l, src: png, height: (l.width * size.h) / size.w } : l
+          ),
+        }));
+        setNotice("Fondo quitado.");
+      }
+      setTimeout(() => setNotice(""), 5000);
+      setCutout(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
   function exportImage(): string | null {
     const stage = stageRef.current;
     if (!stage) return null;
@@ -647,7 +684,7 @@ export default function ImageEditor({
     try {
       url = stage.toDataURL({
         pixelRatio: 1 / s,
-        mimeType: exportFmt === "png" ? "image/png" : "image/jpeg",
+        mimeType: outFmt === "png" ? "image/png" : "image/jpeg",
         quality: 0.92,
       });
     } catch {
@@ -663,7 +700,7 @@ export default function ImageEditor({
     if (!url) return;
     const a = document.createElement("a");
     a.href = url;
-    a.download = `innovationtech-diseno.${exportFmt}`;
+    a.download = `innovationtech-diseno.${outFmt}`;
     a.click();
   };
   const saveGallery = () => {
@@ -677,7 +714,7 @@ export default function ImageEditor({
     const url = exportImage();
     if (!url) return;
     const blob = await (await fetch(url)).blob();
-    const file = new File([blob], `innovationtech-diseno.${exportFmt}`, { type: blob.type });
+    const file = new File([blob], `innovationtech-diseno.${outFmt}`, { type: blob.type });
     const nav = navigator as Navigator & { canShare?: (d: unknown) => boolean };
     if (nav.canShare?.({ files: [file] })) await navigator.share({ files: [file] }).catch(() => {});
     else download();
@@ -781,14 +818,26 @@ export default function ImageEditor({
             >
               ⤡ Mostrar completa
             </button>
+            <button className="btn small" onClick={() => setCutout("photo")}>
+              ✂️ Quitar fondo
+            </button>
             <button className="btn ghost small" onClick={() => (setDoc((d) => ({ ...d, photo: null })), setSelected(null))}>
               Quitar foto
             </button>
           </div>
         </div>
       )}
-      {sel && (
+      {cutout && (cutout === "photo" ? doc.photo : doc.layers.find((l) => l.id === cutout && l.type === "image")) && (
+        <BgRemover
+          src={cutout === "photo" ? doc.photo!.src : (doc.layers.find((l) => l.id === cutout) as ImageLayer).src}
+          title={cutout === "photo" ? "foto de fondo" : "imagen / logo"}
+          onClose={() => setCutout(null)}
+          onApply={(png, size) => applyCutout(cutout, png, size)}
+        />
+      )}
+      {sel && !cutout && (
         <LayerProps
+          onCutout={sel.type === "image" ? () => setCutout(sel.id) : undefined}
           layer={sel}
           docWidth={doc.width}
           onChange={(p, slider) => updateLayer(sel.id, p, slider)}
@@ -952,6 +1001,14 @@ export default function ImageEditor({
 
         {tool === "marco" && (
           <>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={!!doc.transparent}
+                onChange={(e) => setDoc((d) => ({ ...d, transparent: e.target.checked }))}
+              />
+              Fondo transparente (para logos sin fondo; se descarga en PNG)
+            </label>
             <label>Color de fondo (se ve donde no hay foto)</label>
             <ColorRow value={doc.background} onChange={(c) => setDoc((d) => ({ ...d, background: c }))} />
             <label className="check">
@@ -1016,7 +1073,13 @@ export default function ImageEditor({
 
       {/* Exportar */}
       <div className="editor-export">
-        <select value={exportFmt} onChange={(e) => setExportFmt(e.target.value as "png" | "jpg")} style={{ width: "auto" }} aria-label="Formato de archivo">
+        <select
+          value={outFmt}
+          disabled={!!doc.transparent}
+          onChange={(e) => setExportFmt(e.target.value as "png" | "jpg")}
+          style={{ width: "auto" }}
+          aria-label="Formato de archivo"
+        >
           <option value="jpg">JPG (más ligero)</option>
           <option value="png">PNG (máxima calidad)</option>
         </select>
@@ -1051,7 +1114,9 @@ function LayerProps({
   onMove,
   onCenter,
   onClose,
+  onCutout,
 }: {
+  onCutout?: () => void;
   layer: Layer;
   docWidth: number;
   onChange: (p: Partial<Layer>, slider?: boolean) => void;
@@ -1202,6 +1267,11 @@ function LayerProps({
         </>
       )}
 
+      {l.type === "image" && onCutout && (
+        <button className="btn small" onClick={onCutout} style={{ alignSelf: "flex-start" }}>
+          ✂️ Quitar fondo
+        </button>
+      )}
       {l.type === "image" && (
         <Slider label="Esquinas redondeadas" min={0} max={Math.round(Math.min(l.width, l.height) / 2)} value={Math.round(l.radius)} onChange={(v) => onChange({ radius: v } as Partial<ImageLayer>, true)} />
       )}
