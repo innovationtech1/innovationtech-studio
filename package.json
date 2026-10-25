@@ -10,8 +10,11 @@
     "start": "next start"
   },
   "dependencies": {
+    "@fontsource-variable/bricolage-grotesque": "^5.1.0",
+    "@fontsource-variable/instrument-sans": "^5.1.0",
     "fix-webm-duration": "1.0.6",
     "konva": "10.7.1",
+    "lucide-react": "^0.460.0",
     "next": "^15.5.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

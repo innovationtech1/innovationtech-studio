@@ -8,6 +8,7 @@ import { fileToResizedDataUrl } from "@/lib/resize";
 import { usePersistentState } from "@/lib/persist";
 import { useGallery } from "@/lib/use-gallery";
 import { useDemo } from "@/lib/use-demo";
+import { Clapperboard, FolderOpen, ImageIcon, Palette, PenLine, Settings as SettingsIcon, Wand2, type LucideIcon } from "lucide-react";
 import { CheckList, CloudflareWizard, testCloudflare, Welcome } from "./setup-wizard";
 import { formatBytes, storageUsage, toDataUrl } from "@/lib/media-store";
 import type { Item, Settings } from "@/lib/types";
@@ -124,47 +125,50 @@ export default function Home() {
     setTab("config");
     setTimeout(() => window.scrollTo({ top: 0, behavior: "smooth" }), 50);
   };
-  const NAV: [Tab, string, string][] = [
-    ["texto", "✍️", "Textos"],
-    ["imagen", "🖼️", "Imágenes"],
-    ["editor", "✏️", "Editor"],
-    ["video", "🎬", "Videos"],
-    ["galeria", "📁", "Galería"],
-    ["marca", "🎨", "Marca"],
-    ["config", "⚙️", "Ajustes"],
+  const NAV: [Tab, LucideIcon, string, string][] = [
+    ["texto", PenLine, "Textos", "Textos"],
+    ["imagen", ImageIcon, "Imágenes", "Imágenes"],
+    ["editor", Wand2, "Editor", "Editor"],
+    ["video", Clapperboard, "Videos", "Videos"],
+    ["galeria", FolderOpen, "Galería", "Galería"],
+    ["marca", Palette, "Mi marca", "Marca"],
+    ["config", SettingsIcon, "Configuración", "Ajustes"],
   ];
+  const go = (id: Tab) => {
+    setTab(id);
+    window.scrollTo({ top: 0 });
+  };
+  const estado = hasOwnCf
+    ? { cls: "on", text: "Cuenta conectada" }
+    : demoActive
+      ? { cls: "demo", text: "Modo demo" }
+      : { cls: "off", text: "Sin conectar" };
 
   return (
-    <div className="shell">
-      <header className="top">
+    <div className="app">
+      <aside className="rail">
         <div className="brand">
-          <img src="/icons/icon-192.png" alt="InnovationTECH" />
-          <div>
-            <div className="logo">
-              Innovation<span>TECH</span> Studio
-            </div>
-            <div className="tag">Textos, imágenes y videos de marketing con IA · Open source</div>
+          <img src="/icons/icon-192.png" alt="" />
+          <div className="logo">
+            Innovation<span>TECH</span>
+            <small>Studio</small>
           </div>
         </div>
-      </header>
+        <nav className="tabs" aria-label="Secciones">
+          {NAV.map(([id, Icon, label]) => (
+            <button key={id} className={tab === id ? "active" : ""} aria-current={tab === id ? "page" : undefined} title={label} onClick={() => go(id)}>
+              <Icon size={19} strokeWidth={1.9} aria-hidden />
+              {label}
+            </button>
+          ))}
+        </nav>
+        <button className={`status-chip ${estado.cls}`} onClick={() => go("config")} title="Ver configuración">
+          <i aria-hidden />
+          {estado.text}
+        </button>
+      </aside>
 
-      <nav className="tabs">
-        {(
-          [
-            ["texto", "✍️ Textos"],
-            ["imagen", "🖼️ Imágenes"],
-            ["editor", "✏️ Editor"],
-            ["video", "🎬 Videos"],
-            ["galeria", "📁 Galería"],
-            ["marca", "🎨 Mi marca"],
-            ["config", "⚙️ Configuración"],
-          ] as [Tab, string][]
-        ).map(([id, label]) => (
-          <button key={id} className={tab === id ? "active" : ""} onClick={() => setTab(id)}>
-            {label}
-          </button>
-        ))}
-      </nav>
+      <main className="shell">
 
       {demoActive && tab !== "config" && (
         <div className="demo-banner">
@@ -298,18 +302,19 @@ export default function Home() {
         />
       </div>
 
+        <footer>
+          Proyecto open source de InnovationTECH, licencia MIT. Tus claves se guardan solo en tu navegador.
+        </footer>
+      </main>
+
       <nav className="bottom-nav" aria-label="Secciones">
-        {NAV.map(([id, icon, label]) => (
-          <button key={id} className={tab === id ? "active" : ""} onClick={() => (setTab(id), window.scrollTo({ top: 0 }))}>
-            <span>{icon}</span>
-            {label}
+        {NAV.map(([id, Icon, , short]) => (
+          <button key={id} className={tab === id ? "active" : ""} aria-current={tab === id ? "page" : undefined} onClick={() => go(id)}>
+            <Icon size={22} strokeWidth={1.8} aria-hidden />
+            {short}
           </button>
         ))}
       </nav>
-
-      <footer>
-        Proyecto open source de InnovationTECH · Licencia MIT · Tus claves se guardan solo en tu navegador.
-      </footer>
     </div>
   );
 }
@@ -520,7 +525,7 @@ function ImageStudio({
     <section className="card">
       <div className="card-head">
         <div>
-          <h2>✂️ Recortar, quitar fondo y borrar</h2>
+          <h2>Recortar, quitar fondo y borrar</h2>
           <p className="hint" style={{ margin: 0 }}>
             Quita el fondo, recorta con figuras modernas (círculo, arco, corazón, estrella…) o borra a mano zonas. Se descarga en PNG
             transparente. Gratis, en tu dispositivo.
@@ -1117,7 +1122,7 @@ function Config({
     <>
     <section className="card">
       <div className="card-head">
-        <h2>🧭 Conectar tu cuenta gratis de Cloudflare</h2>
+        <h2>Conecta tu cuenta gratis de Cloudflare</h2>
         {!showWizard && (
           <button className="btn ghost small" onClick={() => setShowWizard(true)}>
             Abrir asistente

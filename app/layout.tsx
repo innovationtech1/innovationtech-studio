@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from "next";
+import "@fontsource-variable/bricolage-grotesque/opsz.css";
+import "@fontsource-variable/instrument-sans/index.css";
 import "./globals.css";
 import PwaSetup from "./pwa-setup";
 

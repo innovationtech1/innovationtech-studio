@@ -308,7 +308,7 @@ export default function VideoEditor({
   return (
     <section className="card vedit">
       <div className="card-head">
-        <h2>🎬 Editor de video</h2>
+        <h2>Editor de video</h2>
         <button className="btn ghost small" onClick={newProj} disabled={!!busy && busy.startsWith("Exportando")}>
           Nuevo proyecto
         </button>
