@@ -213,7 +213,6 @@ export default function ReelStudio({
   const makeVoice = () =>
     run("Generando voz…", async () => {
       if (!script.trim()) throw new Error("Escribe el guion de la voz en off.");
-      if (!settings.cfAccountId || !settings.cfToken) throw new Error("La voz usa Cloudflare: agrega tu Account ID y token en Configuración.");
       const res = await fetch("/api/voice", {
         method: "POST",
         headers: { "content-type": "application/json", ...cfHeaders },

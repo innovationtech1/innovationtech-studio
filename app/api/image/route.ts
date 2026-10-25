@@ -1,5 +1,6 @@
 import { createPrediction, getPrediction, jsonError, outputUrls, Prediction } from "@/lib/replicate";
 import { cloudflareImage, isFlagged } from "@/lib/cloudflare";
+import { getCreds, refund } from "@/lib/cf-auth";
 
 export const maxDuration = 60;
 
@@ -16,11 +17,9 @@ export async function POST(req: Request) {
     : [];
 
   if (provider === "cloudflare") {
-    const accountId = req.headers.get("x-cf-account");
-    const token = req.headers.get("x-cf-token");
-    if (!accountId || !token) {
-      return jsonError("Faltan tu Account ID o tu token de Cloudflare. Agrégalos en Configuración.", 401);
-    }
+    const c = getCreds(req, "image", n);
+    if ("error" in c) return jsonError(c.error, c.status);
+    const { accountId, token } = c;
     try {
       // Si una imagen se bloquea, entregamos las demás en vez de fallar todo.
       const results = await Promise.allSettled(
@@ -28,8 +27,8 @@ export async function POST(req: Request) {
           cloudflareImage({
             accountId,
             token,
-            model: model || "@cf/black-forest-labs/flux-1-schnell",
-            refModel: refModel || "@cf/black-forest-labs/flux-2-klein-4b",
+            model: (!c.demo && model) || "@cf/black-forest-labs/flux-1-schnell",
+            refModel: (!c.demo && refModel) || "@cf/black-forest-labs/flux-2-klein-4b",
             prompt,
             aspectRatio: aspectRatio || "1:1",
             references: refs,
@@ -38,6 +37,7 @@ export async function POST(req: Request) {
       );
       const urls = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
       const errors = results.flatMap((r) => (r.status === "rejected" ? [(r.reason as Error).message] : []));
+      if (c.demo && errors.length) refund(req, "image", errors.length); // no cuentan las que fallaron
       if (urls.length) {
         const flagged = errors.filter(isFlagged).length;
         return Response.json({

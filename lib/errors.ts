@@ -2,6 +2,7 @@
 
 export function friendlyError(raw: string): string {
   const m = (raw || "").toLowerCase();
+  if (m.startsWith("demo_limit:")) return raw.replace(/^DEMO_LIMIT:\s*/, "");
   if (m.includes("credit balance is too low"))
     return "Tu cuenta de Anthropic no tiene crédito. Agrégalo en console.anthropic.com → Plans & Billing y vuelve a intentar.";
   if (m.includes("requires credit") || m.includes("insufficient credit"))

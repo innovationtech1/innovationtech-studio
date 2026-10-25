@@ -115,3 +115,16 @@ lib/
 ## Licencia
 
 MIT © InnovationTECH. Puedes usar, copiar, modificar y distribuir este software libremente.
+
+## Modo demo (opcional)
+
+Para que las personas prueben la app sin configurar nada, el dueño del despliegue puede activar el modo demo con su propia cuenta gratis de Cloudflare. En Vercel → Settings → Environment Variables:
+
+| Variable | Valor |
+| --- | --- |
+| `CF_ACCOUNT_ID` | Account ID de Cloudflare |
+| `CF_API_TOKEN` | Token de Workers AI |
+| `DEMO_LIMIT_TEXT` / `DEMO_LIMIT_IMAGE` / `DEMO_LIMIT_VOICE` | Opcional. Límite diario por persona (15 / 8 / 5 por defecto) |
+| `DEMO_MODE` | Opcional. `off` lo desactiva |
+
+El conteo es aproximado (en memoria, por IP y por día). Quien conecta su propia cuenta en **Ajustes → Conectar tu cuenta gratis** usa sus claves y no tiene los límites del demo. En el plan Workers Free, Cloudflare corta al llegar al límite diario gratuito, así que no hay cobros.

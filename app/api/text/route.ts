@@ -1,4 +1,5 @@
 import { jsonError } from "@/lib/replicate";
+import { getCreds, refund } from "@/lib/cf-auth";
 
 export const maxDuration = 60;
 
@@ -7,10 +8,11 @@ type Gen = { system: string; user: string; maxTokens: number };
 // Llama al proveedor elegido (Cloudflare gratis o Claude de pago) y devuelve el texto.
 async function generate(req: Request, provider: string, model: string | undefined, g: Gen): Promise<string> {
   if (provider === "cloudflare") {
-    const accountId = req.headers.get("x-cf-account");
-    const token = req.headers.get("x-cf-token");
-    if (!accountId || !token) throw Object.assign(new Error("Faltan tu Account ID o tu token de Cloudflare. Agrégalos en Configuración."), { status: 401 });
-    const m = model || "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+    const c = getCreds(req, "text");
+    if ("error" in c) throw Object.assign(new Error(c.error), { status: c.status });
+    const { accountId, token } = c;
+    // En modo demo siempre se usa el modelo predeterminado
+    const m = (!c.demo && model) || "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
     const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${m}`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -24,7 +26,10 @@ async function generate(req: Request, provider: string, model: string | undefine
       }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok || data?.success === false) throw new Error(data?.errors?.[0]?.message || `Cloudflare respondió ${res.status}`);
+    if (!res.ok || data?.success === false) {
+      if (c.demo) refund(req, "text");
+      throw new Error(data?.errors?.[0]?.message || `Cloudflare respondió ${res.status}`);
+    }
     // Según el modelo, el texto llega en "response" o con formato tipo OpenAI.
     const r = data?.result ?? {};
     const text =

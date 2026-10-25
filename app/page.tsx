@@ -7,6 +7,8 @@ import { friendlyError } from "@/lib/errors";
 import { fileToResizedDataUrl } from "@/lib/resize";
 import { usePersistentState } from "@/lib/persist";
 import { useGallery } from "@/lib/use-gallery";
+import { useDemo } from "@/lib/use-demo";
+import { CheckList, CloudflareWizard, testCloudflare, Welcome } from "./setup-wizard";
 import { formatBytes, storageUsage, toDataUrl } from "@/lib/media-store";
 import type { Item, Settings } from "@/lib/types";
 import ReelStudio from "./reel-studio";
@@ -93,6 +95,9 @@ export default function Home() {
   };
   const [ready, setReady] = useState(false);
   const [videoMode, setVideoMode] = usePersistentState<"reel" | "editor" | "ia">("video:mode", "reel");
+  const { status: demo } = useDemo();
+  const [welcomeDone, setWelcomeDone] = usePersistentState("bienvenida", false);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   useEffect(() => {
     setSettings(load("its-settings", defaultSettings));
@@ -109,7 +114,25 @@ export default function Home() {
     settings.imageProvider === "cloudflare" ? !settings.cfAccountId || !settings.cfToken : !settings.replicateKey;
   const usesCf = settings.textProvider === "cloudflare" || settings.imageProvider === "cloudflare";
   const textKeysMissing = settings.textProvider === "anthropic" && !settings.anthropicKey;
-  const missingKeys = ready && (textKeysMissing || imageKeysMissing || (usesCf && (!settings.cfAccountId || !settings.cfToken)));
+  const hasOwnCf = !!(settings.cfAccountId && settings.cfToken);
+  const demoActive = !!demo?.demo && usesCf && !hasOwnCf;
+  const missingKeys =
+    ready && (textKeysMissing || (imageKeysMissing && !(settings.imageProvider === "cloudflare" && demoActive)) || (usesCf && !hasOwnCf && !demoActive));
+  const openSetup = () => {
+    setWelcomeDone(true);
+    setWizardOpen(true);
+    setTab("config");
+    setTimeout(() => window.scrollTo({ top: 0, behavior: "smooth" }), 50);
+  };
+  const NAV: [Tab, string, string][] = [
+    ["texto", "✍️", "Textos"],
+    ["imagen", "🖼️", "Imágenes"],
+    ["editor", "✏️", "Editor"],
+    ["video", "🎬", "Videos"],
+    ["galeria", "📁", "Galería"],
+    ["marca", "🎨", "Marca"],
+    ["config", "⚙️", "Ajustes"],
+  ];
 
   return (
     <div className="shell">
@@ -143,14 +166,32 @@ export default function Home() {
         ))}
       </nav>
 
-      {missingKeys && tab !== "config" && (
-        <div className="notice" style={{ marginBottom: 16 }}>
-          Para empezar, agrega tus claves de API en{" "}
-          <a href="#" onClick={(e) => (e.preventDefault(), setTab("config"))} style={{ color: "#fff" }}>
-            Configuración
-          </a>
-          .
+      {demoActive && tab !== "config" && (
+        <div className="demo-banner">
+          <span>
+            🚀 <strong>Modo demo</strong> · hoy te quedan {demo?.remaining?.image ?? 0} imágenes, {demo?.remaining?.text ?? 0} textos y{" "}
+            {demo?.remaining?.voice ?? 0} voces
+          </span>
+          <button className="btn small" onClick={openSetup}>
+            Conectar mi cuenta gratis
+          </button>
         </div>
+      )}
+      {missingKeys && tab !== "config" && (
+        <div className="demo-banner">
+          <span>👋 Para crear con IA, conecta tu cuenta gratis de Cloudflare (toma unos 5 minutos).</span>
+          <button className="btn small" onClick={openSetup}>
+            Empezar
+          </button>
+        </div>
+      )}
+      {ready && !welcomeDone && !hasOwnCf && demo && (
+        <Welcome
+          demo={demo}
+          onDemo={() => setWelcomeDone(true)}
+          onSetup={openSetup}
+          onHaveKeys={() => (setWelcomeDone(true), setTab("config"))}
+        />
       )}
 
       {/* Todas las secciones permanecen abiertas en segundo plano: al cambiar de pestaña no se pierde nada. */}
@@ -247,12 +288,24 @@ export default function Home() {
       <div hidden={tab !== "config"}>
         <Config
           settings={settings}
+          wizardOpen={wizardOpen || !hasOwnCf}
+          demo={!!demo?.demo}
+          onFinish={() => (setWizardOpen(false), setTab("texto"))}
           onSave={(s) => {
             setSettings(s);
             save("its-settings", s);
           }}
         />
       </div>
+
+      <nav className="bottom-nav" aria-label="Secciones">
+        {NAV.map(([id, icon, label]) => (
+          <button key={id} className={tab === id ? "active" : ""} onClick={() => (setTab(id), window.scrollTo({ top: 0 }))}>
+            <span>{icon}</span>
+            {label}
+          </button>
+        ))}
+      </nav>
 
       <footer>
         Proyecto open source de InnovationTECH · Licencia MIT · Tus claves se guardan solo en tu navegador.
@@ -1035,9 +1088,25 @@ function BrandKit({ brand, onSave }: { brand: Brand; onSave: (b: Brand) => void 
 
 /* ---------------- Configuración ---------------- */
 
-function Config({ settings, onSave }: { settings: Settings; onSave: (s: Settings) => void }) {
+function Config({
+  settings,
+  onSave,
+  wizardOpen,
+  demo,
+  onFinish,
+}: {
+  settings: Settings;
+  onSave: (s: Settings) => void;
+  wizardOpen: boolean;
+  demo: boolean;
+  onFinish: () => void;
+}) {
   const [s, setS] = useState(settings);
   const [saved, setSaved] = useState(false);
+  const [showWizard, setShowWizard] = useState(wizardOpen);
+  const [checks, setChecks] = useState<{ ok: boolean; label: string; help?: string }[] | null>(null);
+  const [testing, setTesting] = useState(false);
+  useEffect(() => setShowWizard((v) => v || wizardOpen), [wizardOpen]);
   useEffect(() => setS(settings), [settings]);
   const f = (k: keyof Settings) => ({
     value: s[k],
@@ -1045,8 +1114,33 @@ function Config({ settings, onSave }: { settings: Settings; onSave: (s: Settings
   });
 
   return (
+    <>
     <section className="card">
-      <h2>Configuración</h2>
+      <div className="card-head">
+        <h2>🧭 Conectar tu cuenta gratis de Cloudflare</h2>
+        {!showWizard && (
+          <button className="btn ghost small" onClick={() => setShowWizard(true)}>
+            Abrir asistente
+          </button>
+        )}
+      </div>
+      {settings.cfAccountId && settings.cfToken ? (
+        <p className="ok" style={{ marginTop: 0 }}>✅ Tu cuenta de Cloudflare está conectada.</p>
+      ) : (
+        <p className="hint" style={{ marginTop: 0 }}>
+          Con tu cuenta gratis tienes uso diario de IA sin los límites del modo demo{demo ? "" : " (necesaria para crear con IA)"}.
+        </p>
+      )}
+      {showWizard && (
+        <CloudflareWizard
+          settings={settings}
+          onSave={(n) => (onSave(n), setS(n))}
+          onFinish={() => (setShowWizard(false), onFinish())}
+        />
+      )}
+    </section>
+    <section className="card">
+      <h2>Configuración avanzada</h2>
       <p className="hint">
         Cada persona usa sus propias claves. Se guardan únicamente en este navegador y en cada pedido pasan por el
         servidor de la plataforma hacia el proveedor, sin guardarse ni registrarse.
@@ -1095,6 +1189,24 @@ function Config({ settings, onSave }: { settings: Settings; onSave: (s: Settings
               <input type="password" {...f("cfToken")} placeholder="Token de Workers AI" autoComplete="off" />
             </div>
           </div>
+          <div className="actions">
+            <button
+              className="btn ghost small"
+              disabled={testing || !s.cfAccountId || !s.cfToken}
+              onClick={async () => {
+                setTesting(true);
+                setChecks(null);
+                try {
+                  setChecks((await testCloudflare(s.cfAccountId, s.cfToken)).checks);
+                } finally {
+                  setTesting(false);
+                }
+              }}
+            >
+              {testing ? "Probando…" : "🔌 Probar conexión"}
+            </button>
+          </div>
+          {checks && <CheckList checks={checks} />}
         </>
       )}
 
@@ -1145,5 +1257,6 @@ function Config({ settings, onSave }: { settings: Settings; onSave: (s: Settings
       </button>
       {saved && <div className="ok">Configuración guardada.</div>}
     </section>
+    </>
   );
 }
