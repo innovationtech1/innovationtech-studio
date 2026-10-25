@@ -379,6 +379,7 @@ function ImageStudio({
   const [count, setCount] = usePersistentState("imagen:cantidad", 1);
   const [useBrand, setUseBrand] = usePersistentState("imagen:marca", true);
   const [cutSrc, setCutSrc] = useState<string | null>(null);
+  const [cutEraser, setCutEraser] = useState(false);
   const [cutResults, setCutResults] = useState<string[]>([]);
   const [refs, setRefs] = useState<string[]>([]);
   const [urls, setUrls] = useState<string[]>([]);
@@ -445,28 +446,44 @@ function ImageStudio({
     <section className="card">
       <div className="card-head">
         <div>
-          <h2>✂️ Remover fondo</h2>
+          <h2>✂️ Remover fondo y borrador</h2>
           <p className="hint" style={{ margin: 0 }}>
-            Quita el fondo de un logo o una foto y descárgalo en PNG transparente. Gratis, en tu dispositivo.
+            Quita el fondo de un logo o una foto, o borra a mano zonas o áreas, y descárgalo en PNG transparente. Gratis, en tu dispositivo.
           </p>
         </div>
-        <label className="btn" style={{ margin: 0 }}>
-          📷 Elegir foto o logo
-          <input
-            type="file"
-            accept="image/*"
-            hidden
-            onChange={async (e) => {
-              const f = e.target.files?.[0];
-              e.target.value = "";
-              if (f) setCutSrc(await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png"));
-            }}
-          />
-        </label>
+        <div className="actions">
+          <label className="btn" style={{ margin: 0 }}>
+            📷 Quitar fondo
+            <input
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) (setCutEraser(false), setCutSrc(await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png")));
+              }}
+            />
+          </label>
+          <label className="btn ghost" style={{ margin: 0 }}>
+            🧽 Borrador
+            <input
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) (setCutEraser(true), setCutSrc(await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png")));
+              }}
+            />
+          </label>
+        </div>
       </div>
       {cutSrc && (
         <BgRemover
           src={cutSrc}
+          startWithEraser={cutEraser}
           title="tu imagen"
           onClose={() => setCutSrc(null)}
           onApply={(png) => {
@@ -591,6 +608,7 @@ function ImageStudio({
                   href="#"
                   onClick={async (e) => {
                     e.preventDefault();
+                    setCutEraser(false);
                     setCutSrc(await toDataUrl(u));
                     window.scrollTo({ top: 0, behavior: "smooth" });
                   }}

@@ -205,8 +205,11 @@ export default function ImageEditor({
   const [exportFmt, setExportFmt] = useState<"png" | "jpg">("jpg");
   const [notice, setNotice] = useState("");
   // Quitar fondo: a qué se aplica (la foto de fondo o una capa de imagen)
-  const [cutout, setCutout] = useState<string | null>(null);
+  const [cutout, setCutoutRaw] = useState<string | null>(null);
+  const [eraserMode, setEraserMode] = useState(false);
+  const setCutout = (t: string | null, eraser = false) => (setEraserMode(eraser), setCutoutRaw(t));
   const quickInput = useRef<HTMLInputElement>(null);
+  const wantEraser = useRef(false);
   const [, force] = useState(0);
 
   const past = useRef<Doc[]>([]);
@@ -646,11 +649,18 @@ export default function ImageEditor({
   // JPG no admite transparencia: con fondo transparente siempre se exporta PNG.
   const outFmt: "png" | "jpg" = doc.transparent ? "png" : exportFmt;
 
-  async function applyCutout(target: string, png: string, size: { w: number; h: number }) {
+  async function applyCutout(target: string, png: string, size: { w: number; h: number }, trimmed = true) {
     try {
       const im = await loadImg(png);
       images.current.set(png, im);
-      if (target === "photo") {
+      if (target === "photo" && !trimmed) {
+        // Sin recortar: la foto queda exactamente en el mismo lugar y tamaño
+        setDoc((d) => {
+          const p = d.photo!;
+          return { ...d, transparent: true, photo: { ...p, src: png, scale: (p.scale * p.naturalW) / size.w, naturalW: size.w, naturalH: size.h } };
+        });
+        setNotice("Listo. Las zonas borradas quedan transparentes (se descargará en PNG).");
+      } else if (target === "photo") {
         setDoc((d) => {
           const photo = { ...d.photo!, src: png, naturalW: size.w, naturalH: size.h, rotation: 0 };
           // En «original», el lienzo toma el tamaño del objeto recortado (ideal para descargar el logo solo).
@@ -764,11 +774,28 @@ export default function ImageEditor({
             // Remover fondo: a la imagen seleccionada, o a la foto; si no hay, pide una
             if (sel?.type === "image") setCutout(sel.id);
             else if (doc.photo) setCutout("photo");
-            else quickInput.current?.click();
+            else {
+              wantEraser.current = false;
+              quickInput.current?.click();
+            }
           }}
           title="Remover fondo (Background Removal)"
         >
           ✂️ Remover fondo
+        </button>
+        <button
+          className="btn ghost small"
+          onClick={() => {
+            if (sel?.type === "image") setCutout(sel.id, true);
+            else if (doc.photo) setCutout("photo", true);
+            else {
+              wantEraser.current = true;
+              quickInput.current?.click();
+            }
+          }}
+          title="Borrar zonas o áreas de la imagen"
+        >
+          🧽 Borrador
         </button>
         <input
           ref={quickInput}
@@ -781,7 +808,8 @@ export default function ImageEditor({
             if (!f) return;
             const url = await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png");
             await openPhoto(url);
-            setCutout("photo");
+            setCutout("photo", wantEraser.current);
+            wantEraser.current = false;
           }}
         />
         <select
@@ -857,10 +885,12 @@ export default function ImageEditor({
       )}
       {cutout && (cutout === "photo" ? doc.photo : doc.layers.find((l) => l.id === cutout && l.type === "image")) && (
         <BgRemover
+          key={`${cutout}-${eraserMode}`}
+          startWithEraser={eraserMode}
           src={cutout === "photo" ? doc.photo!.src : (doc.layers.find((l) => l.id === cutout) as ImageLayer).src}
           title={cutout === "photo" ? "foto de fondo" : "imagen / logo"}
           onClose={() => setCutout(null)}
-          onApply={(png, size) => applyCutout(cutout, png, size)}
+          onApply={(png, size, info) => applyCutout(cutout, png, size, info?.trimmed ?? true)}
         />
       )}
       {sel && !cutout && (
