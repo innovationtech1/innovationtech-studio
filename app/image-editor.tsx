@@ -206,6 +206,7 @@ export default function ImageEditor({
   const [notice, setNotice] = useState("");
   // Quitar fondo: a qué se aplica (la foto de fondo o una capa de imagen)
   const [cutout, setCutout] = useState<string | null>(null);
+  const quickInput = useRef<HTMLInputElement>(null);
   const [, force] = useState(0);
 
   const past = useRef<Doc[]>([]);
@@ -757,6 +758,32 @@ export default function ImageEditor({
         <button className="btn ghost small" onClick={() => setShowGallery((v) => !v)}>
           📁 De la galería
         </button>
+        <button
+          className="btn small"
+          onClick={() => {
+            // Remover fondo: a la imagen seleccionada, o a la foto; si no hay, pide una
+            if (sel?.type === "image") setCutout(sel.id);
+            else if (doc.photo) setCutout("photo");
+            else quickInput.current?.click();
+          }}
+          title="Remover fondo (Background Removal)"
+        >
+          ✂️ Remover fondo
+        </button>
+        <input
+          ref={quickInput}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={async (e) => {
+            const f = e.target.files?.[0];
+            e.target.value = "";
+            if (!f) return;
+            const url = await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png");
+            await openPhoto(url);
+            setCutout("photo");
+          }}
+        />
         <select
           value={doc.format}
           onChange={(e) => setDoc((d) => changeFormat(d, e.target.value as FormatId))}

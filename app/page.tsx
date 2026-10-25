@@ -13,6 +13,9 @@ import ReelStudio from "./reel-studio";
 
 type Tab = "texto" | "imagen" | "editor" | "video" | "galeria" | "marca" | "config";
 
+// «Remover fondo» (solo en el navegador)
+const BgRemover = dynamic(() => import("./bg-remover"), { ssr: false });
+
 // El editor usa el lienzo del navegador: se carga solo en el navegador.
 const ImageEditor = dynamic(() => import("./image-editor"), {
   ssr: false,
@@ -375,6 +378,8 @@ function ImageStudio({
   const [ratio, setRatio] = usePersistentState("imagen:formato", "1:1");
   const [count, setCount] = usePersistentState("imagen:cantidad", 1);
   const [useBrand, setUseBrand] = usePersistentState("imagen:marca", true);
+  const [cutSrc, setCutSrc] = useState<string | null>(null);
+  const [cutResults, setCutResults] = useState<string[]>([]);
   const [refs, setRefs] = useState<string[]>([]);
   const [urls, setUrls] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -435,6 +440,66 @@ function ImageStudio({
   }
 
   return (
+    <>
+    {/* ---------- Remover fondo ---------- */}
+    <section className="card">
+      <div className="card-head">
+        <div>
+          <h2>✂️ Remover fondo</h2>
+          <p className="hint" style={{ margin: 0 }}>
+            Quita el fondo de un logo o una foto y descárgalo en PNG transparente. Gratis, en tu dispositivo.
+          </p>
+        </div>
+        <label className="btn" style={{ margin: 0 }}>
+          📷 Elegir foto o logo
+          <input
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f) setCutSrc(await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png"));
+            }}
+          />
+        </label>
+      </div>
+      {cutSrc && (
+        <BgRemover
+          src={cutSrc}
+          title="tu imagen"
+          onClose={() => setCutSrc(null)}
+          onApply={(png) => {
+            setCutResults((r) => [png, ...r]);
+            onDone([{ kind: "imagen", url: png, prompt: "Imagen sin fondo", date: new Date().toISOString() }]);
+            setCutSrc(null);
+            setTimeout(() => document.getElementById("cut-results")?.scrollIntoView({ behavior: "smooth", block: "center" }), 150);
+          }}
+        />
+      )}
+      {cutResults.length > 0 && (
+        <div className="grid" id="cut-results">
+          {cutResults.map((u, i) => (
+            <div className="media" key={i}>
+              <div className="checker" style={{ minHeight: 0, borderRadius: 0 }}>
+                <img src={u} alt="Sin fondo" style={{ maxHeight: 260, width: "auto", maxWidth: "100%", background: "transparent" }} />
+              </div>
+              <div className="meta actions">
+                <a href={u} download="innovationtech-sin-fondo.png">
+                  ⬇️ Descargar PNG
+                </a>
+                ·
+                <a href="#" onClick={(e) => (e.preventDefault(), onEdit(u))}>
+                  ✏️ Editar
+                </a>
+                · <span className="muted">Guardado en la galería</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+
     <section className="card">
       <h2>Crear imágenes</h2>
       <p className="hint">
@@ -522,6 +587,17 @@ function ImageStudio({
                   ✏️ Editar
                 </a>
                 ·
+                <a
+                  href="#"
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    setCutSrc(await toDataUrl(u));
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
+                >
+                  ✂️ Quitar fondo
+                </a>
+                ·
                 <a href="#" onClick={(e) => (e.preventDefault(), onAnimate(u, prompt))}>
                   Animar en video
                 </a>
@@ -531,6 +607,7 @@ function ImageStudio({
         </div>
       )}
     </section>
+    </>
   );
 }
 
