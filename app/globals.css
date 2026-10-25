@@ -204,3 +204,27 @@ details.more summary { cursor: pointer; color: var(--text); font-size: 14px; }
 .shape-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; max-height: 230px; overflow-y: auto; padding: 2px; }
 .shape-btn { display: flex; flex-direction: column; align-items: center; gap: 2px; background: var(--navy-800); border: 1px solid var(--navy-600); border-radius: 8px; padding: 6px 2px; cursor: pointer; color: var(--muted); font-size: 11px; }
 .shape-btn.active { background: var(--red); border-color: var(--red); color: #fff; }
+
+/* Editor de video */
+.vedit-stage { position: relative; display: flex; justify-content: center; background: #000; border-radius: 10px; padding: 8px; margin-top: 12px; }
+.vedit-stage canvas { max-width: 100%; max-height: 56vh; width: auto; height: auto; background: #000; border-radius: 6px; }
+.vedit-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.vedit-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.vedit-controls .btn { margin-top: 0; }
+input.scrub { padding: 0; border: 0; background: transparent; accent-color: var(--red); height: 28px; }
+.timeline { display: flex; gap: 6px; overflow-x: auto; padding: 8px 2px; align-items: stretch; }
+.tl-clip { position: relative; min-width: 76px; flex-basis: 76px; height: 70px; border-radius: 8px; border: 2px solid var(--navy-600); background: var(--navy-800); padding: 0; overflow: hidden; cursor: pointer; color: #fff; }
+.tl-clip.active { border-color: var(--red); }
+.tl-clip img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.85; }
+.tl-clip span { position: absolute; left: 4px; bottom: 3px; font-size: 11px; background: rgba(0,0,0,0.65); padding: 1px 5px; border-radius: 6px; }
+.tl-tr { position: absolute; right: -2px; top: 2px; font-style: normal; font-size: 12px; background: var(--red); border-radius: 6px; padding: 0 4px; }
+.tl-add { display: flex; flex-direction: column; gap: 4px; justify-content: center; min-width: 120px; }
+.tl-add .btn { margin-top: 0; }
+.pick-item { padding: 0; border: 2px solid transparent; border-radius: 6px; overflow: hidden; background: #000; cursor: pointer; aspect-ratio: 1; }
+.pick-item:hover { border-color: var(--red); }
+.pick-item img, .pick-item video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.music-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin: 8px 0; }
+.music-grid button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; background: var(--navy-800); color: var(--text); border: 1px solid var(--navy-600); border-radius: 10px; padding: 10px; cursor: pointer; }
+.music-grid button.active { border-color: var(--red); box-shadow: 0 0 0 1px var(--red) inset; background: var(--navy-700); }
+.music-grid .emoji { font-size: 22px; }
+.music-grid small { color: var(--muted); font-size: 11px; line-height: 1.3; }

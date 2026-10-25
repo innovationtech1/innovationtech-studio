@@ -16,6 +16,10 @@ type Tab = "texto" | "imagen" | "editor" | "video" | "galeria" | "marca" | "conf
 // «Remover fondo» (solo en el navegador)
 const BgRemover = dynamic(() => import("./bg-remover"), { ssr: false });
 const ShapeCrop = dynamic(() => import("./shape-crop"), { ssr: false });
+const VideoEditor = dynamic(() => import("./video-editor"), {
+  ssr: false,
+  loading: () => <section className="card">Cargando editor de video…</section>,
+});
 
 // El editor usa el lienzo del navegador: se carga solo en el navegador.
 const ImageEditor = dynamic(() => import("./image-editor"), {
@@ -88,7 +92,7 @@ export default function Home() {
     setTab("editor");
   };
   const [ready, setReady] = useState(false);
-  const [videoMode, setVideoMode] = usePersistentState<"reel" | "ia">("video:mode", "reel");
+  const [videoMode, setVideoMode] = usePersistentState<"reel" | "editor" | "ia">("video:mode", "reel");
 
   useEffect(() => {
     setSettings(load("its-settings", defaultSettings));
@@ -188,6 +192,9 @@ export default function Home() {
             <button className={videoMode === "reel" ? "active" : ""} onClick={() => setVideoMode("reel")}>
               🎞️ Reel con mis imágenes · gratis
             </button>
+            <button className={videoMode === "editor" ? "active" : ""} onClick={() => setVideoMode("editor")}>
+              ✂️ Editor de video + música
+            </button>
             <button className={videoMode === "ia" ? "active" : ""} onClick={() => setVideoMode("ia")}>
               🤖 Video con IA · Replicate (de pago)
             </button>
@@ -201,6 +208,9 @@ export default function Home() {
               onVideo={(blob, prompt) => galleryStore.add([{ kind: "video", blob, prompt }])}
               handoff={handoff}
             />
+          </div>
+          <div hidden={videoMode !== "editor"}>
+            <VideoEditor gallery={gallery} onVideo={(blob, prompt) => galleryStore.add([{ kind: "video", blob, prompt }])} />
           </div>
           <div hidden={videoMode !== "ia"}>
             <VideoStudio

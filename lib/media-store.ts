@@ -6,6 +6,7 @@ import type { Item } from "./types";
 
 const DB = "innovationtech-studio";
 const STORE = "galeria";
+const FILES = "archivos";
 
 export type StoredItem = {
   id: string;
@@ -21,10 +22,12 @@ function db(): Promise<IDBDatabase> {
   if (!dbPromise) {
     dbPromise = new Promise((resolve, reject) => {
       if (typeof indexedDB === "undefined") return reject(new Error("Sin almacenamiento"));
-      const req = indexedDB.open(DB, 1);
+      const req = indexedDB.open(DB, 2);
       req.onupgradeneeded = () => {
-        const s = req.result.createObjectStore(STORE, { keyPath: "id" });
-        s.createIndex("date", "date");
+        const d = req.result;
+        if (!d.objectStoreNames.contains(STORE)) d.createObjectStore(STORE, { keyPath: "id" }).createIndex("date", "date");
+        // Archivos de los proyectos de video (para que no se pierdan al cerrar la app)
+        if (!d.objectStoreNames.contains(FILES)) d.createObjectStore(FILES);
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -71,6 +74,35 @@ export async function listItems(): Promise<StoredItem[]> {
 
 export async function deleteItem(id: string) {
   await tx("readwrite", (s) => s.delete(id));
+}
+
+// ---------- Archivos de proyectos ----------
+export async function putFile(id: string, blob: Blob) {
+  const d = await db();
+  await new Promise<void>((res, rej) => {
+    const t = d.transaction(FILES, "readwrite");
+    t.objectStore(FILES).put(blob, id);
+    t.oncomplete = () => res();
+    t.onerror = () => rej(t.error);
+    t.onabort = () => rej(t.error || new Error("Sin espacio en el dispositivo."));
+  });
+}
+export async function getFile(id: string): Promise<Blob | null> {
+  const d = await db();
+  return new Promise((res) => {
+    const r = d.transaction(FILES, "readonly").objectStore(FILES).get(id);
+    r.onsuccess = () => res((r.result as Blob) || null);
+    r.onerror = () => res(null);
+  });
+}
+export async function deleteFile(id: string) {
+  const d = await db();
+  await new Promise<void>((res) => {
+    const t = d.transaction(FILES, "readwrite");
+    t.objectStore(FILES).delete(id);
+    t.oncomplete = () => res();
+    t.onerror = () => res();
+  });
 }
 
 export async function clearItems() {

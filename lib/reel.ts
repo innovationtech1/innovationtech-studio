@@ -1,3 +1,5 @@
+import { renderMusic, MusicStyleId } from "./music";
+import fixWebmDuration from "fix-webm-duration";
 // Motor de reels: arma un video animado dentro del navegador, gratis y sin límite.
 // Dibuja cada escena en un <canvas> (zoom/movimiento suave + transiciones + textos)
 // y lo graba con MediaRecorder, incluyendo la voz en off si existe.
@@ -14,6 +16,8 @@ export type ReelOptions = {
   cta: string; // texto del cierre
   logo?: string; // data URL opcional
   voice?: string; // data URL de audio opcional
+  music?: { style: MusicStyleId; seed: number; volume: number } | null; // música gratis de fondo
+  onStatus?: (msg: string) => void;
   onProgress?: (fraction: number) => void;
   previewCanvas?: HTMLCanvasElement; // para ver el reel mientras se graba
 };
@@ -225,6 +229,14 @@ export async function renderReel(o: ReelOptions): Promise<ReelResult> {
   const slidesTime = per * imgs.length;
   const total = slidesTime + OUTRO;
 
+  // Música de fondo (se compone a la medida exacta del reel)
+  let musicBuffer: AudioBuffer | null = null;
+  if (o.music) {
+    o.onStatus?.("🎵 Componiendo música…");
+    musicBuffer = await renderMusic({ style: o.music.style, seed: o.music.seed, duration: total + 0.3 });
+    if (!audioCtx) audioCtx = new AudioContext();
+  }
+
   const canvas = document.createElement("canvas");
   canvas.width = W;
   canvas.height = H;
@@ -271,11 +283,22 @@ export async function renderReel(o: ReelOptions): Promise<ReelResult> {
   draw(0);
   const stream = canvas.captureStream(FPS);
   let source: AudioBufferSourceNode | null = null;
-  if (audioCtx && voiceBuffer) {
+  let musicSource: AudioBufferSourceNode | null = null;
+  let musicGain: GainNode | null = null;
+  if (audioCtx && (voiceBuffer || musicBuffer)) {
     const dest = audioCtx.createMediaStreamDestination();
-    source = audioCtx.createBufferSource();
-    source.buffer = voiceBuffer;
-    source.connect(dest);
+    if (voiceBuffer) {
+      source = audioCtx.createBufferSource();
+      source.buffer = voiceBuffer;
+      source.connect(dest);
+    }
+    if (musicBuffer && o.music) {
+      musicSource = audioCtx.createBufferSource();
+      musicSource.buffer = musicBuffer;
+      musicGain = audioCtx.createGain();
+      musicGain.gain.value = o.music.volume;
+      musicSource.connect(musicGain).connect(dest);
+    }
     dest.stream.getAudioTracks().forEach((tr) => stream.addTrack(tr));
   }
 
@@ -287,10 +310,21 @@ export async function renderReel(o: ReelOptions): Promise<ReelResult> {
   });
 
   recorder.start(250);
-  if (audioCtx && source) {
-    await audioCtx.resume();
-    source.start(audioCtx.currentTime + 0.3);
+  o.onStatus?.("");
+  if (audioCtx) await audioCtx.resume();
+  if (audioCtx && musicSource && musicGain && o.music) {
+    const now = audioCtx.currentTime;
+    musicSource.start(now);
+    if (voiceBuffer) {
+      // La música baja mientras habla la voz y vuelve a subir al terminar
+      const v = o.music.volume;
+      musicGain.gain.setValueAtTime(v, now);
+      musicGain.gain.linearRampToValueAtTime(v * 0.35, now + 0.3);
+      musicGain.gain.setValueAtTime(v * 0.35, now + 0.3 + voiceBuffer.duration);
+      musicGain.gain.linearRampToValueAtTime(v, now + 0.8 + voiceBuffer.duration);
+    }
   }
+  if (audioCtx && source) source.start(audioCtx.currentTime + 0.3);
   const start = performance.now();
 
   // Usamos un temporizador (no requestAnimationFrame) para que siga grabando
@@ -313,7 +347,9 @@ export async function renderReel(o: ReelOptions): Promise<ReelResult> {
   await new Promise((r) => setTimeout(r, 300));
   recorder.stop();
   stream.getTracks().forEach((t) => t.stop());
-  const blob = await done;
+  let blob = await done;
+  // WebM grabado en el navegador no trae la duración: se la escribimos
+  if (rec.ext === "webm") blob = await fixWebmDuration(blob, total * 1000, { logger: false }).catch(() => blob);
   audioCtx?.close().catch(() => {});
   o.onProgress?.(1);
   return { url: URL.createObjectURL(blob), blob, ext: rec.ext, seconds: Math.round(total) };

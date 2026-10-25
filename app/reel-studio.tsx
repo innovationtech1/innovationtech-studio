@@ -8,6 +8,7 @@ import { ReelFormat, renderReel, supportedRecording } from "@/lib/reel";
 import type { Item, Settings } from "@/lib/types";
 import { clearDrafts, usePersistentState } from "@/lib/persist";
 import { toDataUrl } from "@/lib/media-store";
+import { MUSIC_STYLES, MusicStyleId, renderMusic } from "@/lib/music";
 
 type Scene = { image: string; caption: string; prompt: string; loading?: boolean };
 
@@ -60,6 +61,34 @@ export default function ReelStudio({
   const [accent, setAccent] = useState("#e5243b");
   const [logo, setLogo] = useState("");
   const [script, setScript] = usePersistentState("reel:guion", "");
+  const [musicOn, setMusicOn] = usePersistentState("reel:musica", true);
+  const [musicStyle, setMusicStyle] = usePersistentState<MusicStyleId>("reel:musica-estilo", "pop");
+  const [musicSeed, setMusicSeed] = usePersistentState("reel:musica-version", 1);
+  const [musicVolume, setMusicVolume] = usePersistentState("reel:musica-volumen", 0.6);
+  const listenNode = useRef<AudioBufferSourceNode | null>(null);
+  const listenCtx = useRef<AudioContext | null>(null);
+  const stopListen = () => {
+    try {
+      listenNode.current?.stop();
+    } catch {
+      /* nada */
+    }
+    listenNode.current = null;
+  };
+  const listenMusic = (seed: number) =>
+    run("🎵 Componiendo una muestra…", async () => {
+      stopListen();
+      const buf = await renderMusic({ style: musicStyle, seed, duration: 12 });
+      if (!listenCtx.current) listenCtx.current = new AudioContext();
+      await listenCtx.current.resume();
+      const s = listenCtx.current.createBufferSource();
+      s.buffer = buf;
+      const g = listenCtx.current.createGain();
+      g.gain.value = musicVolume;
+      s.connect(g).connect(listenCtx.current.destination);
+      s.start();
+      listenNode.current = s;
+    });
   const [voice, setVoice] = useState("");
   const [picking, setPicking] = useState<number | null>(null);
   const [busy, setBusy] = useState("");
@@ -212,6 +241,8 @@ export default function ReelStudio({
         cta,
         logo: logo || undefined,
         voice: voice || undefined,
+        music: musicOn ? { style: musicStyle, seed: musicSeed, volume: musicVolume } : null,
+        onStatus: (m) => setBusy(m || "Grabando tu reel…"),
         onProgress: setProgress,
         previewCanvas: preview.current || undefined,
       });
@@ -447,8 +478,49 @@ export default function ReelStudio({
       </div>
       {voice && <p className="hint" style={{ marginTop: 6 }}>El reel durará lo necesario para que la voz se escuche completa.</p>}
 
-      {/* 5. Crear */}
-      <h3 className="step">5. Crear el video</h3>
+      {/* 5. Música */}
+      <h3 className="step">5. Música de fondo (gratis, sin derechos de autor)</h3>
+      <div className="music-grid">
+        <button className={!musicOn ? "active" : ""} onClick={() => setMusicOn(false)}>
+          <span className="emoji">🔇</span>
+          <strong>Sin música</strong>
+        </button>
+        {MUSIC_STYLES.map((m) => (
+          <button
+            key={m.id}
+            className={musicOn && musicStyle === m.id ? "active" : ""}
+            onClick={() => (setMusicOn(true), setMusicStyle(m.id), setMusicSeed(1))}
+          >
+            <span className="emoji">{m.emoji}</span>
+            <strong>{m.label}</strong>
+          </button>
+        ))}
+      </div>
+      {musicOn && (
+        <>
+          <div className="actions">
+            <button className="btn ghost small" disabled={!!busy} onClick={() => listenMusic(musicSeed)}>
+              ▶ Escuchar
+            </button>
+            <button className="btn ghost small" disabled={!!busy} onClick={() => (setMusicSeed(musicSeed + 1), listenMusic(musicSeed + 1))}>
+              🎲 Otra versión
+            </button>
+            <button className="btn ghost small" onClick={stopListen}>
+              ⏹
+            </button>
+          </div>
+          <div className="slider">
+            <div className="slider-head">
+              <span>Volumen de la música{voice ? " (baja sola mientras habla la voz)" : ""}</span>
+              <span>{Math.round(musicVolume * 100)}%</span>
+            </div>
+            <input type="range" min={0} max={1} step={0.05} value={musicVolume} onChange={(e) => setMusicVolume(Number(e.target.value))} />
+          </div>
+        </>
+      )}
+
+      {/* 6. Crear */}
+      <h3 className="step">6. Crear el video</h3>
       <button className="btn" disabled={!!busy || !canRecord || !scenes.some((s) => s.image)} onClick={buildReel}>
         🎬 Crear reel
       </button>
