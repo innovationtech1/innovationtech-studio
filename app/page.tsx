@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { Brand, brandContext, brandVisual, emptyBrand } from "@/lib/brand";
 import { friendlyError } from "@/lib/errors";
 import { fileToResizedDataUrl } from "@/lib/resize";
@@ -8,7 +9,13 @@ import { usePersistentState } from "@/lib/persist";
 import type { Item, Settings } from "@/lib/types";
 import ReelStudio from "./reel-studio";
 
-type Tab = "texto" | "imagen" | "video" | "galeria" | "marca" | "config";
+type Tab = "texto" | "imagen" | "editor" | "video" | "galeria" | "marca" | "config";
+
+// El editor usa el lienzo del navegador: se carga solo en el navegador.
+const ImageEditor = dynamic(() => import("./image-editor"), {
+  ssr: false,
+  loading: () => <section className="card">Cargando editor…</section>,
+});
 
 const defaultSettings: Settings = {
   anthropicKey: "",
@@ -76,6 +83,12 @@ export default function Home() {
   const [videoPrompt, setVideoPrompt] = usePersistentState("video:prompt", "");
   // Imagen enviada con «Animar en video» desde la pestaña Imágenes
   const [handoff, setHandoff] = useState<{ url: string; n: number } | null>(null);
+  // Imagen enviada al editor con «Editar»
+  const [toEditor, setToEditor] = useState<{ url: string; n: number } | null>(null);
+  const openInEditor = (url: string) => {
+    setToEditor((h) => ({ url, n: (h?.n || 0) + 1 }));
+    setTab("editor");
+  };
   const [ready, setReady] = useState(false);
   const [videoMode, setVideoMode] = usePersistentState<"reel" | "ia">("video:mode", "reel");
 
@@ -85,7 +98,7 @@ export default function Home() {
     setGallery(loadList<Item>("its-gallery"));
     // Accesos directos de la app instalada (?tab=imagen, etc.)
     const t = new URLSearchParams(window.location.search).get("tab");
-    if (t && ["texto", "imagen", "video", "galeria", "marca", "config"].includes(t)) setTimeout(() => setTab(t as Tab), 0);
+    if (t && ["texto", "imagen", "editor", "video", "galeria", "marca", "config"].includes(t)) setTimeout(() => setTab(t as Tab), 0);
     setReady(true);
   }, []);
 
@@ -119,6 +132,7 @@ export default function Home() {
           [
             ["texto", "✍️ Textos"],
             ["imagen", "🖼️ Imágenes"],
+            ["editor", "✏️ Editor"],
             ["video", "🎬 Videos"],
             ["galeria", "📁 Galería"],
             ["marca", "🎨 Mi marca"],
@@ -157,11 +171,21 @@ export default function Home() {
           prompt={imagePrompt}
           setPrompt={setImagePrompt}
           onDone={addToGallery}
+          onEdit={openInEditor}
           onAnimate={(url, p) => {
             setVideoPrompt(p);
             setHandoff((h) => ({ url, n: (h?.n || 0) + 1 }));
             setTab("video");
           }}
+        />
+      </div>
+      <div hidden={tab !== "editor"}>
+        <ImageEditor
+          incoming={toEditor}
+          gallery={gallery}
+          onSaveToGallery={(url) =>
+            addToGallery([{ kind: "imagen", url, prompt: "Diseño editado", date: new Date().toISOString() }])
+          }
         />
       </div>
       <div hidden={tab !== "video"}>
@@ -194,7 +218,7 @@ export default function Home() {
           </div>
       </div>
       <div hidden={tab !== "galeria"}>
-        <Gallery items={gallery} onClear={() => setGallery([])} />
+        <Gallery items={gallery} onClear={() => setGallery([])} onEdit={openInEditor} />
       </div>
       <div hidden={tab !== "marca"}>
         <BrandKit
@@ -337,6 +361,7 @@ function ImageStudio({
   setPrompt,
   onDone,
   onAnimate,
+  onEdit,
 }: {
   settings: Settings;
   brand: Brand;
@@ -344,6 +369,7 @@ function ImageStudio({
   setPrompt: (p: string) => void;
   onDone: (items: Item[]) => void;
   onAnimate: (url: string, prompt: string) => void;
+  onEdit: (url: string) => void;
 }) {
   const [ratio, setRatio] = usePersistentState("imagen:formato", "1:1");
   const [count, setCount] = usePersistentState("imagen:cantidad", 1);
@@ -489,6 +515,10 @@ function ImageStudio({
               <div className="meta actions">
                 <a href={u} target={u.startsWith("data:") ? undefined : "_blank"} rel="noreferrer" download="innovationtech-imagen">
                   Descargar
+                </a>
+                ·
+                <a href="#" onClick={(e) => (e.preventDefault(), onEdit(u))}>
+                  ✏️ Editar
                 </a>
                 ·
                 <a href="#" onClick={(e) => (e.preventDefault(), onAnimate(u, prompt))}>
@@ -645,7 +675,7 @@ function VideoStudio({
 
 /* ---------------- Galería ---------------- */
 
-function Gallery({ items, onClear }: { items: Item[]; onClear: () => void }) {
+function Gallery({ items, onClear, onEdit }: { items: Item[]; onClear: () => void; onEdit: (url: string) => void }) {
   return (
     <section className="card">
       <h2>Galería</h2>
@@ -662,7 +692,15 @@ function Gallery({ items, onClear }: { items: Item[]; onClear: () => void }) {
               <br />
               <a href={it.url} target={it.url.startsWith("data:") ? undefined : "_blank"} rel="noreferrer" download={`innovationtech-${it.kind}`}>
                 Descargar
-              </a>{" "}
+              </a>
+              {it.kind === "imagen" && (
+                <>
+                  {" · "}
+                  <a href="#" onClick={(e) => (e.preventDefault(), onEdit(it.url))}>
+                    ✏️ Editar
+                  </a>
+                </>
+              )}{" "}
               · {new Date(it.date).toLocaleString("es-MX")}
             </div>
           </div>
