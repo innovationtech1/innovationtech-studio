@@ -1,5 +1,5 @@
 import { createPrediction, getPrediction, jsonError, outputUrls, Prediction } from "@/lib/replicate";
-import { cloudflareImage } from "@/lib/cloudflare";
+import { cloudflareImage, isFlagged } from "@/lib/cloudflare";
 
 export const maxDuration = 60;
 
@@ -22,7 +22,8 @@ export async function POST(req: Request) {
       return jsonError("Faltan tu Account ID o tu token de Cloudflare. Agrégalos en Configuración.", 401);
     }
     try {
-      const urls = await Promise.all(
+      // Si una imagen se bloquea, entregamos las demás en vez de fallar todo.
+      const results = await Promise.allSettled(
         Array.from({ length: n }, () =>
           cloudflareImage({
             accountId,
@@ -35,7 +36,21 @@ export async function POST(req: Request) {
           })
         )
       );
-      return Response.json({ urls });
+      const urls = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+      const errors = results.flatMap((r) => (r.status === "rejected" ? [(r.reason as Error).message] : []));
+      if (urls.length) {
+        const flagged = errors.filter(isFlagged).length;
+        return Response.json({
+          urls,
+          warning: flagged
+            ? `${flagged} de ${n} imágenes fueron bloqueadas por el filtro de seguridad de Cloudflare y no se incluyeron.`
+            : errors.length
+              ? `${errors.length} de ${n} imágenes no se pudieron generar.`
+              : undefined,
+        });
+      }
+      const msg = errors[0] || "No se pudo generar la imagen.";
+      return Response.json({ error: msg, flagged: isFlagged(msg) }, { status: isFlagged(msg) ? 422 : 502 });
     } catch (e) {
       return jsonError((e as Error).message, 502);
     }

@@ -43,7 +43,25 @@ async function readImage(res: Response): Promise<string> {
   return image.startsWith("data:") ? image : `data:image/jpeg;base64,${image}`;
 }
 
-export async function cloudflareImage(o: CfOptions): Promise<string> {
+// El filtro de seguridad del proveedor bloqueó el resultado.
+export const isFlagged = (msg: string) => /flagged|nsfw|unsafe|content policy|safety/i.test(msg);
+
+// Genera la imagen y, si el filtro de seguridad bloquea el resultado, reintenta con otra
+// variación (muchas veces es una falsa alarma). No modifica el pedido del usuario.
+export async function cloudflareImage(o: CfOptions, attempts = 3): Promise<string> {
+  let last: Error = new Error("No se pudo generar la imagen.");
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await cloudflareImageOnce(o, i);
+    } catch (e) {
+      last = e as Error;
+      if (!isFlagged(last.message)) throw last;
+    }
+  }
+  throw last;
+}
+
+async function cloudflareImageOnce(o: CfOptions, attempt: number): Promise<string> {
   const useRef = o.references.length > 0 || o.aspectRatio !== "1:1";
   const model = useRef ? o.refModel : o.model;
   const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(o.accountId)}/ai/run/${model}`;
@@ -66,6 +84,8 @@ export async function cloudflareImage(o: CfOptions): Promise<string> {
   form.append("prompt", o.prompt.slice(0, 2048));
   form.append("width", String(w));
   form.append("height", String(h));
+  // FLUX.2 acepta una «semilla»: cada intento produce una variación distinta.
+  form.append("seed", String(Math.floor(Math.random() * 2_000_000_000) + attempt));
   o.references.slice(0, 4).forEach((ref, i) => {
     form.append(`input_image_${i}`, dataUrlToBlob(ref), `referencia-${i}.jpg`);
   });

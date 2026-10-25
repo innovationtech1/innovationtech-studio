@@ -10,6 +10,8 @@ export function friendlyError(raw: string): string {
     return "La clave de Anthropic no es válida. Revísala en Configuración.";
   if (m.includes("unauthenticated") || m.includes("invalid token") || m.includes("authentication error"))
     return "La clave o el token no son válidos. Revísalos en Configuración.";
+  if (/flagged|nsfw|unsafe|content policy|safety/.test(m))
+    return "El filtro de seguridad de Cloudflare bloqueó esta imagen (ya lo intenté 3 veces con variaciones distintas). Suele pasar con fotos de personas, logos o marcas, o con palabras que el filtro malinterpreta. Prueba: describir la escena con otras palabras, usar otra foto de referencia, o generar sin fotos de referencia.";
   if (m.includes("neurons") || m.includes("daily free allocation") || m.includes("capacity"))
     return "Se acabó el límite gratuito de hoy en Cloudflare. Se reinicia a medianoche UTC; mientras, puedes usar Replicate.";
   return raw || "Algo salió mal. Intenta de nuevo.";

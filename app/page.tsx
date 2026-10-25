@@ -379,6 +379,8 @@ function ImageStudio({
   const [ratio, setRatio] = usePersistentState("imagen:formato", "1:1");
   const [count, setCount] = usePersistentState("imagen:cantidad", 1);
   const [useBrand, setUseBrand] = usePersistentState("imagen:marca", true);
+  const [warning, setWarning] = useState("");
+  const [flagged, setFlagged] = useState(false);
   const [cutSrc, setCutSrc] = useState<string | null>(null);
   const [cutEraser, setCutEraser] = useState(false);
   const [shapeSrc, setShapeSrc] = useState<string | null>(null);
@@ -407,11 +409,14 @@ function ImageStudio({
     }
   }
 
-  async function generate() {
+  async function generate(withoutRefs = false) {
     setLoading(true);
     setError("");
+    setWarning("");
+    setFlagged(false);
     setUrls([]);
     const full = prompt + (useBrand ? brandVisual(brand) : "");
+    const useRefs = withoutRefs ? [] : refs.slice(0, maxRefs);
     try {
       const cf = settings.imageProvider === "cloudflare";
       const res = await fetch("/api/image", {
@@ -427,12 +432,16 @@ function ImageStudio({
           model: cf ? settings.cfImageModel : settings.imageModel,
           refModel: settings.cfRefModel,
           editModel: settings.editModel,
-          references: refs.slice(0, maxRefs),
+          references: useRefs,
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) {
+        if (data.flagged) setFlagged(true);
+        throw new Error(data.error);
+      }
       setUrls(data.urls);
+      if (data.warning) setWarning(data.warning);
       const date = new Date().toISOString();
       onDone(data.urls.map((url: string) => ({ kind: "imagen", url, prompt, date })));
     } catch (e) {
@@ -615,10 +624,27 @@ function ImageStudio({
           </select>
         </div>
       </div>
-      <button className="btn" disabled={loading || !prompt} onClick={generate}>
+      <button className="btn" disabled={loading || !prompt} onClick={() => generate()}>
         {loading ? "Generando… (hasta 1 min)" : "Generar imagen"}
       </button>
-      {error && <div className="error">{error}</div>}
+      {error && (
+        <div className="error">
+          {error}
+          {flagged && (
+            <div className="actions" style={{ marginTop: 8 }}>
+              <button className="btn small" disabled={loading} onClick={() => generate()}>
+                🔄 Intentar otra vez
+              </button>
+              {refs.length > 0 && (
+                <button className="btn ghost small" disabled={loading} onClick={() => generate(true)}>
+                  Intentar sin fotos de referencia
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      {warning && <div className="notice">⚠️ {warning}</div>}
       {urls.length > 0 && (
         <div className="grid">
           {urls.map((u) => (
