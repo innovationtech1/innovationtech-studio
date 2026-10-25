@@ -36,6 +36,7 @@ import { usePersistentState } from "@/lib/persist";
 import { fileToResizedDataUrl } from "@/lib/resize";
 import type { Item } from "@/lib/types";
 import BgRemover from "./bg-remover";
+import ShapeCrop from "./shape-crop";
 import { toDataUrl } from "@/lib/media-store";
 
 type Tool = "ajustes" | "filtros" | "texto" | "stickers" | "formas" | "imagen" | "marco" | "capas";
@@ -207,9 +208,15 @@ export default function ImageEditor({
   // Quitar fondo: a qué se aplica (la foto de fondo o una capa de imagen)
   const [cutout, setCutoutRaw] = useState<string | null>(null);
   const [eraserMode, setEraserMode] = useState(false);
-  const setCutout = (t: string | null, eraser = false) => (setEraserMode(eraser), setCutoutRaw(t));
+  const setCutout = (t: string | null, eraser = false) => {
+    setEraserMode(eraser);
+    setCutoutRaw(t);
+    if (t) setShapeTarget(null); // solo un panel a la vez
+  };
   const quickInput = useRef<HTMLInputElement>(null);
   const wantEraser = useRef(false);
+  const wantShape = useRef(false);
+  const [shapeTarget, setShapeTarget] = useState<string | null>(null);
   const [, force] = useState(0);
 
   const past = useRef<Doc[]>([]);
@@ -797,6 +804,21 @@ export default function ImageEditor({
         >
           🧽 Borrador
         </button>
+        <button
+          className="btn ghost small"
+          onClick={() => {
+            setCutout(null);
+            if (sel?.type === "image") setShapeTarget(sel.id);
+            else if (doc.photo) setShapeTarget("photo");
+            else {
+              wantShape.current = true;
+              quickInput.current?.click();
+            }
+          }}
+          title="Recortar la imagen con una figura"
+        >
+          🔷 Recortar con forma
+        </button>
         <input
           ref={quickInput}
           type="file"
@@ -808,8 +830,10 @@ export default function ImageEditor({
             if (!f) return;
             const url = await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png");
             await openPhoto(url);
-            setCutout("photo", wantEraser.current);
+            if (wantShape.current) setShapeTarget("photo");
+            else setCutout("photo", wantEraser.current);
             wantEraser.current = false;
+            wantShape.current = false;
           }}
         />
         <select
@@ -893,7 +917,20 @@ export default function ImageEditor({
           onApply={(png, size, info) => applyCutout(cutout, png, size, info?.trimmed ?? true)}
         />
       )}
-      {sel && !cutout && (
+      {shapeTarget && (shapeTarget === "photo" ? doc.photo : doc.layers.find((l) => l.id === shapeTarget && l.type === "image")) && (
+        <ShapeCrop
+          key={shapeTarget}
+          src={shapeTarget === "photo" ? doc.photo!.src : (doc.layers.find((l) => l.id === shapeTarget) as ImageLayer).src}
+          title={shapeTarget === "photo" ? "foto de fondo" : "imagen / logo"}
+          onClose={() => setShapeTarget(null)}
+          onApply={async (png, size) => {
+            await applyCutout(shapeTarget, png, size, true);
+            setShapeTarget(null);
+            setNotice("Recorte aplicado. Fondo transparente activado (se descargará en PNG).");
+          }}
+        />
+      )}
+      {sel && !cutout && !shapeTarget && (
         <LayerProps
           onCutout={sel.type === "image" ? () => setCutout(sel.id) : undefined}
           layer={sel}

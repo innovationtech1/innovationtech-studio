@@ -15,6 +15,7 @@ type Tab = "texto" | "imagen" | "editor" | "video" | "galeria" | "marca" | "conf
 
 // «Remover fondo» (solo en el navegador)
 const BgRemover = dynamic(() => import("./bg-remover"), { ssr: false });
+const ShapeCrop = dynamic(() => import("./shape-crop"), { ssr: false });
 
 // El editor usa el lienzo del navegador: se carga solo en el navegador.
 const ImageEditor = dynamic(() => import("./image-editor"), {
@@ -380,6 +381,7 @@ function ImageStudio({
   const [useBrand, setUseBrand] = usePersistentState("imagen:marca", true);
   const [cutSrc, setCutSrc] = useState<string | null>(null);
   const [cutEraser, setCutEraser] = useState(false);
+  const [shapeSrc, setShapeSrc] = useState<string | null>(null);
   const [cutResults, setCutResults] = useState<string[]>([]);
   const [refs, setRefs] = useState<string[]>([]);
   const [urls, setUrls] = useState<string[]>([]);
@@ -446,9 +448,10 @@ function ImageStudio({
     <section className="card">
       <div className="card-head">
         <div>
-          <h2>✂️ Remover fondo y borrador</h2>
+          <h2>✂️ Recortar, quitar fondo y borrar</h2>
           <p className="hint" style={{ margin: 0 }}>
-            Quita el fondo de un logo o una foto, o borra a mano zonas o áreas, y descárgalo en PNG transparente. Gratis, en tu dispositivo.
+            Quita el fondo, recorta con figuras modernas (círculo, arco, corazón, estrella…) o borra a mano zonas. Se descarga en PNG
+            transparente. Gratis, en tu dispositivo.
           </p>
         </div>
         <div className="actions">
@@ -461,7 +464,20 @@ function ImageStudio({
               onChange={async (e) => {
                 const f = e.target.files?.[0];
                 e.target.value = "";
-                if (f) (setCutEraser(false), setCutSrc(await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png")));
+                if (f) (setShapeSrc(null), setCutEraser(false), setCutSrc(await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png")));
+              }}
+            />
+          </label>
+          <label className="btn ghost" style={{ margin: 0 }}>
+            🔷 Recortar con forma
+            <input
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) (setCutSrc(null), setShapeSrc(await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png")));
               }}
             />
           </label>
@@ -474,7 +490,7 @@ function ImageStudio({
               onChange={async (e) => {
                 const f = e.target.files?.[0];
                 e.target.value = "";
-                if (f) (setCutEraser(true), setCutSrc(await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png")));
+                if (f) (setShapeSrc(null), setCutEraser(true), setCutSrc(await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png")));
               }}
             />
           </label>
@@ -490,6 +506,19 @@ function ImageStudio({
             setCutResults((r) => [png, ...r]);
             onDone([{ kind: "imagen", url: png, prompt: "Imagen sin fondo", date: new Date().toISOString() }]);
             setCutSrc(null);
+            setTimeout(() => document.getElementById("cut-results")?.scrollIntoView({ behavior: "smooth", block: "center" }), 150);
+          }}
+        />
+      )}
+      {shapeSrc && (
+        <ShapeCrop
+          src={shapeSrc}
+          title="tu imagen"
+          onClose={() => setShapeSrc(null)}
+          onApply={(png) => {
+            setCutResults((r) => [png, ...r]);
+            onDone([{ kind: "imagen", url: png, prompt: "Recorte con forma", date: new Date().toISOString() }]);
+            setShapeSrc(null);
             setTimeout(() => document.getElementById("cut-results")?.scrollIntoView({ behavior: "smooth", block: "center" }), 150);
           }}
         />
@@ -614,6 +643,18 @@ function ImageStudio({
                   }}
                 >
                   ✂️ Quitar fondo
+                </a>
+                ·
+                <a
+                  href="#"
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    setCutSrc(null);
+                    setShapeSrc(await toDataUrl(u));
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
+                >
+                  🔷 Forma
                 </a>
                 ·
                 <a href="#" onClick={(e) => (e.preventDefault(), onAnimate(u, prompt))}>
