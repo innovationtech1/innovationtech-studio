@@ -6,6 +6,8 @@ import { Brand, brandContext, brandVisual, emptyBrand } from "@/lib/brand";
 import { friendlyError } from "@/lib/errors";
 import { fileToResizedDataUrl } from "@/lib/resize";
 import { usePersistentState } from "@/lib/persist";
+import { useGallery } from "@/lib/use-gallery";
+import { formatBytes, storageUsage, toDataUrl } from "@/lib/media-store";
 import type { Item, Settings } from "@/lib/types";
 import ReelStudio from "./reel-studio";
 
@@ -32,17 +34,6 @@ const defaultSettings: Settings = {
   imageModel: "black-forest-labs/flux-schnell",
   videoModel: "minimax/video-01",
 };
-
-// Las imágenes de Cloudflare llegan como datos dentro de la página (pesan más),
-// así que la galería guarda solo las más recientes para no llenar el navegador.
-function trimGallery(items: Item[]): Item[] {
-  let embedded = 0;
-  return items.slice(0, 100).filter((it) => {
-    if (!it.url.startsWith("data:")) return true;
-    embedded++;
-    return embedded <= 8;
-  });
-}
 
 // Todo se guarda solo en el navegador de cada persona.
 function load<T>(key: string, fallback: T): T {
@@ -78,14 +69,17 @@ export default function Home() {
   const [tab, setTab] = usePersistentState<Tab>("tab", "texto");
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [brand, setBrand] = useState<Brand>(emptyBrand);
-  const [gallery, setGallery] = useState<Item[]>([]);
+  // Galería permanente (IndexedDB): no se pierde al cerrar la app
+  const galleryStore = useGallery();
+  const gallery = galleryStore.items;
   const [imagePrompt, setImagePrompt] = usePersistentState("imagen:prompt", "");
   const [videoPrompt, setVideoPrompt] = usePersistentState("video:prompt", "");
   // Imagen enviada con «Animar en video» desde la pestaña Imágenes
   const [handoff, setHandoff] = useState<{ url: string; n: number } | null>(null);
   // Imagen enviada al editor con «Editar»
   const [toEditor, setToEditor] = useState<{ url: string; n: number } | null>(null);
-  const openInEditor = (url: string) => {
+  const openInEditor = async (src: string) => {
+    const url = await toDataUrl(src); // los enlaces locales temporales se convierten para el borrador
     setToEditor((h) => ({ url, n: (h?.n || 0) + 1 }));
     setTab("editor");
   };
@@ -95,18 +89,14 @@ export default function Home() {
   useEffect(() => {
     setSettings(load("its-settings", defaultSettings));
     setBrand(load("its-brand", emptyBrand));
-    setGallery(loadList<Item>("its-gallery"));
     // Accesos directos de la app instalada (?tab=imagen, etc.)
     const t = new URLSearchParams(window.location.search).get("tab");
     if (t && ["texto", "imagen", "editor", "video", "galeria", "marca", "config"].includes(t)) setTimeout(() => setTab(t as Tab), 0);
     setReady(true);
   }, []);
 
-  useEffect(() => {
-    if (ready) save("its-gallery", trimGallery(gallery));
-  }, [gallery, ready]);
-
-  const addToGallery = (items: Item[]) => setGallery((g) => [...items, ...g]);
+  const addToGallery = (items: Item[]) =>
+    galleryStore.add(items.map((i) => ({ kind: i.kind, url: i.url, prompt: i.prompt })));
   const imageKeysMissing =
     settings.imageProvider === "cloudflare" ? !settings.cfAccountId || !settings.cfToken : !settings.replicateKey;
   const usesCf = settings.textProvider === "cloudflare" || settings.imageProvider === "cloudflare";
@@ -172,7 +162,8 @@ export default function Home() {
           setPrompt={setImagePrompt}
           onDone={addToGallery}
           onEdit={openInEditor}
-          onAnimate={(url, p) => {
+          onAnimate={async (src, p) => {
+            const url = await toDataUrl(src);
             setVideoPrompt(p);
             setHandoff((h) => ({ url, n: (h?.n || 0) + 1 }));
             setTab("video");
@@ -203,6 +194,7 @@ export default function Home() {
               brand={brand}
               gallery={gallery}
               onImages={addToGallery}
+              onVideo={(blob, prompt) => galleryStore.add([{ kind: "video", blob, prompt }])}
               handoff={handoff}
             />
           </div>
@@ -218,7 +210,16 @@ export default function Home() {
           </div>
       </div>
       <div hidden={tab !== "galeria"}>
-        <Gallery items={gallery} onClear={() => setGallery([])} onEdit={openInEditor} />
+        <Gallery
+          items={gallery}
+          ready={galleryStore.ready}
+          persistent={galleryStore.persistent}
+          storeError={galleryStore.error}
+          onRemove={galleryStore.remove}
+          onClear={galleryStore.clear}
+          onEdit={openInEditor}
+          visible={tab === "galeria"}
+        />
       </div>
       <div hidden={tab !== "marca"}>
         <BrandKit
@@ -675,41 +676,139 @@ function VideoStudio({
 
 /* ---------------- Galería ---------------- */
 
-function Gallery({ items, onClear, onEdit }: { items: Item[]; onClear: () => void; onEdit: (url: string) => void }) {
+function Gallery({
+  items,
+  ready,
+  persistent,
+  storeError,
+  onRemove,
+  onClear,
+  onEdit,
+  visible,
+}: {
+  items: Item[];
+  ready: boolean;
+  persistent: boolean;
+  storeError: string;
+  onRemove: (id: string) => void;
+  onClear: () => void;
+  onEdit: (url: string) => void;
+  visible: boolean;
+}) {
+  const [filter, setFilter] = useState<"todo" | "imagen" | "video">("todo");
+  const [usage, setUsage] = useState<{ used: number; quota: number } | null>(null);
+  const [open, setOpen] = useState<Item | null>(null);
+
+  useEffect(() => {
+    if (visible) storageUsage().then(setUsage);
+  }, [visible, items.length]);
+
+  const shown = items.filter((i) => filter === "todo" || i.kind === filter);
+  const nImg = items.filter((i) => i.kind === "imagen").length;
+  const nVid = items.length - nImg;
+  const ext = (it: Item) => {
+    const m = it.mime || "";
+    if (it.kind === "video") return m.includes("webm") ? "webm" : "mp4";
+    return m.includes("png") ? "png" : m.includes("webp") ? "webp" : "jpg";
+  };
+
   return (
     <section className="card">
-      <h2>Galería</h2>
+      <div className="card-head">
+        <h2>Galería</h2>
+        {usage && usage.quota > 0 && (
+          <span className="muted">
+            Usado: {formatBytes(usage.used)} de {formatBytes(usage.quota)} disponibles
+          </span>
+        )}
+      </div>
       <p className="hint">
-        Tus últimas creaciones. Los enlaces de Replicate caducan después de un tiempo: descarga lo que quieras conservar.
+        Todo lo que creas se guarda aquí, en tu dispositivo, aunque cierres la app.
+        {persistent ? " ✅ Protegida: el navegador no la borrará." : ""}
       </p>
-      {items.length === 0 && <div className="notice">Aún no has creado nada.</div>}
-      <div className="grid">
-        {items.map((it, i) => (
-          <div className="media" key={it.url + i}>
-            {it.kind === "imagen" ? <img src={it.url} alt={it.prompt} /> : <video src={it.url} controls playsInline />}
-            <div className="meta">
-              {it.prompt.slice(0, 90)}
-              <br />
-              <a href={it.url} target={it.url.startsWith("data:") ? undefined : "_blank"} rel="noreferrer" download={`innovationtech-${it.kind}`}>
-                Descargar
-              </a>
-              {it.kind === "imagen" && (
+      {storeError && <div className="error">{storeError}</div>}
+
+      <div className="seg" style={{ marginBottom: 12 }}>
+        <button className={filter === "todo" ? "active" : ""} onClick={() => setFilter("todo")}>
+          Todo ({items.length})
+        </button>
+        <button className={filter === "imagen" ? "active" : ""} onClick={() => setFilter("imagen")}>
+          🖼️ Imágenes ({nImg})
+        </button>
+        <button className={filter === "video" ? "active" : ""} onClick={() => setFilter("video")}>
+          🎬 Videos ({nVid})
+        </button>
+      </div>
+
+      {!ready && <div className="notice">Cargando galería…</div>}
+      {ready && shown.length === 0 && <div className="notice">Aún no hay nada aquí. Lo que crees aparecerá automáticamente.</div>}
+
+      <div className="gallery-grid">
+        {shown.map((it) => (
+          <div className="gallery-item" key={it.id || it.url}>
+            <button className="gallery-thumb" onClick={() => setOpen(it)} aria-label="Ver en grande">
+              {it.kind === "imagen" ? (
+                <img src={it.url} alt={it.prompt} loading="lazy" />
+              ) : (
                 <>
-                  {" · "}
-                  <a href="#" onClick={(e) => (e.preventDefault(), onEdit(it.url))}>
-                    ✏️ Editar
-                  </a>
+                  <video src={it.url} muted playsInline preload="metadata" />
+                  <span className="badge-video">▶ Video</span>
                 </>
-              )}{" "}
-              · {new Date(it.date).toLocaleString("es-MX")}
+              )}
+            </button>
+            <div className="gallery-meta">
+              <span className="muted">{new Date(it.date).toLocaleDateString("es-MX", { day: "numeric", month: "short" })}</span>
+              <div className="gallery-actions">
+                {it.kind === "imagen" && (
+                  <button title="Editar" onClick={() => onEdit(it.url)}>
+                    ✏️
+                  </button>
+                )}
+                <a title="Descargar" href={it.url} download={`innovationtech-${it.kind}.${ext(it)}`}>
+                  ⬇️
+                </a>
+                <button
+                  title="Eliminar"
+                  onClick={() => it.id && confirm("¿Eliminar este elemento de la galería?") && onRemove(it.id)}
+                >
+                  🗑️
+                </button>
+              </div>
             </div>
+            {it.external && <span className="muted" style={{ fontSize: 11 }}>Enlace externo: descárgalo para conservarlo</span>}
           </div>
         ))}
       </div>
+
       {items.length > 0 && (
-        <button className="btn ghost small" onClick={onClear}>
+        <button
+          className="btn ghost small"
+          onClick={() => confirm("¿Borrar TODA la galería? Esto no se puede deshacer.") && onClear()}
+        >
           Vaciar galería
         </button>
+      )}
+
+      {open && (
+        <div className="lightbox" onClick={() => setOpen(null)}>
+          <div className="lightbox-inner" onClick={(e) => e.stopPropagation()}>
+            {open.kind === "imagen" ? <img src={open.url} alt={open.prompt} /> : <video src={open.url} controls autoPlay playsInline />}
+            <p className="muted">{open.prompt}</p>
+            <div className="actions">
+              {open.kind === "imagen" && (
+                <button className="btn small" onClick={() => (onEdit(open.url), setOpen(null))}>
+                  ✏️ Editar
+                </button>
+              )}
+              <a className="btn ghost small" href={open.url} download={`innovationtech-${open.kind}.${ext(open)}`}>
+                ⬇️ Descargar
+              </a>
+              <button className="btn ghost small" onClick={() => setOpen(null)}>
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   );

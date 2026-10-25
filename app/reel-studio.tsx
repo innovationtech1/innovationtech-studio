@@ -7,6 +7,7 @@ import { fileToResizedDataUrl } from "@/lib/resize";
 import { ReelFormat, renderReel, supportedRecording } from "@/lib/reel";
 import type { Item, Settings } from "@/lib/types";
 import { clearDrafts, usePersistentState } from "@/lib/persist";
+import { toDataUrl } from "@/lib/media-store";
 
 type Scene = { image: string; caption: string; prompt: string; loading?: boolean };
 
@@ -33,8 +34,10 @@ export default function ReelStudio({
   brand,
   gallery,
   onImages,
+  onVideo,
   handoff,
 }: {
+  onVideo: (blob: Blob, prompt: string) => void;
   settings: Settings;
   brand: Brand;
   gallery: Item[];
@@ -213,6 +216,7 @@ export default function ReelStudio({
         previewCanvas: preview.current || undefined,
       });
       setResult({ url: r.url, ext: r.ext, seconds: r.seconds });
+      onVideo(r.blob, `Reel: ${topic || brandName || "sin título"}`); // se guarda solo en la galería
     });
 
   const ratioStyle = format === "9:16" ? "9 / 16" : format === "1:1" ? "1 / 1" : "16 / 9";
@@ -360,7 +364,7 @@ export default function ReelStudio({
                     key={g.url + k}
                     src={g.url}
                     alt={g.prompt}
-                    onClick={() => (setScene(i, { image: g.url }), setPicking(null))}
+                    onClick={async () => (setScene(i, { image: await toDataUrl(g.url) }), setPicking(null))}
                   />
                 ))}
               </div>
@@ -477,6 +481,7 @@ export default function ReelStudio({
               <a href={result.url} download={`reel-innovationtech.${result.ext}`}>
                 ⬇️ Descargar video ({result.seconds} s, {result.ext.toUpperCase()})
               </a>
+              <span className="muted">· ✅ Guardado en tu galería</span>
             </div>
           </div>
         )}

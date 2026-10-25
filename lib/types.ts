@@ -16,4 +16,4 @@ export type Settings = {
   videoModel: string;
 };
 
-export type Item = { kind: "imagen" | "video"; url: string; prompt: string; date: string };
+export type Item = { id?: string; kind: "imagen" | "video"; url: string; prompt: string; date: string; external?: boolean; mime?: string };

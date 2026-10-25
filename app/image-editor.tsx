@@ -36,6 +36,7 @@ import { usePersistentState } from "@/lib/persist";
 import { fileToResizedDataUrl } from "@/lib/resize";
 import type { Item } from "@/lib/types";
 import BgRemover from "./bg-remover";
+import { toDataUrl } from "@/lib/media-store";
 
 type Tool = "ajustes" | "filtros" | "texto" | "stickers" | "formas" | "imagen" | "marco" | "capas";
 
@@ -773,7 +774,7 @@ export default function ImageEditor({
         <div className="picker" style={{ marginBottom: 10 }}>
           {galleryImages.length === 0 && <span className="muted">Tu galería está vacía.</span>}
           {galleryImages.slice(0, 30).map((g, k) => (
-            <img key={g.url + k} src={g.url} alt={g.prompt} onClick={() => (openPhoto(g.url), setShowGallery(false))} />
+            <img key={g.url + k} src={g.url} alt={g.prompt} onClick={async () => (openPhoto(await toDataUrl(g.url)), setShowGallery(false))} />
           ))}
         </div>
       )}
