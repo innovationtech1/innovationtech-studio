@@ -324,7 +324,12 @@ export default function Home() {
             />
           </div>
           <div hidden={videoMode !== "editor"}>
-            <VideoEditor gallery={gallery} onVideo={(blob, prompt) => galleryStore.add([{ kind: "video", blob, prompt }])} />
+            <VideoEditor
+              gallery={gallery}
+              settings={settings}
+              accent={brandAccent(brand)}
+              onVideo={(blob, prompt) => galleryStore.add([{ kind: "video", blob, prompt }])}
+            />
           </div>
           <div hidden={videoMode !== "ia"}>
             <VideoStudio

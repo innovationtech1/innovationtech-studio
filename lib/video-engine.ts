@@ -1,3 +1,4 @@
+import { cuesFromWords, drawCue, wordsFromScript, type Word } from "./captions";
 // Motor del editor de video: dibuja cada cuadro (clips, transiciones, filtros y textos),
 // reproduce con sonido y exporta grabando el lienzo + la mezcla de audio. Todo en el navegador.
 
@@ -56,7 +57,30 @@ export type TextOverlay = {
   style: "titulo" | "subtitulo" | "etiqueta";
   color: string;
   bg: string; // "" = sin fondo
-  anim: "fade" | "slide" | "pop" | "type";
+  anim: "fade" | "slide" | "pop" | "type" | "words" | "karaoke";
+  highlight?: string; // color de la palabra resaltada (palabra por palabra / karaoke)
+  words?: Word[]; // tiempos de cada palabra (subtítulos automáticos); si no hay, se reparten
+};
+
+export type StickerAnim = "rebote" | "girar" | "latido" | "flotar" | "temblor" | "aparecer";
+export const STICKER_ANIMS: { id: StickerAnim; label: string }[] = [
+  { id: "rebote", label: "Rebote" },
+  { id: "latido", label: "Latido" },
+  { id: "flotar", label: "Flotar" },
+  { id: "girar", label: "Girar" },
+  { id: "temblor", label: "Temblor" },
+  { id: "aparecer", label: "Aparecer" },
+];
+export const STICKER_EMOJIS = ["🔥", "⭐", "❤️", "🎉", "✨", "👉", "✅", "💥", "😍", "🤩", "😋", "👀", "📍", "🛒", "🎁", "💯", "🆕", "⚡", "🌮", "🍔", "☕", "💈", "🏠", "🛍️"];
+export type Sticker = {
+  id: string;
+  emoji: string;
+  x: number; // 0..1 (centro)
+  y: number; // 0..1
+  size: number; // fracción del lado corto
+  start: number;
+  end: number;
+  anim: StickerAnim;
 };
 
 export type MusicSettings = {
@@ -72,6 +96,7 @@ export type Project = {
   background: "blur" | "black";
   clips: Clip[];
   texts: TextOverlay[];
+  stickers?: Sticker[];
   music: MusicSettings;
   clipVolume: number; // volumen general del audio de los videos
 };
@@ -395,6 +420,7 @@ export class VideoEngine {
     } else this.drawClip(i, t, starts, 1, 0, 0, 1);
 
     this.drawTexts(t);
+    this.drawStickers(t);
   }
 
   private drawTransition(a: number, b: number, p: number, t: number, starts: number[]) {
@@ -479,6 +505,23 @@ export class VideoEngine {
     const unit = Math.min(W, H);
     for (const tx of this.project.texts) {
       if (t < tx.start || t > tx.end || !tx.text.trim()) continue;
+      if (tx.anim === "words" || tx.anim === "karaoke") {
+        const size = unit * (tx.style === "titulo" ? 0.08 : tx.style === "subtitulo" ? 0.068 : 0.056);
+        const words = tx.words?.length ? tx.words : wordsFromScript(tx.text, tx.end - tx.start, tx.start);
+        const cue = cuesFromWords(words).find((c) => t >= c.start && t <= c.end + 0.05);
+        if (cue)
+          drawCue(ctx, cue, t, {
+            W,
+            centerY: tx.position === "top" ? H * 0.16 : tx.position === "center" ? H / 2 : H * 0.8,
+            size,
+            font: `Montserrat, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`,
+            color: tx.color,
+            highlight: tx.highlight || "#e5243b",
+            mode: tx.anim,
+            uppercase: tx.style !== "subtitulo",
+          });
+        continue;
+      }
       const inP = Math.min(1, (t - tx.start) / 0.45);
       const outP = Math.min(1, (tx.end - t) / 0.3);
       const a = ease(Math.min(inP, outP));
@@ -517,6 +560,44 @@ export class VideoEngine {
         ctx.fillText(l, W / 2, ly);
         ctx.shadowColor = "transparent";
       });
+      ctx.restore();
+    }
+  }
+
+  private drawStickers(t: number) {
+    const list = this.project.stickers || [];
+    if (!list.length) return;
+    const ctx = this.ctx;
+    const [W, H] = SIZES[this.project.format];
+    const unit = Math.min(W, H);
+    for (const st of list) {
+      if (t < st.start || t > st.end) continue;
+      const local = t - st.start;
+      const inP = Math.min(1, local / 0.35);
+      const outP = Math.min(1, (st.end - t) / 0.25);
+      let scale = 0.4 + 0.6 * ease(inP);
+      let rot = 0;
+      let dx = 0;
+      let dy = 0;
+      if (st.anim === "rebote") dy = -Math.abs(Math.sin(local * Math.PI * 1.6)) * unit * 0.04;
+      if (st.anim === "latido") scale *= 1 + 0.12 * Math.max(0, Math.sin(local * Math.PI * 2.4));
+      if (st.anim === "flotar") (dy = Math.sin(local * 2.2) * unit * 0.018), (rot = Math.sin(local * 1.6) * 0.12);
+      if (st.anim === "girar") rot = local * Math.PI * 1.2;
+      if (st.anim === "temblor") (dx = Math.sin(local * 40) * unit * 0.006), (rot = Math.sin(local * 33) * 0.08);
+      if (st.anim === "aparecer") scale = inP < 1 ? 0.3 + 0.95 * ease(inP) - 0.25 * Math.max(0, inP - 0.7) / 0.3 : 1;
+      const size = unit * st.size;
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, outP * 1.5, inP * 2);
+      ctx.translate(st.x * W + dx, st.y * H + dy);
+      ctx.rotate(rot);
+      ctx.scale(scale, scale);
+      ctx.font = `${size}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.shadowColor = "rgba(0,0,0,0.35)";
+      ctx.shadowBlur = size * 0.12;
+      ctx.shadowOffsetY = size * 0.04;
+      ctx.fillText(st.emoji, 0, 0);
       ctx.restore();
     }
   }

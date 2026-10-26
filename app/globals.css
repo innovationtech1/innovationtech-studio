@@ -515,6 +515,12 @@ h3.step { font-size: 18px; margin: 28px 0 8px; }
 .checklist li.bad .check-ic { color: var(--signal); }
 .tl-clip span { display: inline-flex; align-items: center; gap: 3px; }
 
+
+/* Stickers del video: posición */
+.pos-grid { display: grid; grid-template-columns: repeat(3, 34px); grid-template-rows: repeat(3, 34px); gap: 4px; padding: 6px; border-radius: 10px; background: #000; width: max-content; }
+.pos-grid button { border-radius: 6px; border: 1px solid var(--line); background: var(--deck); cursor: pointer; }
+.pos-grid button.active { background: var(--signal); border-color: var(--signal); }
+
 /* ---------- Responsive ---------- */
 .bottom-nav { display: none; }
 

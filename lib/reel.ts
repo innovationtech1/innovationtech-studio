@@ -1,3 +1,4 @@
+import { cuesFromWords, drawCue, wordsFromScript } from "./captions";
 import { renderMusic, MusicStyleId } from "./music";
 import fixWebmDuration from "fix-webm-duration";
 // Motor de reels: arma un video animado dentro del navegador, gratis y sin límite.
@@ -17,6 +18,7 @@ export type ReelOptions = {
   logo?: string; // data URL opcional
   font?: string; // letra de la marca para los textos
   voice?: string; // data URL de audio opcional
+  subtitles?: { script: string; highlight: string } | null; // subtítulos palabra por palabra de la voz en off
   music?: { style: MusicStyleId; seed: number; volume: number } | null; // música gratis de fondo
   onStatus?: (msg: string) => void;
   onProgress?: (fraction: number) => void;
@@ -239,6 +241,9 @@ export async function renderReel(o: ReelOptions): Promise<ReelResult> {
   let per = Math.max(1.5, o.secondsPerSlide);
   if (voiceBuffer) per = Math.max(per, (voiceBuffer.duration + 0.5) / imgs.length);
   const slidesTime = per * imgs.length;
+  // Subtítulos de la voz: cada palabra se reparte a lo largo del audio
+  const subCues =
+    voiceBuffer && o.subtitles?.script.trim() ? cuesFromWords(wordsFromScript(o.subtitles.script, voiceBuffer.duration, 0.05)) : [];
   const total = slidesTime + OUTRO;
 
   // Música de fondo (se compone a la medida exacta del reel)
@@ -279,6 +284,18 @@ export async function renderReel(o: ReelOptions): Promise<ReelResult> {
       drawCaption(ctx, o.captions[i] || "", W, H, (local - 0.15) / 0.5, o.accent);
       ctx.restore();
       drawLogo(ctx, logo, W, H);
+      const cue = subCues.find((c) => time >= c.start && time <= c.end + 0.05);
+      if (cue)
+        drawCue(ctx, cue, time, {
+          W,
+          centerY: H * (H > W ? 0.86 : 0.85),
+          size: Math.round(Math.min(W, H) * 0.062),
+          font: FONT_STACK,
+          color: "#ffffff",
+          highlight: o.subtitles!.highlight,
+          mode: "karaoke",
+          uppercase: true,
+        });
     } else {
       const t = time - slidesTime;
       if (t < FADE) {

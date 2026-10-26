@@ -56,6 +56,7 @@ export default function ReelStudio({
   const accent = accentOverride || brandAccent(brand);
   const logo = brand.logo;
   const [useLogo, setUseLogo] = usePersistentState("reel:usar-logo", true);
+  const [subtitlesOn, setSubtitlesOn] = usePersistentState("reel:subtitulos", true);
   const [script, setScript] = usePersistentState("reel:guion", "");
   const [musicOn, setMusicOn] = usePersistentState("reel:musica", true);
   const [musicStyle, setMusicStyle] = usePersistentState<MusicStyleId>("reel:musica-estilo", "pop");
@@ -244,6 +245,7 @@ export default function ReelStudio({
         logo: (useLogo && logo) || undefined,
         font: brand.font || undefined,
         voice: voice || undefined,
+        subtitles: voice && subtitlesOn ? { script, highlight: accent } : null,
         music: musicOn ? { style: musicStyle, seed: musicSeed, volume: musicVolume } : null,
         onStatus: (m) => setBusy(m || "Grabando tu reel…"),
         onProgress: setProgress,
@@ -472,7 +474,17 @@ export default function ReelStudio({
           </>
         )}
       </div>
-      {voice && <p className="hint" style={{ marginTop: 6 }}>El reel durará lo necesario para que la voz se escuche completa.</p>}
+      {voice && (
+        <>
+          <label className="check">
+            <input type="checkbox" checked={subtitlesOn} onChange={(e) => setSubtitlesOn(e.target.checked)} />
+            Subtítulos de la voz, palabra por palabra (estilo TikTok)
+          </label>
+          <p className="hint" style={{ marginTop: 6 }}>
+            El reel durará lo necesario para que la voz se escuche completa. Si cambias el guion, vuelve a generar la voz para que los subtítulos coincidan.
+          </p>
+        </>
+      )}
 
       {/* 5. Música */}
       <h3 className="step">5. Música de fondo (gratis, sin derechos de autor)</h3>

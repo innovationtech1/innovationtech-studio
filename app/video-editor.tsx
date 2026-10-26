@@ -10,6 +10,9 @@ import {
   probeFile,
   Project,
   SIZES,
+  Sticker,
+  STICKER_ANIMS,
+  STICKER_EMOJIS,
   TextOverlay,
   TRANSITIONS,
   uid,
@@ -18,23 +21,30 @@ import {
 import { MUSIC_STYLES, renderMusic } from "@/lib/music";
 import { deleteFile, getFile, putFile, toBlob } from "@/lib/media-store";
 import { usePersistentState } from "@/lib/persist";
-import type { Item } from "@/lib/types";
+import type { Item, Settings } from "@/lib/types";
+import { blobToBase64, cuesFromWords, toWav16k, type Word } from "@/lib/captions";
+import { friendlyError } from "@/lib/errors";
 
-import { ChevronLeft, ChevronRight, Clapperboard, Copy, Dices, Download, Film, FolderOpen, ImageIcon, Music, Pause, Play, Scissors, Trash2, Type, Upload, Video } from "lucide-react";
+import { Captions, ChevronLeft, Smile, ChevronRight, Clapperboard, Copy, Dices, Download, Film, FolderOpen, ImageIcon, Music, Pause, Play, Scissors, Trash2, Type, Upload, Video } from "lucide-react";
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 const SW = ["#ffffff", "#000000", "#ffd23f", "#e5243b", "#0d1630", "#32c48d", "#2f80ed"];
 
 export default function VideoEditor({
   gallery,
   onVideo,
+  settings,
+  accent = "#e5243b",
 }: {
   gallery: Item[];
   onVideo: (blob: Blob, prompt: string) => void;
+  settings: Settings;
+  accent?: string;
 }) {
   const [project, setProject] = usePersistentState<Project>("video:proyecto", newProject());
   const [selected, setSelected] = useState<string | null>(null);
   const [selText, setSelText] = useState<string | null>(null);
-  const [panel, setPanel] = useState<"clip" | "textos" | "musica">("clip");
+  const [panel, setPanel] = useState<"clip" | "textos" | "stickers" | "musica">("clip");
+  const [selSticker, setSelSticker] = useState<string | null>(null);
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [busy, setBusy] = useState("");
@@ -55,6 +65,8 @@ export default function VideoEditor({
   const sel = project.clips.find((c) => c.id === selected) || null;
   const selIdx = project.clips.findIndex((c) => c.id === selected);
   const tsel = project.texts.find((t) => t.id === selText) || null;
+  const stickers = project.stickers || [];
+  const ssel = stickers.find((x) => x.id === selSticker) || null;
 
   // ---------- Motor ----------
   useEffect(() => {
@@ -107,6 +119,82 @@ export default function VideoEditor({
     update((p) => ({ ...p, clips: p.clips.map((c) => (c.id === id ? { ...c, ...patch } : c)) }));
   const updateText = (id: string, patch: Partial<TextOverlay>) =>
     update((p) => ({ ...p, texts: p.texts.map((t) => (t.id === id ? { ...t, ...patch } : t)) }));
+
+  const updateSticker = (id: string, patch: Partial<Sticker>) =>
+    update((p) => ({ ...p, stickers: (p.stickers || []).map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
+  const addSticker = (emoji: string) => {
+    const st: Sticker = {
+      id: uid(),
+      emoji,
+      x: 0.78,
+      y: 0.2,
+      size: 0.16,
+      start: Math.min(time, Math.max(0, total - 1)),
+      end: Math.min(total || 3, time + 3),
+      anim: "rebote",
+    };
+    update((p) => ({ ...p, stickers: [...(p.stickers || []), st] }));
+    setSelSticker(st.id);
+  };
+
+  // ---------- Subtítulos automáticos ----------
+  // Reconoce lo que se dice en cada video y crea subtítulos palabra por palabra en la línea de tiempo.
+  async function autoSubtitles() {
+    setError("");
+    const videos = project.clips.map((c, i) => ({ c, start: starts[i] })).filter((x) => x.c.kind === "video" && x.c.volume > 0);
+    if (!videos.length) return setError("Agrega un video con voz para crear subtítulos.");
+    const headers: Record<string, string> = { "content-type": "application/json", "x-cf-account": settings.cfAccountId, "x-cf-token": settings.cfToken };
+    const all: Word[] = [];
+    try {
+      const ctx = new AudioContext();
+      for (const [n, { c, start }] of videos.entries()) {
+        setBusy(`Escuchando el video ${n + 1} de ${videos.length}…`);
+        const blob = await getFile(c.fileId);
+        if (!blob) continue;
+        let buf: AudioBuffer;
+        try {
+          buf = await ctx.decodeAudioData(await blob.arrayBuffer());
+        } catch {
+          continue; // video sin audio
+        }
+        const to = Math.min(c.trimEnd, buf.duration);
+        // En partes de 60 s para no exceder el tamaño permitido
+        for (let from = c.trimStart; from < to - 0.2; from += 60) {
+          const wav = await toWav16k(buf, from, Math.min(to, from + 60));
+          const res = await fetch("/api/transcribe", { method: "POST", headers, body: JSON.stringify({ audio: await blobToBase64(wav) }) });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error);
+          for (const w of data.words as Word[]) {
+            const src = from + w.start; // segundo dentro del archivo
+            if (src < c.trimStart || src > c.trimEnd) continue;
+            all.push({ w: w.w, start: start + (src - c.trimStart) / c.speed, end: start + (from + w.end - c.trimStart) / c.speed });
+          }
+        }
+      }
+      ctx.close().catch(() => {});
+      if (!all.length) return setError("No se escuchó voz en los videos. Revisa que tengan sonido.");
+      const cues = cuesFromWords(all);
+      const subs: TextOverlay[] = cues.map((q) => ({
+        id: uid(),
+        text: q.words.map((w) => w.w).join(" "),
+        start: q.start,
+        end: Math.max(q.end, q.start + 0.4),
+        position: "bottom",
+        style: "subtitulo",
+        color: "#ffffff",
+        bg: "",
+        anim: "karaoke",
+        highlight: accent,
+        words: q.words,
+      }));
+      update((p) => ({ ...p, texts: [...p.texts.filter((t) => !t.words?.length), ...subs] }));
+      setPanel("textos");
+    } catch (e) {
+      setError(friendlyError((e as Error).message));
+    } finally {
+      setBusy("");
+    }
+  }
 
   // ---------- Agregar archivos ----------
   async function addBlobs(list: { blob: Blob; name: string }[]) {
@@ -460,6 +548,9 @@ export default function VideoEditor({
         <button className={panel === "textos" ? "active" : ""} onClick={() => setPanel("textos")}>
           <Type size={16} aria-hidden /> Textos ({project.texts.length})
         </button>
+        <button className={panel === "stickers" ? "active" : ""} onClick={() => setPanel("stickers")}>
+          <Smile size={16} aria-hidden /> Stickers ({stickers.length})
+        </button>
         <button className={panel === "musica" ? "active" : ""} onClick={() => setPanel("musica")}>
           <Music size={16} aria-hidden /> Música y audio
         </button>
@@ -591,6 +682,10 @@ export default function VideoEditor({
               <button onClick={() => addText("subtitulo")}>+ Subtítulo</button>
               <button onClick={() => addText("etiqueta")}>+ Etiqueta</button>
             </div>
+            <button className="btn small" onClick={autoSubtitles} disabled={!!busy}>
+              <Captions size={16} aria-hidden /> Subtítulos automáticos
+            </button>
+            <p className="muted">La IA escucha tus videos y escribe lo que se dice, palabra por palabra (gratis con tu cuenta de Cloudflare).</p>
             <p className="muted">El texto aparece desde el momento actual de la reproducción (puedes ajustarlo).</p>
             <div className="layers">
               {project.texts.map((t) => (
@@ -633,14 +728,20 @@ export default function VideoEditor({
                 </div>
                 <label>Animación</label>
                 <div className="seg">
-                  {(["fade", "slide", "pop", "type"] as const).map((a) => (
-                    <button key={a} className={tsel.anim === a ? "active" : ""} onClick={() => updateText(tsel.id, { anim: a })}>
-                      {a === "fade" ? "Aparecer" : a === "slide" ? "Deslizar" : a === "pop" ? "Rebote" : "Máquina de escribir"}
+                  {(["fade", "slide", "pop", "type", "words", "karaoke"] as const).map((a) => (
+                    <button key={a} className={tsel.anim === a ? "active" : ""} onClick={() => updateText(tsel.id, { anim: a, highlight: tsel.highlight || accent })}>
+                      {{ fade: "Aparecer", slide: "Deslizar", pop: "Rebote", type: "Máquina de escribir", words: "Palabra por palabra", karaoke: "Resaltar palabra" }[a]}
                     </button>
                   ))}
                 </div>
                 <label>Color del texto</label>
                 <Swatches value={tsel.color} onChange={(c) => updateText(tsel.id, { color: c })} />
+                {(tsel.anim === "words" || tsel.anim === "karaoke") && (
+                  <>
+                    <label>Color de la palabra resaltada</label>
+                    <Swatches value={tsel.highlight || accent} onChange={(c) => updateText(tsel.id, { highlight: c })} />
+                  </>
+                )}
                 <label>Fondo</label>
                 <div className="swatches">
                   <button className={!tsel.bg ? "active" : ""} onClick={() => updateText(tsel.id, { bg: "" })} style={{ background: "transparent", color: "#fff", fontSize: 10, width: "auto", borderRadius: 6, padding: "0 6px" }}>
@@ -650,6 +751,59 @@ export default function VideoEditor({
                     <button key={c} className={tsel.bg === c ? "active" : ""} style={{ background: c }} onClick={() => updateText(tsel.id, { bg: c })} />
                   ))}
                 </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {panel === "stickers" && (
+          <>
+            <p className="muted" style={{ marginTop: 0 }}>Toca un sticker para agregarlo desde el momento actual. Luego elige su animación y dónde va.</p>
+            <div className="presets emojis">
+              {STICKER_EMOJIS.map((e) => (
+                <button key={e} onClick={() => addSticker(e)} aria-label={`Agregar ${e}`}>
+                  {e}
+                </button>
+              ))}
+            </div>
+            <div className="layers" style={{ marginTop: 10 }}>
+              {stickers.map((st) => (
+                <div key={st.id} className={`layer-row ${selSticker === st.id ? "active" : ""}`}>
+                  <button className="layer-name" onClick={() => (setSelSticker(st.id), engine.current?.seek(st.start + 0.4))}>
+                    {st.emoji} {STICKER_ANIMS.find((a) => a.id === st.anim)?.label} · {fmt(st.start)}–{fmt(st.end)}
+                  </button>
+                  <button title="Eliminar" aria-label="Eliminar" onClick={() => update((p) => ({ ...p, stickers: (p.stickers || []).filter((x) => x.id !== st.id) }))}>
+                    <Trash2 size={16} aria-hidden />
+                  </button>
+                </div>
+              ))}
+            </div>
+            {ssel && (
+              <div className="props">
+                <label style={{ marginTop: 0 }}>Animación</label>
+                <div className="seg">
+                  {STICKER_ANIMS.map((a) => (
+                    <button key={a.id} className={ssel.anim === a.id ? "active" : ""} onClick={() => updateSticker(ssel.id, { anim: a.id })}>
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+                <label>Posición</label>
+                <div className="pos-grid" role="group" aria-label="Posición">
+                  {[0.2, 0.5, 0.8].flatMap((y) =>
+                    [0.2, 0.5, 0.8].map((x) => (
+                      <button
+                        key={`${x}-${y}`}
+                        className={Math.abs(ssel.x - x) < 0.05 && Math.abs(ssel.y - y) < 0.05 ? "active" : ""}
+                        onClick={() => updateSticker(ssel.id, { x, y })}
+                        aria-label={`Posición ${x},${y}`}
+                      />
+                    ))
+                  )}
+                </div>
+                <Range label={`Tamaño: ${Math.round(ssel.size * 100)}`} min={0.06} max={0.4} step={0.01} value={ssel.size} onChange={(v) => updateSticker(ssel.id, { size: v })} />
+                <Range label={`Aparece: ${ssel.start.toFixed(1)} s`} min={0} max={Math.max(0.1, total)} step={0.1} value={ssel.start} onChange={(v) => updateSticker(ssel.id, { start: Math.min(v, ssel.end - 0.3) })} />
+                <Range label={`Desaparece: ${ssel.end.toFixed(1)} s`} min={0} max={Math.max(0.1, total)} step={0.1} value={ssel.end} onChange={(v) => updateSticker(ssel.id, { end: Math.max(v, ssel.start + 0.3) })} />
               </div>
             )}
           </>
