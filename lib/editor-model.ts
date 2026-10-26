@@ -140,6 +140,7 @@ export type Doc = {
   width: number;
   height: number;
   background: string;
+  template?: string; // id de la plantilla de la que salió (al poner foto se conserva el diseño)
   transparent?: boolean; // fondo transparente (logos sin fondo, se descarga en PNG)
   photo: Photo | null;
   adjust: Adjust;

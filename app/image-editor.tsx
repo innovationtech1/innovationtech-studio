@@ -39,6 +39,7 @@ import {
   textFromCopy,
 } from "@/lib/editor-model";
 import { Brand, brandAccent, hasVisualBrand, textOn } from "@/lib/brand";
+import { buildTemplate, GIROS, Giro, loadTemplateFonts, Template, TEMPLATE_FONTS, TEMPLATES } from "@/lib/templates";
 import { usePersistentState } from "@/lib/persist";
 import { fileToResizedDataUrl } from "@/lib/resize";
 import type { Item } from "@/lib/types";
@@ -46,7 +47,7 @@ import BgRemover from "./bg-remover";
 import ShapeCrop from "./shape-crop";
 import { toDataUrl } from "@/lib/media-store";
 
-type Tool = "marca" | "ajustes" | "filtros" | "texto" | "stickers" | "formas" | "imagen" | "marco" | "capas";
+type Tool = "plantillas" | "marca" | "ajustes" | "filtros" | "texto" | "stickers" | "formas" | "imagen" | "marco" | "capas";
 
 export type EditorIncoming = { n: number; url?: string; text?: string; returnTo?: { scene: number } };
 
@@ -229,7 +230,7 @@ export default function ImageEditor({
     layers: d.layers.filter((l) => !(l.type === "image" && l.src.startsWith("data:"))),
   }));
   const [selected, setSelected] = useState<string | null>(null);
-  const [tool, setTool] = useState<Tool>("marca");
+  const [tool, setTool] = useState<Tool>(() => "plantillas");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [showGallery, setShowGallery] = useState(false);
@@ -674,11 +675,15 @@ export default function ImageEditor({
 
   const setAdjust = (patch: Partial<Adjust>) => setDocSlider((d) => ({ ...d, adjust: { ...d.adjust, ...patch } }));
 
+  // Con una plantilla, la foto entra detrás del diseño; si no, se pregunta.
+  const keepOnPhoto = () =>
+    !!docRef.current.template || (!!docRef.current.layers.length && confirm("¿Mantener los textos y stickers del diseño actual?"));
+
   async function uploadPhoto(file: File | undefined) {
     if (!file) return;
     try {
       const url = await fileToResizedDataUrl(file, 2048, 0.92);
-      await openPhoto(url, !!doc.layers.length && confirm("¿Mantener los textos y stickers del diseño actual?"));
+      await openPhoto(url, keepOnPhoto());
     } catch (e) {
       setError((e as Error).message);
     }
@@ -722,6 +727,31 @@ export default function ImageEditor({
     setNotice("Se aplicó tu marca. Puedes mover o cambiar cualquier elemento.");
     setTimeout(() => setNotice(""), 3000);
   }
+  async function applyTemplate(t: Template) {
+    const fmt = doc.format === "original" ? "1:1" : doc.format;
+    await loadTemplateFonts([...TEMPLATE_FONTS, brandFont(brand)]);
+    const next = buildTemplate(t, brand, fmt);
+    if (doc.photo) {
+      // Conserva la foto que ya estaba
+      next.photo = coverPhoto(doc.photo, next.width, next.height);
+      next.adjust = doc.adjust;
+      next.overlay = { ...next.overlay, on: true };
+    }
+    if (brand.logo) {
+      try {
+        const im = await loadImg(brand.logo);
+        images.current.set(brand.logo, im);
+        next.layers = [...next.layers, logoLayer(next, brand.logo, im.naturalWidth, im.naturalHeight)];
+      } catch {
+        /* sin logo */
+      }
+    }
+    setDoc(next);
+    setSelected(null);
+    setNotice("Plantilla lista: toca cualquier texto para cambiarlo, o usa «Abrir foto» para poner tu foto detrás.");
+    setTimeout(() => setNotice(""), 4000);
+  }
+
   const paintSelected = (c: string) => {
     const l = doc.layers.find((x) => x.id === selected);
     if (!l) return setDoc((d) => ({ ...d, background: c }));
@@ -953,7 +983,7 @@ export default function ImageEditor({
         <div className="picker" style={{ marginBottom: 10 }}>
           {galleryImages.length === 0 && <span className="muted">Tu galería está vacía.</span>}
           {galleryImages.slice(0, 30).map((g, k) => (
-            <img key={g.url + k} src={g.url} alt={g.prompt} onClick={async () => (openPhoto(await toDataUrl(g.url)), setShowGallery(false))} />
+            <img key={g.url + k} src={g.url} alt={g.prompt} onClick={async () => (openPhoto(await toDataUrl(g.url), keepOnPhoto()), setShowGallery(false))} />
           ))}
         </div>
       )}
@@ -1048,6 +1078,7 @@ export default function ImageEditor({
       <div className="tool-tabs">
         {(
           [
+            ["plantillas", "🧩 Plantillas"],
             ["marca", "⭐ Mi marca"],
             ["filtros", "🎨 Filtros"],
             ["ajustes", "🎚️ Ajustes"],
@@ -1066,6 +1097,8 @@ export default function ImageEditor({
       </div>
 
       <div className="tool-panel">
+        {tool === "plantillas" && <TemplatePicker brand={brand} format={doc.format === "original" ? "1:1" : doc.format} onPick={applyTemplate} />}
+
         {tool === "marca" && (
           <BrandPanel
             brand={brand}
@@ -1659,5 +1692,93 @@ function BrandPanel({
         </>
       )}
     </div>
+  );
+}
+
+// ---------- Plantillas ----------
+
+async function renderThumb(doc: Doc, width: number): Promise<string> {
+  const images = new Map<string, HTMLImageElement>();
+  const fonts = new Set(doc.layers.flatMap((l) => (l.type === "text" || l.type === "badge" ? [l.fontFamily] : [])));
+  if (document.fonts) await Promise.all([...fonts].flatMap((f) => [document.fonts.load(`40px "${f}"`), document.fonts.load(`bold 40px "${f}"`)])).catch(() => {});
+  const s = width / doc.width;
+  const holder = document.createElement("div");
+  const stage = new Konva.Stage({ container: holder, width: Math.round(doc.width * s), height: Math.round(doc.height * s), scale: { x: s, y: s } });
+  const layer = new Konva.Layer();
+  stage.add(layer);
+  layer.add(new Konva.Rect({ width: doc.width, height: doc.height, fill: doc.background }));
+  if (doc.overlay.on)
+    layer.add(
+      new Konva.Rect({
+        width: doc.width,
+        height: doc.height,
+        fillLinearGradientStartPoint: { x: 0, y: doc.height * 0.35 },
+        fillLinearGradientEndPoint: { x: 0, y: doc.height },
+        fillLinearGradientColorStops: [0, "rgba(0,0,0,0)", 1, hexA(doc.overlay.color, doc.overlay.strength / 100)],
+      })
+    );
+  doc.layers.forEach((l) => {
+    const n = buildNode(l, images);
+    if (n) layer.add(n);
+  });
+  if (doc.frame.on) {
+    const w = doc.frame.width;
+    layer.add(new Konva.Rect({ x: w / 2, y: w / 2, width: doc.width - w, height: doc.height - w, stroke: doc.frame.color, strokeWidth: w }));
+  }
+  layer.draw();
+  const url = stage.toDataURL({ pixelRatio: 1, mimeType: "image/jpeg", quality: 0.85 });
+  stage.destroy();
+  return url;
+}
+
+function TemplatePicker({ brand, format, onPick }: { brand: Brand; format: FormatId; onPick: (t: Template) => void }) {
+  const [giro, setGiro] = usePersistentState<Giro | "todas">("editor:giro", "todas");
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  const key = JSON.stringify([brand.palette, brand.font, brand.name, brand.contact, format]);
+  useEffect(() => {
+    let cancelled = false;
+    setThumbs({});
+    (async () => {
+      await loadTemplateFonts([...TEMPLATE_FONTS, brandFont(brand)]);
+      for (const t of TEMPLATES) {
+        if (cancelled) return;
+        const url = await renderThumb(buildTemplate(t, brand, format), 240).catch(() => "");
+        if (cancelled) return;
+        setThumbs((m) => ({ ...m, [t.id]: url }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  const list = TEMPLATES.filter((t) => giro === "todas" || t.giro === giro);
+  const ratio = FORMATS.find((f) => f.id === format)?.size;
+  return (
+    <>
+      <p className="muted" style={{ marginTop: 0 }}>
+        Elige un diseño: sale con tus colores, tu letra y tu logo de Mi marca. Luego cambia los textos y pon tu foto.
+      </p>
+      <div className="seg giro-seg">
+        <button className={giro === "todas" ? "active" : ""} onClick={() => setGiro("todas")}>
+          Todas
+        </button>
+        {GIROS.map((g) => (
+          <button key={g.id} className={giro === g.id ? "active" : ""} onClick={() => setGiro(g.id)}>
+            {g.label}
+          </button>
+        ))}
+      </div>
+      <div className="template-grid">
+        {list.map((t) => (
+          <button key={t.id} className="template-card" onClick={() => onPick(t)}>
+            <span className="template-thumb" style={{ aspectRatio: ratio ? `${ratio[0]} / ${ratio[1]}` : "1" }}>
+              {thumbs[t.id] ? <img src={thumbs[t.id]} alt="" /> : <span className="muted">…</span>}
+            </span>
+            <span className="template-name">{t.name}</span>
+          </button>
+        ))}
+      </div>
+    </>
   );
 }

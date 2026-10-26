@@ -42,7 +42,11 @@ export function normalizeBrand(raw: Partial<Brand> | null | undefined, legacy?: 
 export const hasVisualBrand = (b: Brand) => !!(b.logo || b.palette.length || b.font || b.name);
 
 export const brandAccent = (b: Brand) => b.palette[0] || DEFAULT_PALETTE[0];
-export const brandDark = (b: Brand) => b.palette.find((c) => luminance(c) < 0.25) || DEFAULT_PALETTE[1];
+export const brandDark = (b: Brand) => {
+  // El color más oscuro que no sea el principal (para fondos y franjas)
+  const others = b.palette.slice(1).filter((c) => luminance(c) < 0.12).sort((x, y) => luminance(x) - luminance(y));
+  return others[0] || DEFAULT_PALETTE[1];
+};
 
 // Texto legible (blanco o casi negro) sobre un color de fondo.
 export function textOn(bg: string) {
