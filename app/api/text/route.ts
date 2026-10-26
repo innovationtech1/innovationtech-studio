@@ -140,7 +140,7 @@ export async function POST(req: Request) {
         "Escribe en el idioma del pedido (por defecto, español). Sin hashtags ni emojis.",
         brandBlock,
       ].join("\n");
-      const text = await generate(req, provider, model, { system, user: `Tema del reel: ${prompt}`, maxTokens: 1100 });
+      const text = await generate(req, provider, model, { system, user: `Tema del reel: ${prompt}`, maxTokens: 400 + n * 170 });
       const json = parseJson(text);
       const captions = Array.isArray(json?.captions) ? (json!.captions as unknown[]).map(String).slice(0, n) : [];
       if (!captions.length) return jsonError("La IA no devolvió los textos en el formato esperado. Intenta de nuevo.", 502);

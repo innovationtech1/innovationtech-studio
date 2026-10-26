@@ -206,12 +206,19 @@ export default function ReelStudio({
       const data = await writeWithAi();
       if (!data) return;
       // Solo crea imágenes para las escenas que aún no tienen una.
-      const jobs = scenes.map((sc, i) =>
-        sc.image ? Promise.resolve() : makeImage(i, data.imagePrompts?.[i] || `${topic}, ${data.captions[i] || ""}`)
-      );
-      const results = await Promise.allSettled(jobs);
-      const failed = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
-      if (failed) throw failed.reason;
+      // De 3 en 3 para no saturar el límite gratuito de Cloudflare (hasta 8 escenas).
+      const pending = scenes.map((sc, i) => i).filter((i) => !scenes[i].image);
+      let failed: unknown = null;
+      for (let k = 0; k < pending.length; k += 3) {
+        const batch = pending.slice(k, k + 3);
+        setBusy(`Creando imágenes ${k + 1}–${k + batch.length} de ${pending.length}…`);
+        const results = await Promise.allSettled(
+          batch.map((i) => makeImage(i, data.imagePrompts?.[i] || `${topic}, ${data.captions[i] || ""}`))
+        );
+        const bad = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
+        if (bad && !failed) failed = bad.reason;
+      }
+      if (failed) throw failed;
     });
 
   const makeVoice = () =>
@@ -299,7 +306,7 @@ export default function ReelStudio({
         <div>
           <label>Escenas</label>
           <select value={count} onChange={(e) => resize(Number(e.target.value))}>
-            {[2, 3, 4, 5, 6].map((n) => (
+            {[2, 3, 4, 5, 6, 7, 8].map((n) => (
               <option key={n} value={n}>
                 {n} escenas
               </option>

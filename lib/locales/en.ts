@@ -781,6 +781,7 @@ export const EN_PATTERNS: [RegExp, string][] = [
   [/^Llegaste al límite diario del modo demo para (.+)\. (.*)$/, "You reached the demo mode daily limit. Set up your own free Cloudflare account in ⚙️ Settings to keep creating."],
   [/^(.*) Se guardaron las primeras (\d+) publicaciones\.$/, "$1 The first $2 posts were saved."],
   [/^Escena (\d+)$/, "Scene $1"],
+  [/^Creando imágenes (\d+)–(\d+) de (\d+)…$/, "Creating images $1–$2 of $3…"],
   [/^y letra (.+)$/, "and font $1"],
   [/^Sube hasta (\d+) foto\(s\) de tu producto, local o logo para crear imágenes a partir de ellas, o déjalo vacío para crear desde cero\.$/, "Upload up to $1 photo(s) of your product, shop or logo to create images from them, or leave it empty to create from scratch."],
   [/^Texto en pantalla (\d+)$/, "On-screen text $1"],
