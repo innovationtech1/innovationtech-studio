@@ -14,8 +14,8 @@ function detect(): Lang {
   } catch {
     /* sin almacenamiento */
   }
-  const nav = typeof navigator !== "undefined" ? navigator.language || "" : "";
-  return nav && !nav.toLowerCase().startsWith("es") ? "en" : "es";
+  // Español por defecto (muchos clientes hispanos usan celulares en inglés); inglés se elige en el menú.
+  return "es";
 }
 
 let current: Lang = typeof window === "undefined" ? "es" : detect();
