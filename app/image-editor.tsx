@@ -1,12 +1,13 @@
 "use client";
 
 import Konva from "konva";
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   Adjust,
   BADGES,
   BadgeLayer,
-  changeFormat,
+  adaptDoc,
+  Box,
   coverPhoto,
   Doc,
   EMOJIS,
@@ -699,6 +700,21 @@ export default function ImageEditor({
     }
   }
 
+  // Medidas reales de cada elemento en el lienzo (para adaptar el diseño a otros tamaños)
+  const measureBoxes = () => {
+    const m = new Map<string, Box>();
+    const stage = stageRef.current;
+    if (!stage) return m;
+    for (const l of docRef.current.layers) {
+      const node = stage.findOne(`#${l.id}`);
+      if (!node || !node.visible()) continue;
+      const r = node.getClientRect({ relativeTo: stage as unknown as Konva.Container });
+      m.set(l.id, { x: r.x, y: r.y, width: r.width, height: r.height });
+    }
+    return m;
+  };
+  const [sizesOpen, setSizesOpen] = useState(false);
+
   // ---------- Mi marca ----------
   async function addBrandLogo() {
     if (!brand.logo) return;
@@ -968,7 +984,7 @@ export default function ImageEditor({
         />
         <select
           value={doc.format}
-          onChange={(e) => setDoc((d) => changeFormat(d, e.target.value as FormatId))}
+          onChange={(e) => setDoc((d) => adaptDoc(d, e.target.value as FormatId, measureBoxes()))}
           aria-label="Formato"
           style={{ width: "auto", flex: "1 1 180px" }}
         >
@@ -1339,7 +1355,20 @@ export default function ImageEditor({
         <button className="btn ghost" onClick={saveGallery}>
           💾 Guardar en galería
         </button>
+        <button className={`btn ${sizesOpen ? "" : "ghost"}`} onClick={() => setSizesOpen((v) => !v)}>
+          📐 Todos los tamaños
+        </button>
       </div>
+      {sizesOpen && (
+        <SizesPanel
+          doc={doc}
+          measure={measureBoxes}
+          images={images.current}
+          outFmt={outFmt}
+          onOpen={(d) => (setDoc(d), setSelected(null), setSizesOpen(false), wrapRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }))}
+          onSave={(urls) => urls.forEach((u) => onSaveToGallery(u))}
+        />
+      )}
       {notice && <div className="ok">{notice}</div>}
       <p className="hint" style={{ marginTop: 10 }}>
         Toca un elemento para seleccionarlo; arrástralo para moverlo y usa las esquinas para cambiar tamaño o girar. Para mover la foto de fondo, tócala primero. Se exporta en {doc.width}×{doc.height} px.
@@ -1697,16 +1726,49 @@ function BrandPanel({
 
 // ---------- Plantillas ----------
 
-async function renderThumb(doc: Doc, width: number): Promise<string> {
-  const images = new Map<string, HTMLImageElement>();
+// Dibuja un diseño completo fuera de pantalla (foto con filtros, degradado, capas y marco).
+async function renderDocImage(
+  doc: Doc,
+  o: { width?: number; mime?: "image/png" | "image/jpeg"; quality?: number; images?: Map<string, HTMLImageElement> } = {}
+): Promise<string> {
+  const images = new Map(o.images || []);
+  const needed = [doc.photo?.src, ...doc.layers.map((l) => (l.type === "image" ? l.src : undefined))].filter((x): x is string => !!x && !images.has(x));
+  await Promise.all(needed.map((src) => loadImg(src).then((im) => images.set(src, im)).catch(() => {})));
   const fonts = new Set(doc.layers.flatMap((l) => (l.type === "text" || l.type === "badge" ? [l.fontFamily] : [])));
   if (document.fonts) await Promise.all([...fonts].flatMap((f) => [document.fonts.load(`40px "${f}"`), document.fonts.load(`bold 40px "${f}"`)])).catch(() => {});
-  const s = width / doc.width;
+  const s = o.width ? o.width / doc.width : 1;
   const holder = document.createElement("div");
   const stage = new Konva.Stage({ container: holder, width: Math.round(doc.width * s), height: Math.round(doc.height * s), scale: { x: s, y: s } });
   const layer = new Konva.Layer();
   stage.add(layer);
-  layer.add(new Konva.Rect({ width: doc.width, height: doc.height, fill: doc.background }));
+  layer.add(new Konva.Rect({ width: doc.width, height: doc.height, fill: doc.transparent ? "rgba(0,0,0,0)" : doc.background }));
+  const p = doc.photo;
+  const pim = p && images.get(p.src);
+  if (p && pim) {
+    const node = new Konva.Image({
+      image: pim,
+      x: p.cx,
+      y: p.cy,
+      offsetX: p.naturalW / 2,
+      offsetY: p.naturalH / 2,
+      width: p.naturalW,
+      height: p.naturalH,
+      scaleX: p.scale * (p.flipX ? -1 : 1),
+      scaleY: p.scale * (p.flipY ? -1 : 1),
+      rotation: p.rotation,
+    });
+    layer.add(node);
+    if (!isNeutral(doc.adjust) || doc.adjust.blur) {
+      node.cache({ pixelRatio: Math.min(1, 1600 / Math.max(p.naturalW, p.naturalH)) });
+      const filters: Konva.Filter[] = [];
+      if (!isNeutral(doc.adjust)) filters.push(makeColorFilter(doc.adjust) as unknown as Konva.Filter);
+      if (doc.adjust.blur) {
+        filters.push(Konva.Filters.Blur);
+        node.blurRadius(doc.adjust.blur);
+      }
+      node.filters(filters);
+    }
+  }
   if (doc.overlay.on)
     layer.add(
       new Konva.Rect({
@@ -1723,12 +1785,149 @@ async function renderThumb(doc: Doc, width: number): Promise<string> {
   });
   if (doc.frame.on) {
     const w = doc.frame.width;
-    layer.add(new Konva.Rect({ x: w / 2, y: w / 2, width: doc.width - w, height: doc.height - w, stroke: doc.frame.color, strokeWidth: w }));
+    layer.add(new Konva.Rect({ x: w / 2, y: w / 2, width: doc.width - w, height: doc.height - w, stroke: doc.frame.color, strokeWidth: w, cornerRadius: doc.frame.radius }));
   }
   layer.draw();
-  const url = stage.toDataURL({ pixelRatio: 1, mimeType: "image/jpeg", quality: 0.85 });
+  const url = stage.toDataURL({ pixelRatio: 1, mimeType: o.mime || "image/jpeg", quality: o.quality ?? 0.9 });
   stage.destroy();
   return url;
+}
+const renderThumb = (doc: Doc, width: number) => renderDocImage(doc, { width, quality: 0.85 });
+
+// ---------- Todos los tamaños ----------
+
+const SIZE_IDS: FormatId[] = ["1:1", "4:5", "9:16", "16:9", "2:3", "fb", "yt"];
+
+function SizesPanel({
+  doc,
+  measure,
+  images,
+  outFmt,
+  onOpen,
+  onSave,
+}: {
+  doc: Doc;
+  measure: () => Map<string, Box>;
+  images: Map<string, HTMLImageElement>;
+  outFmt: "png" | "jpg";
+  onOpen: (d: Doc) => void;
+  onSave: (urls: string[]) => void;
+}) {
+  const [picked, setPicked] = usePersistentState<FormatId[]>("editor:tamanos", ["1:1", "4:5", "9:16", "fb"]);
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState("");
+  const [done, setDone] = useState("");
+  const docs = useMemo(() => {
+    const boxes = measure();
+    return Object.fromEntries(SIZE_IDS.map((id) => [id, id === doc.format ? doc : adaptDoc(doc, id, boxes)])) as Record<FormatId, Doc>;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      for (const id of SIZE_IDS) {
+        const url = await renderDocImage(docs[id], { width: 260, quality: 0.8, images }).catch(() => "");
+        if (cancelled) return;
+        setThumbs((m) => ({ ...m, [id]: url }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [docs, images]);
+
+  const mime = outFmt === "png" ? "image/png" : "image/jpeg";
+  const ext = outFmt;
+  const name = (id: FormatId) => `innovationtech-${(FORMATS.find((f) => f.id === id)?.short || id).toLowerCase().replace(/[^a-z0-9]+/g, "-")}.${ext}`;
+  const renderAll = async () => {
+    const out: { id: FormatId; url: string }[] = [];
+    for (const id of picked) {
+      setBusy(`Preparando ${FORMATS.find((f) => f.id === id)?.short}…`);
+      out.push({ id, url: await renderDocImage(docs[id], { mime, quality: 0.92, images }) });
+    }
+    return out;
+  };
+  const downloadZip = async () => {
+    setDone("");
+    try {
+      const files = await renderAll();
+      setBusy("Armando el archivo .zip…");
+      const JSZip = (await import("jszip")).default;
+      const zip = new JSZip();
+      for (const f of files) zip.file(name(f.id), f.url.split(",")[1], { base64: true });
+      const blob = await zip.generateAsync({ type: "blob" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "innovationtech-todos-los-tamanos.zip";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      setDone(`Listo: ${files.length} tamaños en un .zip.`);
+    } catch {
+      setDone("No se pudo exportar: una de las imágenes viene de un enlace protegido. Descárgala y súbela desde tu dispositivo.");
+    } finally {
+      setBusy("");
+    }
+  };
+  const saveAll = async () => {
+    setDone("");
+    try {
+      const files = await renderAll();
+      onSave(files.map((f) => f.url));
+      setDone(`Guardados ${files.length} tamaños en tu galería.`);
+    } catch {
+      setDone("No se pudo guardar uno de los tamaños.");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  return (
+    <div className="sizes-panel">
+      <p className="muted" style={{ marginTop: 0 }}>
+        Tu diseño adaptado a cada red. Elige los tamaños que quieres y descárgalos juntos. Si alguno necesita un ajuste, ábrelo en el editor.
+      </p>
+      <div className="sizes-grid">
+        {SIZE_IDS.map((id) => {
+          const f = FORMATS.find((x) => x.id === id)!;
+          const on = picked.includes(id);
+          return (
+            <div key={id} className={`size-card ${on ? "on" : ""}`}>
+              <button
+                className="size-thumb"
+                style={{ aspectRatio: `${f.size![0]} / ${f.size![1]}` }}
+                onClick={() => setPicked(on ? picked.filter((x) => x !== id) : [...picked, id])}
+                aria-pressed={on}
+                title={on ? "Quitar de la descarga" : "Agregar a la descarga"}
+              >
+                {thumbs[id] ? <img src={thumbs[id]} alt="" /> : <span className="muted">…</span>}
+                <i aria-hidden>{on ? "✓" : ""}</i>
+              </button>
+              <div className="size-meta">
+                <strong>{f.short}</strong>
+                <span className="muted">
+                  {f.size![0]}×{f.size![1]}
+                </span>
+              </div>
+              {f.safe && <span className="muted size-note">Tu contenido queda en la zona que se ve en celular y computadora.</span>}
+              <button className="btn ghost small" onClick={() => onOpen(docs[id])}>
+                Ajustar en el editor
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      <div className="actions">
+        <button className="btn" disabled={!picked.length || !!busy} onClick={downloadZip}>
+          ⬇️ Descargar {picked.length} {picked.length === 1 ? "tamaño" : "tamaños"} (.zip)
+        </button>
+        <button className="btn ghost" disabled={!picked.length || !!busy} onClick={saveAll}>
+          💾 Guardar en galería
+        </button>
+      </div>
+      {busy && <div className="notice">{busy}</div>}
+      {done && <div className="ok">{done}</div>}
+    </div>
+  );
 }
 
 function TemplatePicker({ brand, format, onPick }: { brand: Brand; format: FormatId; onPick: (t: Template) => void }) {

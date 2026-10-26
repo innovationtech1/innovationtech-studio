@@ -482,6 +482,19 @@ h3.step { font-size: 18px; margin: 28px 0 8px; }
   .cal-list { display: flex; }
 }
 
+
+/* Todos los tamaños */
+.sizes-panel { margin-top: 16px; padding: 16px; border-radius: var(--radius-inner); background: var(--ink); border: 1px solid var(--line-soft); }
+.sizes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; align-items: end; margin-bottom: 6px; }
+.size-card { display: flex; flex-direction: column; gap: 6px; }
+.size-card .btn { margin-top: 0; }
+.size-thumb { position: relative; display: grid; place-items: center; width: 100%; padding: 0; border-radius: var(--radius-ctl); overflow: hidden; border: 1px solid var(--line); background: var(--deck); cursor: pointer; opacity: 0.55; transition: opacity 0.15s, border-color 0.15s; }
+.size-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.size-card.on .size-thumb { opacity: 1; border-color: var(--signal); box-shadow: inset 0 0 0 1px var(--signal); }
+.size-thumb i { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 13px; font-weight: 800; background: rgba(0,0,0,0.5); border: 1.5px solid #fff; color: #fff; }
+.size-card.on .size-thumb i { background: var(--signal); border-color: var(--signal); }
+.size-meta { display: flex; justify-content: space-between; gap: 6px; font-size: 13px; }
+
 /* ---------- Responsive ---------- */
 .bottom-nav { display: none; }
 
@@ -541,3 +554,4 @@ h3.step { font-size: 18px; margin: 28px 0 8px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+.size-note { font-size: 12px; line-height: 1.35; }

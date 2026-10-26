@@ -4,14 +4,18 @@ import { brandAccent, textOn } from "./brand";
 // Modelo del editor de imágenes: todo el diseño se describe con datos simples
 // (así se puede deshacer/rehacer y guardar el borrador en el navegador).
 
-export type FormatId = "original" | "1:1" | "4:5" | "9:16" | "16:9";
+export type FormatId = "original" | "1:1" | "4:5" | "9:16" | "16:9" | "2:3" | "fb" | "yt";
 
-export const FORMATS: { id: FormatId; label: string; size?: [number, number] }[] = [
+// safe: zona donde va el contenido importante (en YouTube el banner se recorta según la pantalla)
+export const FORMATS: { id: FormatId; label: string; short?: string; size?: [number, number]; safe?: [number, number] }[] = [
   { id: "original", label: "Original de la foto" },
-  { id: "1:1", label: "Cuadrado 1:1 · post", size: [1080, 1080] },
-  { id: "4:5", label: "Vertical 4:5 · feed", size: [1080, 1350] },
-  { id: "9:16", label: "Historia / Reel 9:16", size: [1080, 1920] },
-  { id: "16:9", label: "Horizontal 16:9 · YouTube, web", size: [1920, 1080] },
+  { id: "1:1", label: "Cuadrado 1:1 · post", short: "Post cuadrado", size: [1080, 1080] },
+  { id: "4:5", label: "Vertical 4:5 · feed", short: "Post vertical", size: [1080, 1350] },
+  { id: "9:16", label: "Historia / Reel 9:16", short: "Historia / Reel", size: [1080, 1920] },
+  { id: "16:9", label: "Horizontal 16:9 · YouTube, web", short: "Horizontal 16:9", size: [1920, 1080] },
+  { id: "2:3", label: "Pinterest 2:3", short: "Pinterest", size: [1000, 1500] },
+  { id: "fb", label: "Portada de Facebook", short: "Portada de Facebook", size: [1640, 624], safe: [1400, 560] },
+  { id: "yt", label: "Banner de YouTube", short: "Banner de YouTube", size: [2560, 1440], safe: [1546, 423] },
 ];
 
 export type Adjust = {
@@ -179,6 +183,48 @@ export function coverPhoto(p: Photo, W: number, H: number): Photo {
   const iw = swap ? p.naturalH : p.naturalW;
   const ih = swap ? p.naturalW : p.naturalH;
   return { ...p, cx: W / 2, cy: H / 2, scale: Math.max(W / iw, H / ih) };
+}
+
+export type Box = { x: number; y: number; width: number; height: number };
+
+// Adapta un diseño a otro tamaño: cada elemento conserva su posición relativa (por su centro)
+// y se escala por igual para que nada se deforme ni se salga. Las franjas que cruzan todo el
+// ancho o el alto se estiran para seguir cruzándolo. En el banner de YouTube todo va en la zona segura.
+export function adaptDoc(doc: Doc, format: FormatId, boxes: Map<string, Box>): Doc {
+  const f = FORMATS.find((x) => x.id === format);
+  const [W, H] = sizeFor(format, doc.photo);
+  const [Sw, Sh] = f?.safe || [W, H];
+  const x0 = (W - Sw) / 2;
+  const y0 = (H - Sh) / 2;
+  const W0 = doc.width;
+  const H0 = doc.height;
+  const k = Math.min(Sw / W0, Sh / H0);
+  const layers = doc.layers.map((l): Layer => {
+    const b = boxes.get(l.id);
+    if (!b) return { ...l, x: x0 + (l.x / W0) * Sw, y: y0 + (l.y / H0) * Sh, scaleX: l.scaleX * k, scaleY: l.scaleY * k };
+    const spanX = b.width >= W0 * 0.9;
+    const spanY = b.height >= H0 * 0.9;
+    const kx = spanX ? W / W0 : k;
+    const ky = spanY ? H / H0 : k;
+    const cx = spanX ? ((b.x + b.width / 2) / W0) * W : x0 + ((b.x + b.width / 2) / W0) * Sw;
+    const cy = spanY ? ((b.y + b.height / 2) / H0) * H : y0 + ((b.y + b.height / 2) / H0) * Sh;
+    return {
+      ...l,
+      x: cx - (b.width * kx) / 2 + (l.x - b.x) * kx,
+      y: cy - (b.height * ky) / 2 + (l.y - b.y) * ky,
+      scaleX: l.scaleX * kx,
+      scaleY: l.scaleY * ky,
+    };
+  });
+  return {
+    ...doc,
+    format,
+    width: W,
+    height: H,
+    photo: doc.photo ? coverPhoto(doc.photo, W, H) : null,
+    frame: { ...doc.frame, width: Math.max(4, Math.round(doc.frame.width * Math.min(W / W0, H / H0))) },
+    layers,
+  };
 }
 
 // Cambia de formato manteniendo las capas en posiciones proporcionales.
