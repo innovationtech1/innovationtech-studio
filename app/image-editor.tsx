@@ -1,7 +1,7 @@
 "use client";
 
 import Konva from "konva";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import {
   Adjust,
   BADGES,
@@ -31,7 +31,14 @@ import {
   TEXT_PRESETS,
   TextLayer,
   uid,
+  applyBrandToDoc,
+  brandContactLayer,
+  brandFont,
+  brandNameLayer,
+  logoLayer,
+  textFromCopy,
 } from "@/lib/editor-model";
+import { Brand, brandAccent, hasVisualBrand, textOn } from "@/lib/brand";
 import { usePersistentState } from "@/lib/persist";
 import { fileToResizedDataUrl } from "@/lib/resize";
 import type { Item } from "@/lib/types";
@@ -39,7 +46,12 @@ import BgRemover from "./bg-remover";
 import ShapeCrop from "./shape-crop";
 import { toDataUrl } from "@/lib/media-store";
 
-type Tool = "ajustes" | "filtros" | "texto" | "stickers" | "formas" | "imagen" | "marco" | "capas";
+type Tool = "marca" | "ajustes" | "filtros" | "texto" | "stickers" | "formas" | "imagen" | "marco" | "capas";
+
+export type EditorIncoming = { n: number; url?: string; text?: string; returnTo?: { scene: number } };
+
+// Colores de la marca para mostrarlos primero en todos los selectores de color
+const BrandColors = createContext<string[]>([]);
 
 // ---------- Carga de imágenes (siempre como archivo local para poder exportar) ----------
 
@@ -105,9 +117,20 @@ function buildNode(l: Layer, images: Map<string, HTMLImageElement>): Konva.Group
       shadowBlur: l.shadow ? l.fontSize * 0.25 : 0,
       shadowOffsetY: l.shadow ? l.fontSize * 0.04 : 0,
       shadowOpacity: l.shadow ? 0.6 : 0,
+      ...(l.width ? { width: l.width } : {}),
     });
+    if (l.width && l.bg) {
+      // Caja de color ajustada al texto (no a todo el ancho), respetando la alineación.
+      const natural = new Konva.Text({ text: t.text(), fontFamily: t.fontFamily(), fontSize: t.fontSize(), fontStyle: t.fontStyle(), letterSpacing: t.letterSpacing(), padding: t.padding(), lineHeight: 1.12 });
+      const nw = natural.width();
+      if (nw < l.width) {
+        t.width(nw);
+        t.x(l.align === "center" ? (l.width - nw) / 2 : l.align === "right" ? l.width - nw : 0);
+      }
+      natural.destroy();
+    }
     if (l.bg) {
-      g.add(new Konva.Rect({ width: t.width(), height: t.height(), fill: l.bg, cornerRadius: l.bgRadius }));
+      g.add(new Konva.Rect({ x: t.x(), width: t.width(), height: t.height(), fill: l.bg, cornerRadius: l.bgRadius }));
     }
     g.add(t);
   } else if (l.type === "badge") {
@@ -188,18 +211,25 @@ export default function ImageEditor({
   incoming,
   gallery,
   onSaveToGallery,
+  brand,
+  onOpenBrand,
+  onReturn,
 }: {
-  incoming: { url: string; n: number } | null;
+  incoming: EditorIncoming | null;
   gallery: Item[];
   onSaveToGallery: (dataUrl: string) => void;
+  brand: Brand;
+  onOpenBrand: () => void;
+  onReturn: (dataUrl: string, to: { scene: number }) => void;
 }) {
+  const [returnTo, setReturnTo] = useState<{ scene: number } | null>(null);
   const [doc, setDocRaw] = usePersistentState<Doc>("editor:doc", emptyDoc(), (d) => ({
     ...d,
     photo: d.photo && d.photo.src.startsWith("data:") ? null : d.photo,
     layers: d.layers.filter((l) => !(l.type === "image" && l.src.startsWith("data:"))),
   }));
   const [selected, setSelected] = useState<string | null>(null);
-  const [tool, setTool] = useState<Tool>("filtros");
+  const [tool, setTool] = useState<Tool>("marca");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [showGallery, setShowGallery] = useState(false);
@@ -319,10 +349,21 @@ export default function ImageEditor({
     [setDoc]
   );
 
-  // Imagen enviada desde otra pestaña («Editar»)
+  // Lo que llega desde otra pestaña: una foto («Editar»), un texto («Llevar al editor»)
+  // o la escena de un reel (al terminar se devuelve al reel).
+  const brandRef = useRef(brand);
+  brandRef.current = brand;
   useEffect(() => {
-    if (incoming) openPhoto(incoming.url);
-  }, [incoming, openPhoto]);
+    if (!incoming) return;
+    setReturnTo(incoming.returnTo || null);
+    if (incoming.url) openPhoto(incoming.url);
+    if (incoming.text) {
+      const l = textFromCopy(docRef.current, incoming.text, brandRef.current);
+      setDoc((d) => ({ ...d, layers: [...d.layers, l] }));
+      setSelected(l.id);
+      setTool("texto");
+    }
+  }, [incoming, openPhoto, setDoc]);
 
   // ---------- Escenario de Konva ----------
 
@@ -653,6 +694,49 @@ export default function ImageEditor({
     }
   }
 
+  // ---------- Mi marca ----------
+  async function addBrandLogo() {
+    if (!brand.logo) return;
+    try {
+      const im = await loadImg(brand.logo);
+      images.current.set(brand.logo, im);
+      const d = docRef.current;
+      const l = logoLayer(d, brand.logo, im.naturalWidth, im.naturalHeight);
+      setDoc((x) => ({ ...x, layers: [...x.layers.filter((y) => y.tag !== "logo"), l] }));
+      setSelected(l.id);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function applyBrand() {
+    setDoc((d) => applyBrandToDoc(d, brand));
+    if (brand.logo && !docRef.current.layers.some((l) => l.tag === "logo")) {
+      try {
+        const im = await loadImg(brand.logo);
+        images.current.set(brand.logo, im);
+        setDoc((x) => ({ ...x, layers: [...x.layers, logoLayer(x, brand.logo, im.naturalWidth, im.naturalHeight)] }), { history: false });
+      } catch {
+        /* sin logo */
+      }
+    }
+    setNotice("Se aplicó tu marca. Puedes mover o cambiar cualquier elemento.");
+    setTimeout(() => setNotice(""), 3000);
+  }
+  const paintSelected = (c: string) => {
+    const l = doc.layers.find((x) => x.id === selected);
+    if (!l) return setDoc((d) => ({ ...d, background: c }));
+    if (l.type === "text") updateLayer(l.id, l.bg ? { bg: c, fill: textOn(c) } : { fill: c });
+    else if (l.type === "badge") updateLayer(l.id, { fill: c, color: textOn(c) });
+    else if (l.type === "shape") updateLayer(l.id, l.fill ? { fill: c } : { stroke: c });
+  };
+  const backToReel = () => {
+    if (!returnTo) return;
+    const url = exportImage();
+    if (!url) return;
+    onReturn(url, returnTo);
+    setReturnTo(null);
+  };
+
   // JPG no admite transparencia: con fondo transparente siempre se exporta PNG.
   const outFmt: "png" | "jpg" = doc.transparent ? "png" : exportFmt;
 
@@ -751,7 +835,23 @@ export default function ImageEditor({
   // ---------- Interfaz ----------
 
   return (
+    <BrandColors.Provider value={brand.palette}>
     <section className="card editor">
+      {returnTo && (
+        <div className="return-bar">
+          <span>
+            Estás editando la <strong>escena {returnTo.scene + 1}</strong> de tu reel.
+          </span>
+          <div className="actions">
+            <button className="btn ghost small" onClick={() => setReturnTo(null)}>
+              Seguir aquí
+            </button>
+            <button className="btn small" onClick={backToReel}>
+              Usar en el reel
+            </button>
+          </div>
+        </div>
+      )}
       <div className="card-head">
         <h2>Editor de imágenes</h2>
         <div className="actions">
@@ -948,6 +1048,7 @@ export default function ImageEditor({
       <div className="tool-tabs">
         {(
           [
+            ["marca", "⭐ Mi marca"],
             ["filtros", "🎨 Filtros"],
             ["ajustes", "🎚️ Ajustes"],
             ["texto", "🔤 Texto"],
@@ -965,6 +1066,22 @@ export default function ImageEditor({
       </div>
 
       <div className="tool-panel">
+        {tool === "marca" && (
+          <BrandPanel
+            brand={brand}
+            selectedName={(() => { const l = doc.layers.find((x) => x.id === selected); return l ? layerLabel(l) : ""; })()}
+            onApply={applyBrand}
+            onLogo={addBrandLogo}
+            onName={() => addLayer(brandNameLayer(doc, brand))}
+            onContact={() => addLayer(brandContactLayer(doc, brand))}
+            onTitle={() =>
+              addLayer(newText(doc, { text: "TÍTULO", uppercase: true, fontFamily: brandFont(brand), fontSize: doc.width * 0.11, fill: "#ffffff", shadow: true, width: doc.width * 0.84, x: doc.width * 0.08, y: doc.height * 0.12 }))
+            }
+            onPaint={paintSelected}
+            onOpenBrand={onOpenBrand}
+          />
+        )}
+
         {tool === "filtros" && (
           <>
             {!doc.photo && <p className="muted">Abre una foto para aplicar filtros.</p>}
@@ -1195,6 +1312,7 @@ export default function ImageEditor({
         Toca un elemento para seleccionarlo; arrástralo para moverlo y usa las esquinas para cambiar tamaño o girar. Para mover la foto de fondo, tócala primero. Se exporta en {doc.width}×{doc.height} px.
       </p>
     </section>
+    </BrandColors.Provider>
   );
 }
 
@@ -1427,12 +1545,15 @@ function Slider({
 }
 
 function ColorRow({ value, onChange }: { value: string; onChange: (c: string) => void }) {
+  const mine = useContext(BrandColors).map((c) => c.toLowerCase());
+  const all = [...mine, ...SWATCHES.filter((c) => !mine.includes(c))];
   return (
     <div className="swatches">
-      {SWATCHES.map((c) => (
+      {mine.length > 0 && <span className="swatch-label">Mi marca</span>}
+      {all.map((c, i) => (
         <button
           key={c}
-          className={value.toLowerCase() === c ? "active" : ""}
+          className={`${value.toLowerCase() === c ? "active" : ""} ${i === mine.length - 1 ? "last-brand" : ""}`}
           style={{ background: c }}
           onClick={() => onChange(c)}
           aria-label={`Color ${c}`}
@@ -1464,4 +1585,79 @@ function hexA(hex: string, a: number) {
   const m = hex.replace("#", "");
   const n = parseInt(m.length === 3 ? m.split("").map((c) => c + c).join("") : m, 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+// ---------- Panel «Mi marca» del editor ----------
+
+function BrandPanel({
+  brand,
+  selectedName,
+  onApply,
+  onLogo,
+  onName,
+  onContact,
+  onTitle,
+  onPaint,
+  onOpenBrand,
+}: {
+  brand: Brand;
+  selectedName: string;
+  onApply: () => void;
+  onLogo: () => void;
+  onName: () => void;
+  onContact: () => void;
+  onTitle: () => void;
+  onPaint: (c: string) => void;
+  onOpenBrand: () => void;
+}) {
+  if (!hasVisualBrand(brand))
+    return (
+      <div className="brand-empty">
+        <p>Guarda tu logo, tus colores y tu letra en <strong>Mi marca</strong> y aquí los aplicas con un toque.</p>
+        <button className="btn small" onClick={onOpenBrand}>
+          Configurar mi marca
+        </button>
+      </div>
+    );
+  const accent = brandAccent(brand);
+  return (
+    <div className="brand-panel">
+      <div className="brand-strip">
+        {brand.logo ? <img src={brand.logo} alt="Logo" /> : <span className="brand-initial" style={{ background: accent, color: textOn(accent) }}>{(brand.name || "M")[0]}</span>}
+        <div>
+          <strong style={{ fontFamily: `${brandFont(brand)}, sans-serif` }}>{brand.name || "Mi marca"}</strong>
+          <div className="brand-dots">
+            {brand.palette.map((c) => (
+              <i key={c} style={{ background: c }} />
+            ))}
+          </div>
+        </div>
+        <button className="btn ghost small" onClick={onOpenBrand}>
+          Editar marca
+        </button>
+      </div>
+      <button className="btn" onClick={onApply} style={{ marginTop: 12 }}>
+        ✨ Aplicar mi marca al diseño
+      </button>
+      <p className="muted">Pone tus colores y tu letra en el diseño y agrega tu logo, nombre y contacto.</p>
+      <div className="presets" style={{ marginTop: 10 }}>
+        <button onClick={onLogo} disabled={!brand.logo}>
+          + Logo
+        </button>
+        <button onClick={onName}>+ Nombre</button>
+        <button onClick={onContact}>+ Contacto</button>
+        <button onClick={onTitle}>+ Título con mi letra</button>
+      </div>
+      {brand.palette.length > 0 && (
+        <>
+          <label>Pintar {selectedName ? `«${selectedName}»` : "el fondo"} con un color de mi marca</label>
+          <div className="swatches">
+            {brand.palette.map((c) => (
+              <button key={c} style={{ background: c }} onClick={() => onPaint(c)} aria-label={`Color ${c}`} />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
 }

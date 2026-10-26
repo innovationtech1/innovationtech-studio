@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { Brand, brandContext, brandVisual, emptyBrand } from "@/lib/brand";
+import { Brand, brandAccent, brandContext, brandVisual, emptyBrand, normalizeBrand, textOn } from "@/lib/brand";
+import { FONTS } from "@/lib/editor-model";
+import type { EditorIncoming } from "./image-editor";
 import { friendlyError } from "@/lib/errors";
 import { fileToResizedDataUrl } from "@/lib/resize";
 import { usePersistentState } from "@/lib/persist";
@@ -63,12 +65,34 @@ function loadList<T>(key: string): T[] {
     return [];
   }
 }
+function rawLoad(key: string): string {
+  try {
+    return localStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+}
+
 function save(key: string, value: unknown) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {
     /* almacenamiento no disponible */
   }
+}
+
+// Frases cortas del texto generado que sirven para poner sobre una imagen.
+function phrases(text: string): string[] {
+  const out: string[] = [];
+  for (const raw of text.split(/\n+/)) {
+    if (/^\s*(#[^\s#]+[\s,]*)+$/.test(raw)) continue; // solo hashtags
+    let l = raw.replace(/\*+|^#+\s+|^[-•]\s*|^\d+[.)]\s*/g, "").trim();
+    if (!l || /^PROMPT DE/i.test(l)) continue;
+    l = l.replace(/^[A-ZÁÉÍÓÚÑ ]{3,30}:\s*/, "").trim(); // «GANCHO: …» → «…»
+    if (l.length < 4 || l.length > 140 || /:$/.test(l)) continue;
+    if (!out.includes(l)) out.push(l);
+  }
+  return out.slice(0, 12);
 }
 
 function extract(text: string, label: string): string {
@@ -88,12 +112,18 @@ export default function Home() {
   // Imagen enviada con «Animar en video» desde la pestaña Imágenes
   const [handoff, setHandoff] = useState<{ url: string; n: number } | null>(null);
   // Imagen enviada al editor con «Editar»
-  const [toEditor, setToEditor] = useState<{ url: string; n: number } | null>(null);
-  const openInEditor = async (src: string) => {
+  const [toEditor, setToEditor] = useState<EditorIncoming | null>(null);
+  const openInEditor = async (src: string, returnTo?: { scene: number }) => {
     const url = await toDataUrl(src); // los enlaces locales temporales se convierten para el borrador
-    setToEditor((h) => ({ url, n: (h?.n || 0) + 1 }));
+    setToEditor((h) => ({ url, returnTo, n: (h?.n || 0) + 1 }));
     setTab("editor");
   };
+  const textToEditor = (text: string) => {
+    setToEditor((h) => ({ text, n: (h?.n || 0) + 1 }));
+    setTab("editor");
+  };
+  // Escena editada que vuelve al reel
+  const [sceneUpdate, setSceneUpdate] = useState<{ scene: number; url: string; n: number } | null>(null);
   const [ready, setReady] = useState(false);
   const [videoMode, setVideoMode] = usePersistentState<"reel" | "editor" | "ia">("video:mode", "reel");
   const { status: demo } = useDemo();
@@ -102,7 +132,12 @@ export default function Home() {
 
   useEffect(() => {
     setSettings(load("its-settings", defaultSettings));
-    setBrand(load("its-brand", emptyBrand));
+    setBrand(
+      normalizeBrand(load<Partial<Brand>>("its-brand", emptyBrand), {
+        logo: rawLoad("its-logo"),
+        accent: rawLoad("its-accent"),
+      })
+    );
     // Accesos directos de la app instalada (?tab=imagen, etc.)
     const t = new URLSearchParams(window.location.search).get("tab");
     if (t && ["texto", "imagen", "editor", "video", "galeria", "marca", "config"].includes(t)) setTimeout(() => setTab(t as Tab), 0);
@@ -204,6 +239,7 @@ export default function Home() {
           settings={settings}
           brand={brand}
           onUseImage={(p) => (setImagePrompt(p), setTab("imagen"))}
+          onToEditor={textToEditor}
           onUseVideo={(p) => (setVideoPrompt(p), setVideoMode("ia"), setTab("video"))}
         />
       </div>
@@ -226,6 +262,13 @@ export default function Home() {
       <div hidden={tab !== "editor"}>
         <ImageEditor
           incoming={toEditor}
+          brand={brand}
+          onOpenBrand={() => go("marca")}
+          onReturn={(url, to) => {
+            setSceneUpdate((u) => ({ scene: to.scene, url, n: (u?.n || 0) + 1 }));
+            setVideoMode("reel");
+            go("video");
+          }}
           gallery={gallery}
           onSaveToGallery={(url) =>
             addToGallery([{ kind: "imagen", url, prompt: "Diseño editado", date: new Date().toISOString() }])
@@ -252,6 +295,9 @@ export default function Home() {
               onImages={addToGallery}
               onVideo={(blob, prompt) => galleryStore.add([{ kind: "video", blob, prompt }])}
               handoff={handoff}
+              sceneUpdate={sceneUpdate}
+              onEditScene={(i, src) => openInEditor(src, { scene: i })}
+              onOpenBrand={() => go("marca")}
             />
           </div>
           <div hidden={videoMode !== "editor"}>
@@ -326,12 +372,15 @@ function TextStudio({
   brand,
   onUseImage,
   onUseVideo,
+  onToEditor,
 }: {
   settings: Settings;
   brand: Brand;
   onUseImage: (p: string) => void;
   onUseVideo: (p: string) => void;
+  onToEditor: (text: string) => void;
 }) {
+  const [picking, setPicking] = useState(false);
   const [prompt, setPrompt] = usePersistentState("texto:prompt", "");
   const [platform, setPlatform] = usePersistentState("texto:plataforma", "Instagram");
   const [result, setResult] = usePersistentState("texto:resultado", "");
@@ -418,7 +467,20 @@ function TextStudio({
                 Crear el video →
               </button>
             )}
+            <button className="btn ghost small" onClick={() => setPicking((v) => !v)}>
+              Llevar al editor
+            </button>
           </div>
+          {picking && (
+            <div className="phrase-pick">
+              <p className="muted">Elige la frase que quieres poner en tu diseño:</p>
+              {phrases(result).map((ph) => (
+                <button key={ph} onClick={() => (onToEditor(ph), setPicking(false))}>
+                  {ph}
+                </button>
+              ))}
+            </div>
+          )}
         </>
       )}
     </section>
@@ -1049,44 +1111,139 @@ function Gallery({
 function BrandKit({ brand, onSave }: { brand: Brand; onSave: (b: Brand) => void }) {
   const [b, setB] = useState(brand);
   const [saved, setSaved] = useState(false);
+  const [logoError, setLogoError] = useState("");
   useEffect(() => setB(brand), [brand]);
-  const f = (k: keyof Brand) => ({
+  const set = (patch: Partial<Brand>) => (setB((x) => ({ ...x, ...patch })), setSaved(false));
+  const f = (k: "name" | "industry" | "audience" | "tone" | "colors" | "extra" | "contact") => ({
     value: b[k],
-    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => (setB({ ...b, [k]: e.target.value }), setSaved(false)),
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => set({ [k]: e.target.value }),
   });
+  const accent = brandAccent(b);
+  const bg = b.palette[1] || "#0d1630";
+  const font = b.font || "Montserrat";
 
   return (
     <section className="card">
       <h2>Mi marca</h2>
-      <p className="hint">La IA usa estos datos en cada texto, imagen y video para que todo salga con tu identidad.</p>
-      <div className="row">
-        <div>
-          <label>Nombre del negocio</label>
-          <input {...f("name")} placeholder="Ej.: Tortas Tortuga" />
-        </div>
-        <div>
-          <label>Giro</label>
-          <input {...f("industry")} placeholder="Ej.: restaurante de tortas mexicanas" />
-        </div>
-      </div>
-      <div className="row">
-        <div>
-          <label>Público objetivo</label>
-          <input {...f("audience")} placeholder="Ej.: familias y estudiantes" />
-        </div>
-        <div>
+      <p className="hint">
+        Guarda tu identidad una sola vez. La IA la usa en cada texto e imagen, y en el editor y los reels la aplicas con un toque.
+      </p>
+
+      <div className="brand-kit">
+        <div className="brand-kit-form">
+          <h3 className="step" style={{ marginTop: 0 }}>Identidad visual</h3>
+          <label>Logo</label>
+          <div className="actions">
+            {b.logo && <img className="brand-logo-prev" src={b.logo} alt="Logo" />}
+            <label className="btn ghost small" style={{ margin: 0 }}>
+              {b.logo ? "Cambiar logo" : "Subir logo"}
+              <input
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file) return;
+                  setLogoError("");
+                  try {
+                    set({ logo: await fileToResizedDataUrl(file, 512, 0.9, true) });
+                  } catch {
+                    setLogoError("No se pudo leer esa imagen. Prueba con un PNG o JPG.");
+                  }
+                }}
+              />
+            </label>
+            {b.logo && (
+              <button className="btn ghost small" onClick={() => set({ logo: "" })}>
+                Quitar
+              </button>
+            )}
+          </div>
+          <p className="muted">Lo ideal es un PNG sin fondo. Si tu logo tiene fondo, quítalo en Imágenes → Quitar fondo.</p>
+          {logoError && <div className="error">{logoError}</div>}
+
+          <label>Colores (el primero es el principal)</label>
+          <div className="palette-edit">
+            {b.palette.map((c, i) => (
+              <div key={i} className="palette-chip">
+                <input
+                  type="color"
+                  value={c}
+                  aria-label={`Color ${i + 1}`}
+                  onChange={(e) => set({ palette: b.palette.map((x, k) => (k === i ? e.target.value : x)) })}
+                />
+                <button aria-label="Quitar color" onClick={() => set({ palette: b.palette.filter((_, k) => k !== i) })}>
+                  ×
+                </button>
+              </div>
+            ))}
+            {b.palette.length < 5 && (
+              <button className="palette-add" onClick={() => set({ palette: [...b.palette, b.palette.length ? "#ffffff" : "#e5243b"] })}>
+                + Color
+              </button>
+            )}
+          </div>
+
+          <label>Letra de títulos</label>
+          <div className="font-pick">
+            {FONTS.map((ft) => (
+              <button key={ft} className={font === ft ? "active" : ""} style={{ fontFamily: `${ft}, sans-serif` }} onClick={() => set({ font: ft })}>
+                {b.name || "Aa"}
+              </button>
+            ))}
+          </div>
+
+          <h3 className="step">Tu negocio</h3>
+          <div className="row">
+            <div>
+              <label>Nombre del negocio</label>
+              <input {...f("name")} placeholder="Ej.: Tortas Tortuga" />
+            </div>
+            <div>
+              <label>Contacto (teléfono, web o redes)</label>
+              <input {...f("contact")} placeholder="Ej.: (210) 555-0123 · @tortastortuga" />
+            </div>
+          </div>
+          <div className="row">
+            <div>
+              <label>Giro</label>
+              <input {...f("industry")} placeholder="Ej.: restaurante de tortas mexicanas" />
+            </div>
+            <div>
+              <label>Público objetivo</label>
+              <input {...f("audience")} placeholder="Ej.: familias y estudiantes" />
+            </div>
+          </div>
           <label>Tono de voz</label>
           <input {...f("tone")} placeholder="Ej.: divertido, cercano, con humor" />
+          <label>Colores en palabras (para la IA, opcional)</label>
+          <input {...f("colors")} placeholder="Ej.: dark navy blue and red" />
+          <label>Notas adicionales</label>
+          <textarea {...f("extra")} placeholder="Promociones fijas, palabras que sí o no usar, etc." />
         </div>
+
+        <aside className="brand-preview" aria-label="Vista previa">
+          <span className="muted">Vista previa</span>
+          <div className="brand-post" style={{ background: bg }}>
+            {b.logo && <img src={b.logo} alt="" />}
+            <div className="brand-post-title" style={{ fontFamily: `${font}, sans-serif`, color: textOn(bg) }}>
+              Promo de la semana
+            </div>
+            <div className="brand-post-tag" style={{ background: accent, color: textOn(accent), fontFamily: `${font}, sans-serif` }}>
+              {b.name || "Tu negocio"}
+            </div>
+            {b.contact && <div className="brand-post-contact" style={{ color: textOn(bg) }}>{b.contact}</div>}
+          </div>
+        </aside>
       </div>
-      <label>Colores de marca</label>
-      <input {...f("colors")} placeholder="Ej.: dark navy blue and red" />
-      <label>Notas adicionales</label>
-      <textarea {...f("extra")} placeholder="Promociones fijas, palabras que sí o no usar, etc." />
-      <button className="btn" onClick={() => (onSave(b), setSaved(true))}>
-        Guardar marca
-      </button>
-      {saved && <div className="ok">Marca guardada.</div>}
+
+      <div className="actions">
+        <button className="btn" onClick={() => (onSave(b), setSaved(true))}>
+          Guardar marca
+        </button>
+        {saved && <span className="ok" style={{ marginTop: 18 }}>Marca guardada.</span>}
+      </div>
     </section>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Brand, brandContext, brandVisual } from "@/lib/brand";
+import { Brand, brandAccent, brandContext, brandVisual } from "@/lib/brand";
 import { friendlyError } from "@/lib/errors";
 import { fileToResizedDataUrl } from "@/lib/resize";
 import { ReelFormat, renderReel, supportedRecording } from "@/lib/reel";
@@ -14,22 +14,6 @@ type Scene = { image: string; caption: string; prompt: string; loading?: boolean
 
 const emptyScene = (): Scene => ({ image: "", caption: "", prompt: "" });
 
-function load(key: string): string {
-  try {
-    return localStorage.getItem(key) || "";
-  } catch {
-    return "";
-  }
-}
-function save(key: string, value: string) {
-  try {
-    if (value) localStorage.setItem(key, value);
-    else localStorage.removeItem(key);
-  } catch {
-    /* sin almacenamiento */
-  }
-}
-
 export default function ReelStudio({
   settings,
   brand,
@@ -37,7 +21,13 @@ export default function ReelStudio({
   onImages,
   onVideo,
   handoff,
+  sceneUpdate,
+  onEditScene,
+  onOpenBrand,
 }: {
+  sceneUpdate: { scene: number; url: string; n: number } | null;
+  onEditScene: (i: number, src: string) => void;
+  onOpenBrand: () => void;
   onVideo: (blob: Blob, prompt: string) => void;
   settings: Settings;
   brand: Brand;
@@ -58,8 +48,11 @@ export default function ReelStudio({
   const [seconds, setSeconds] = usePersistentState("reel:segundos", 3);
   const [brandName, setBrandName] = usePersistentState("reel:negocio", brand.name);
   const [cta, setCta] = usePersistentState("reel:cta", "");
-  const [accent, setAccent] = useState("#e5243b");
-  const [logo, setLogo] = useState("");
+  // Color, logo y letra vienen de «Mi marca»; el color se puede cambiar solo para este reel.
+  const [accentOverride, setAccentOverride] = usePersistentState("reel:acento", "");
+  const accent = accentOverride || brandAccent(brand);
+  const logo = brand.logo;
+  const [useLogo, setUseLogo] = usePersistentState("reel:usar-logo", true);
   const [script, setScript] = usePersistentState("reel:guion", "");
   const [musicOn, setMusicOn] = usePersistentState("reel:musica", true);
   const [musicStyle, setMusicStyle] = usePersistentState<MusicStyleId>("reel:musica-estilo", "pop");
@@ -98,8 +91,6 @@ export default function ReelStudio({
   const preview = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    setLogo(load("its-logo"));
-    setAccent(load("its-accent") || "#e5243b");
     // Si la app se cerró mientras se creaba una imagen, quitamos el «Creando…».
     const t = setTimeout(() => setScenes((s) => s.map((sc) => (sc.loading ? { ...sc, loading: false } : sc))), 0);
     return () => clearTimeout(t);
@@ -115,6 +106,11 @@ export default function ReelStudio({
     });
   }, [handoff, setScenes]);
   useEffect(() => setBrandName((b) => b || brand.name), [brand.name]);
+  // Escena que vuelve del editor
+  useEffect(() => {
+    if (!sceneUpdate) return;
+    setScenes((s) => s.map((sc, j) => (j === sceneUpdate.scene ? { ...sc, image: sceneUpdate.url, loading: false } : sc)));
+  }, [sceneUpdate, setScenes]);
 
   const canRecord = typeof window === "undefined" ? true : supportedRecording() !== null;
   const galleryImages = gallery.filter((g) => g.kind === "imagen");
@@ -238,7 +234,8 @@ export default function ReelStudio({
         accent,
         brandName,
         cta,
-        logo: logo || undefined,
+        logo: (useLogo && logo) || undefined,
+        font: brand.font || undefined,
         voice: voice || undefined,
         music: musicOn ? { style: musicStyle, seed: musicSeed, volume: musicVolume } : null,
         onStatus: (m) => setBusy(m || "Grabando tu reel…"),
@@ -381,6 +378,11 @@ export default function ReelStudio({
                 Crear con IA
               </button>
               {sc.image && (
+                <button className="btn small" onClick={() => onEditScene(i, sc.image)}>
+                  Editar
+                </button>
+              )}
+              {sc.image && (
                 <button className="btn ghost small" onClick={() => setScene(i, { image: "" })}>
                   Quitar
                 </button>
@@ -415,44 +417,32 @@ export default function ReelStudio({
           <input value={cta} onChange={(e) => setCta(e.target.value)} placeholder="Ej.: Te esperamos este martes" />
         </div>
       </div>
-      <div className="row">
-        <div>
-          <label>Color de acento</label>
-          <input
-            type="color"
-            value={accent}
-            onChange={(e) => (setAccent(e.target.value), save("its-accent", e.target.value))}
-            style={{ height: 44, padding: 4 }}
-          />
-        </div>
-        <div>
-          <label>Logo (opcional, PNG con fondo transparente es ideal)</label>
-          <div className="actions" style={{ alignItems: "center" }}>
-            {logo && <img src={logo} alt="Logo" style={{ height: 44, borderRadius: 6 }} />}
-            <label className="btn ghost small" style={{ margin: 0 }}>
-              {logo ? "Cambiar" : "Subir logo"}
-              <input
-                type="file"
-                accept="image/*"
-                hidden
-                onChange={async (e) => {
-                  const f = e.target.files?.[0];
-                  e.target.value = "";
-                  if (!f) return;
-                  const url = await fileToResizedDataUrl(f, 512, 0.9, true).catch(() => "");
-                  setLogo(url);
-                  save("its-logo", url);
-                }}
-              />
+      <div className="reel-brand">
+        {logo ? <img src={logo} alt="Logo" /> : <span className="muted">Sin logo</span>}
+        <div className="reel-brand-info">
+          <strong>Tu marca en el reel</strong>
+          <span className="muted">
+            Color, logo{brand.font ? ` y letra ${brand.font}` : ""} de Mi marca.
+          </span>
+          {logo && (
+            <label className="check" style={{ margin: "4px 0 0" }}>
+              <input type="checkbox" checked={useLogo} onChange={(e) => setUseLogo(e.target.checked)} />
+              Poner el logo en el cierre
             </label>
-            {logo && (
-              <button className="btn ghost small" onClick={() => (setLogo(""), save("its-logo", ""))}>
-                Quitar
-              </button>
-            )}
-          </div>
+          )}
         </div>
+        <label className="reel-accent" title="Color de acento de este reel">
+          <input type="color" value={accent} onChange={(e) => setAccentOverride(e.target.value)} aria-label="Color de acento" />
+        </label>
+        <button className="btn ghost small" onClick={onOpenBrand}>
+          Editar mi marca
+        </button>
       </div>
+      {accentOverride && accentOverride !== brandAccent(brand) && (
+        <button className="btn ghost small" onClick={() => setAccentOverride("")}>
+          Usar el color de mi marca
+        </button>
+      )}
 
       {/* 4. Voz */}
       <h3 className="step">4. Voz en off (opcional, gratis con Cloudflare)</h3>

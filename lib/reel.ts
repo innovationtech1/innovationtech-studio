@@ -15,6 +15,7 @@ export type ReelOptions = {
   brandName: string;
   cta: string; // texto del cierre
   logo?: string; // data URL opcional
+  font?: string; // letra de la marca para los textos
   voice?: string; // data URL de audio opcional
   music?: { style: MusicStyleId; seed: number; volume: number } | null; // música gratis de fondo
   onStatus?: (msg: string) => void;
@@ -30,6 +31,7 @@ const SIZES: Record<ReelFormat, [number, number]> = {
   "16:9": [1280, 720],
 };
 const FPS = 30;
+let FONT_STACK = `system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
 const FADE = 0.6; // segundos de transición
 const OUTRO = 3; // segundos del cierre
 
@@ -122,7 +124,7 @@ function drawCaption(ctx: CanvasRenderingContext2D, text: string, W: number, H: 
   if (!text.trim()) return;
   const unit = Math.min(W, H);
   const size = Math.round(unit * 0.058);
-  ctx.font = `800 ${size}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+  ctx.font = `800 ${size}px ${FONT_STACK}`;
   const pad = unit * 0.045;
   const maxW = W * 0.84 - pad * 2;
   const lines = wrap(ctx, text, maxW);
@@ -186,7 +188,7 @@ function drawOutro(
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   ctx.fillStyle = "#ffffff";
-  ctx.font = `800 ${Math.round(unit * 0.075)}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+  ctx.font = `800 ${Math.round(unit * 0.075)}px ${FONT_STACK}`;
   if (o.brandName) {
     wrap(ctx, o.brandName, W * 0.85).forEach((l) => {
       ctx.fillText(l, W / 2, y);
@@ -198,7 +200,7 @@ function drawOutro(
   y += unit * 0.05;
   if (o.cta) {
     ctx.fillStyle = "#dbe2f3";
-    ctx.font = `600 ${Math.round(unit * 0.05)}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+    ctx.font = `600 ${Math.round(unit * 0.05)}px ${FONT_STACK}`;
     wrap(ctx, o.cta, W * 0.82).forEach((l) => {
       ctx.fillText(l, W / 2, y);
       y += unit * 0.065;
@@ -208,6 +210,16 @@ function drawOutro(
 }
 
 export async function renderReel(o: ReelOptions): Promise<ReelResult> {
+  const SYSTEM = `system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+  FONT_STACK = SYSTEM;
+  if (o.font && typeof document !== "undefined") {
+    try {
+      await Promise.race([document.fonts.load(`800 48px "${o.font}"`), new Promise((r) => setTimeout(r, 2500))]);
+      if (document.fonts.check(`800 48px "${o.font}"`)) FONT_STACK = `"${o.font}", ${SYSTEM}`;
+    } catch {
+      /* se usa la letra del sistema */
+    }
+  }
   if (o.images.length === 0) throw new Error("Elige al menos una imagen para el reel.");
   const rec = supportedRecording();
   if (!rec) throw new Error("Este navegador no puede grabar video. Usa Chrome, Edge o Safari actualizados.");

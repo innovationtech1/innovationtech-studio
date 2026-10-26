@@ -1,3 +1,6 @@
+import type { Brand } from "./brand";
+import { brandAccent, textOn } from "./brand";
+
 // Modelo del editor de imágenes: todo el diseño se describe con datos simples
 // (así se puede deshacer/rehacer y guardar el borrador en el navegador).
 
@@ -64,6 +67,7 @@ type Base = {
   opacity: number;
   hidden?: boolean;
   locked?: boolean;
+  tag?: "logo" | "brand-name" | "brand-contact"; // capas que agrega «Mi marca»
 };
 
 export type TextLayer = Base & {
@@ -83,6 +87,7 @@ export type TextLayer = Base & {
   padding: number;
   letterSpacing: number;
   uppercase: boolean;
+  width?: number; // ancho de la caja de texto (el texto se acomoda en varias líneas)
 };
 
 export type BadgeShape = "circle" | "star" | "pill" | "ribbon";
@@ -442,3 +447,112 @@ export function newImage(doc: Doc, src: string, w: number, h: number): ImageLaye
 }
 
 export const SWATCHES = ["#ffffff", "#000000", "#0d1630", "#e5243b", "#ffd23f", "#32c48d", "#2f80ed", "#ff7a00", "#8e44ad", "#f5e6c8"];
+
+// ---------- Mi marca en el editor ----------
+
+
+export const brandFont = (b: Brand) => (b.font && FONTS.includes(b.font) ? b.font : "Montserrat");
+
+// Texto enviado desde «Textos»: caja centrada que se acomoda en varias líneas.
+export function textFromCopy(doc: Doc, text: string, b: Brand): TextLayer {
+  const clean = text.trim();
+  const short = clean.length <= 40;
+  const fontSize = doc.width * (short ? 0.085 : clean.length <= 90 ? 0.06 : 0.045);
+  return newText(doc, {
+    text: clean,
+    fontFamily: short ? brandFont(b) : "Montserrat",
+    bold: !short,
+    fontSize,
+    width: doc.width * 0.84,
+    x: doc.width * 0.08,
+    y: doc.height * 0.38,
+    align: "center",
+    shadow: true,
+  });
+}
+
+export function logoLayer(doc: Doc, src: string, w: number, h: number): ImageLayer {
+  const target = Math.min(doc.width, doc.height) * 0.2;
+  const r = target / Math.max(w, h);
+  const m = Math.min(doc.width, doc.height) * 0.045;
+  return { ...newImage(doc, src, w, h), x: doc.width - w * r - m, y: m, width: w * r, height: h * r, tag: "logo" };
+}
+
+export function brandNameLayer(doc: Doc, b: Brand): TextLayer {
+  const accent = brandAccent(b);
+  const fs = Math.min(doc.width, doc.height) * 0.05;
+  return newText(doc, {
+    tag: "brand-name",
+    text: b.name || "Mi negocio",
+    fontFamily: brandFont(b),
+    bold: true,
+    fontSize: fs,
+    fill: textOn(accent),
+    bg: accent,
+    padding: fs * 0.45,
+    bgRadius: fs * 0.35,
+    align: "center",
+    width: doc.width * 0.6,
+    x: doc.width * 0.2,
+    y: doc.height - fs * 2.2 - Math.min(doc.width, doc.height) * 0.05 - (b.contact ? fs * 1.4 : 0),
+  });
+}
+
+export function brandContactLayer(doc: Doc, b: Brand): TextLayer {
+  const fs = Math.min(doc.width, doc.height) * 0.032;
+  return newText(doc, {
+    tag: "brand-contact",
+    text: b.contact || "tu teléfono o web",
+    fontFamily: "Montserrat",
+    bold: true,
+    fontSize: fs,
+    fill: "#ffffff",
+    shadow: true,
+    align: "center",
+    width: doc.width * 0.84,
+    x: doc.width * 0.08,
+    y: doc.height - fs * 1.4 - Math.min(doc.width, doc.height) * 0.05,
+  });
+}
+
+// «Aplicar mi marca»: pasa los colores y la letra de la marca a lo que ya hay en el diseño
+// y agrega (o actualiza) el nombre y el contacto. El logo se agrega aparte porque hay que cargarlo.
+export function applyBrandToDoc(doc: Doc, b: Brand): Doc {
+  const accent = brandAccent(b);
+  const second = b.palette[1] || accent;
+  const font = brandFont(b);
+  let layers = doc.layers.map((l): Layer => {
+    if (l.tag) return l;
+    if (l.type === "badge") return { ...l, fill: accent, color: textOn(accent) };
+    if (l.type === "shape") return l.fill ? { ...l, fill: accent } : { ...l, stroke: accent };
+    if (l.type === "text") {
+      const isEmoji = /^\p{Extended_Pictographic}+$/u.test(l.text.trim());
+      if (isEmoji) return l;
+      const big = l.fontSize >= Math.min(doc.width, doc.height) * 0.07;
+      return {
+        ...l,
+        fontFamily: big ? font : l.fontFamily,
+        ...(l.bg ? { bg: accent, fill: textOn(accent) } : {}),
+      };
+    }
+    return l;
+  });
+  const has = (t: string) => layers.some((l) => l.tag === t);
+  if (b.name) {
+    layers = has("brand-name")
+      ? layers.map((l) => (l.tag === "brand-name" && l.type === "text" ? { ...l, text: b.name, fontFamily: font, bg: accent, fill: textOn(accent) } : l))
+      : [...layers, brandNameLayer(doc, b)];
+  }
+  if (b.contact) {
+    layers = has("brand-contact")
+      ? layers.map((l) => (l.tag === "brand-contact" && l.type === "text" ? { ...l, text: b.contact } : l))
+      : [...layers, brandContactLayer(doc, b)];
+  }
+  return {
+    ...doc,
+    background: doc.photo ? doc.background : b.palette.find((c) => c !== accent) || doc.background,
+    frame: { ...doc.frame, color: doc.frame.on ? second : accent },
+    overlay: doc.overlay,
+    layers,
+  };
+}
