@@ -10,6 +10,8 @@ import { fileToResizedDataUrl } from "@/lib/resize";
 import { usePersistentState } from "@/lib/persist";
 import { useGallery } from "@/lib/use-gallery";
 import { useDemo } from "@/lib/use-demo";
+import { getLang, installLangHeader, locale, setLang, startDomTranslation } from "@/lib/i18n";
+import { Bug, Languages } from "lucide-react";
 import { Bot, CalendarDays, Clapperboard, Download, Eraser, Film, FolderOpen, ImageIcon, ImagePlus, Images, Palette, Pencil, PenLine, Plug, RefreshCw, Rocket, Scissors, Settings as SettingsIcon, Shapes, Trash2, type LucideIcon, Wand2 } from "lucide-react";
 import { CheckList, CloudflareWizard, testCloudflare, Welcome } from "./setup-wizard";
 import { formatBytes, storageUsage, toDataUrl } from "@/lib/media-store";
@@ -172,6 +174,23 @@ export default function Home() {
     ["marca", Palette, "Mi marca", "Marca"],
     ["config", SettingsIcon, "Configuración", "Ajustes"],
   ];
+  const [lang, setLangState] = useState<"es" | "en">("es");
+  const [device, setDevice] = useState("");
+  useEffect(() => {
+    setLangState(getLang());
+    setDevice(navigator.userAgent);
+    installLangHeader();
+    return startDomTranslation();
+  }, []);
+  const reportUrl = () => {
+    const q = new URLSearchParams({
+      template: "reporte.yml",
+      seccion: tab,
+      dispositivo: device,
+      version: (process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || "local").slice(0, 7),
+    });
+    return `https://github.com/innovationtech1/innovationtech-studio/issues/new?${q}`;
+  };
   const go = (id: Tab) => {
     setTab(id);
     window.scrollTo({ top: 0 });
@@ -200,10 +219,20 @@ export default function Home() {
             </button>
           ))}
         </nav>
-        <button className={`status-chip ${estado.cls}`} onClick={() => go("config")} title="Ver configuración">
-          <i aria-hidden />
-          {estado.text}
-        </button>
+        <div className="rail-foot">
+          <button className={`status-chip ${estado.cls}`} onClick={() => go("config")} title="Ver configuración">
+            <i aria-hidden />
+            {estado.text}
+          </button>
+          <button className="lang-btn" onClick={() => setLang(lang === "es" ? "en" : "es")} title={lang === "es" ? "Switch to English" : "Cambiar a español"} data-no-translate>
+            <Languages size={16} aria-hidden />
+            <span>{lang === "es" ? "English" : "Español"}</span>
+          </button>
+          <a className="rail-link" href={reportUrl()} target="_blank" rel="noreferrer">
+            <Bug size={16} aria-hidden />
+            <span>Reportar un problema</span>
+          </a>
+        </div>
       </aside>
 
       <main className="shell">
@@ -378,6 +407,17 @@ export default function Home() {
 
         <footer>
           Proyecto open source de InnovationTECH, licencia MIT. Tus claves se guardan solo en tu navegador.
+          <span className="footer-links">
+            <a href="https://github.com/innovationtech1/innovationtech-studio" target="_blank" rel="noreferrer">
+              GitHub
+            </a>
+            <a href={reportUrl()} target="_blank" rel="noreferrer">
+              Reportar un problema
+            </a>
+            <a href="https://github.com/innovationtech1/innovationtech-studio/blob/main/CONTRIBUTING.md" target="_blank" rel="noreferrer">
+              Cómo contribuir
+            </a>
+          </span>
         </footer>
       </main>
 
@@ -1077,7 +1117,7 @@ function Gallery({
               )}
             </button>
             <div className="gallery-meta">
-              <span className="muted">{new Date(it.date).toLocaleDateString("es-MX", { day: "numeric", month: "short" })}</span>
+              <span className="muted">{new Date(it.date).toLocaleDateString(locale(), { day: "numeric", month: "short" })}</span>
               <div className="gallery-actions">
                 {it.kind === "imagen" && (
                   <button title="Editar" onClick={() => onEdit(it.url)}>

@@ -521,6 +521,26 @@ h3.step { font-size: 18px; margin: 28px 0 8px; }
 .pos-grid button { border-radius: 6px; border: 1px solid var(--line); background: var(--deck); cursor: pointer; }
 .pos-grid button.active { background: var(--signal); border-color: var(--signal); }
 
+
+/* Pie del menú lateral: estado, idioma y reportar */
+.rail-foot { margin-top: auto; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.rail-foot .status-chip { margin-top: 0; }
+.lang-btn, .rail-link { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 99px; border: 0; background: transparent; color: var(--fog); font: 500 13px var(--body); cursor: pointer; text-decoration: none; }
+.lang-btn:hover, .rail-link:hover { color: var(--paper); background: var(--deck); }
+.footer-links { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; }
+.footer-links a { color: var(--fog); }
+.footer-links a:hover { color: var(--paper); }
+@media (max-width: 1080px) and (min-width: 761px) {
+  .rail-foot { align-items: center; }
+  .lang-btn span, .rail-link span { display: none; }
+}
+@media (max-width: 760px) {
+  .rail-foot { flex-direction: row; align-items: center; margin-top: 0; gap: 4px; }
+  .rail-link { display: none; }
+  .lang-btn { padding: 6px 8px; font-size: 12px; }
+  .lang-btn span { display: none; }
+}
+
 /* ---------- Responsive ---------- */
 .bottom-nav { display: none; }
 

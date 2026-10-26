@@ -24,6 +24,7 @@ import { usePersistentState } from "@/lib/persist";
 import type { Item, Settings } from "@/lib/types";
 import { blobToBase64, cuesFromWords, toWav16k, type Word } from "@/lib/captions";
 import { friendlyError } from "@/lib/errors";
+import { tr } from "@/lib/i18n";
 
 import { Captions, ChevronLeft, Smile, ChevronRight, Clapperboard, Copy, Dices, Download, Film, FolderOpen, ImageIcon, Music, Pause, Play, Scissors, Trash2, Type, Upload, Video } from "lucide-react";
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -345,7 +346,7 @@ export default function VideoEditor({
   const addText = (style: TextOverlay["style"]) => {
     const t: TextOverlay = {
       id: uid(),
-      text: style === "titulo" ? "Tu título aquí" : style === "subtitulo" ? "Escribe tu mensaje" : "¡OFERTA!",
+      text: tr(style === "titulo" ? "Tu título aquí" : style === "subtitulo" ? "Escribe tu mensaje" : "¡OFERTA!"),
       start: Math.min(time, Math.max(0, total - 1)),
       end: Math.min(total || 3, time + 3),
       position: style === "titulo" ? "center" : style === "etiqueta" ? "top" : "bottom",

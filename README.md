@@ -1,5 +1,7 @@
 # InnovationTECH Studio
 
+> **English:** InnovationTECH Studio is a free, open source app to create marketing content with AI — copy, images, reels and videos — with your own brand. The interface is available in Spanish and English (switch it from the side menu). See [CONTRIBUTING.md](CONTRIBUTING.md) to help.
+
 Plataforma **open source** para crear contenido de marketing con inteligencia artificial: **textos, imágenes y videos**, todo en un mismo lugar y con la identidad de tu marca.
 
 Cada persona usa **sus propias claves de API** y paga solo lo que genera. El código es libre (licencia MIT): cualquiera puede usarlo, instalarlo y mejorarlo.
@@ -21,7 +23,12 @@ Cada persona usa **sus propias claves de API** y paga solo lo que genera. El có
 | ✂️ Editor de video | Une videos y fotos; recortar, dividir, reordenar, duplicar, velocidad (0.5x–2x), volumen, encuadre, 8 filtros, 6 transiciones, textos animados, formatos 9:16, 1:1 y 16:9; el proyecto se guarda en el dispositivo | Navegador (gratis) |
 | 🎵 Música gratis | La app **compone música original sin derechos de autor** a la medida del video, en 7 estilos (pop, lo-fi, corporativo, latino, electrónica, épico, acústico) con versiones ilimitadas; o sube tu propia canción. También en el Creador de Reels (baja sola cuando habla la voz) | Navegador (gratis) |
 | 🎬 Video con IA (opcional) | Clips generados por IA desde texto o animando una foto | Modelos de video en Replicate (de pago) |
-| 🎨 Mi marca | Guarda nombre, giro, público, tono y colores; se aplican en todo | — |
+| 🎨 Mi marca | Logo, paleta de colores, letra de títulos, contacto, giro, público y tono. La IA la usa en cada pedido y en el editor y los reels se aplica con un toque | — |
+| 🧩 Plantillas | 14 diseños por giro (comida, belleza, bienes raíces, tiendas, eventos, servicios) que salen con tu marca; los títulos se ajustan solos | Navegador |
+| 🗓️ Calendario de contenido | Plan de 30 días con la IA: tipo de publicación, frase para la imagen, texto listo y descripción de la foto; cada día se convierte en imagen, diseño o reel; descarga para Excel | Cloudflare Workers AI (gratis) o Claude |
+| 📐 Todos los tamaños | Un diseño adaptado a post, post vertical, historia, horizontal, Pinterest, portada de Facebook y banner de YouTube (con zona segura); descarga en .zip | Navegador |
+| 💬 Subtítulos y efectos | Subtítulos automáticos de tus videos (Whisper de Cloudflare, gratis), textos palabra por palabra o con la palabra resaltada, stickers animados; subtítulos de la voz en off en los reels | Navegador + Cloudflare Workers AI |
+| 🌎 Idiomas | Interfaz en español e inglés; la IA escribe en el idioma elegido | — |
 | 📁 Galería | Guarda **permanentemente** en tu dispositivo todas tus imágenes, diseños y reels (IndexedDB, cientos de MB); copia los archivos para que no caduquen; filtros, vista grande, editar, descargar y eliminar | Navegador |
 
 **Flujo 100% gratis:** en *Videos → Reel con mis imágenes*, escribe el tema y presiona **✨ Crear todo con IA**: la IA escribe los textos de cada escena, el cierre y el guion de voz, y crea las imágenes. Luego genera la voz y presiona **🎬 Crear reel**.
@@ -88,14 +95,27 @@ Los modelos usan el formato `dueño/nombre` o `dueño/nombre:version`. Si un mod
 
 ```
 app/
-  page.tsx              Interfaz completa (pestañas)
-  api/text/route.ts     Textos con Claude
-  api/image/route.ts    Imágenes con Replicate
-  api/video/route.ts    Inicia un video
-  api/video/[id]/       Consulta el estado del video
+  page.tsx                Pantalla principal: secciones, Textos, Imágenes, Galería, Mi marca, Ajustes
+  image-editor.tsx        Editor de imágenes (Konva): plantillas, marca, capas, todos los tamaños
+  bg-remover.tsx          Quitar fondo y borrador
+  shape-crop.tsx          Recortar con forma
+  reel-studio.tsx         Creador de reels
+  video-editor.tsx        Editor de video, stickers y subtítulos automáticos
+  content-calendar.tsx    Calendario de contenido
+  setup-wizard.tsx        Asistente para conectar Cloudflare y bienvenida
+  api/text/               Textos, guiones de reel y calendario (Cloudflare o Claude)
+  api/image/              Imágenes (Cloudflare o Replicate)
+  api/voice/              Voz en off (Cloudflare MeloTTS)
+  api/transcribe/         Subtítulos automáticos (Cloudflare Whisper)
+  api/video/              Video con IA (Replicate)
+  api/cf-test/, api/status/  «Probar conexión» y modo demo
 lib/
-  replicate.ts          Conexión con Replicate
-  brand.ts              Kit de marca
+  brand.ts                Kit de marca
+  editor-model.ts         Modelo del diseño, formatos y adaptación a otros tamaños
+  templates.ts            Plantillas por giro
+  captions.ts             Subtítulos palabra por palabra
+  video-engine.ts, reel.ts, music.ts   Video, reels y música generada
+  i18n.ts, locales/en.ts  Idiomas
 ```
 
 ## Uso responsable
@@ -104,13 +124,16 @@ lib/
 - Revisa los términos de uso comercial de cada modelo antes de vender el contenido.
 - Revisa siempre los textos antes de publicarlos.
 
-## Próximos pasos (ideas para contribuir)
+## Contribuir
 
-- Voz en off y música para los videos.
-- Unir varios clips con subtítulos y logo en un reel final.
-- Plantillas por industria (restaurantes, bienes raíces, salones, etc.).
-- Calendario de publicaciones.
-- Guardar la galería en la nube.
+¡Las contribuciones son bienvenidas! Lee [CONTRIBUTING.md](CONTRIBUTING.md). Para reportar un problema usa el botón **Reportar un problema** de la app o abre un *issue* en GitHub.
+
+Ideas abiertas:
+
+- Más plantillas y más idiomas.
+- Publicar directo en redes sociales.
+- Guardar la galería en la nube (opcional).
+- Más estilos de música y de subtítulos.
 
 ## Licencia
 

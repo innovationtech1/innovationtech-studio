@@ -5,6 +5,7 @@ import { Brand, brandContext } from "@/lib/brand";
 import { friendlyError } from "@/lib/errors";
 import { usePersistentState } from "@/lib/persist";
 import type { Settings } from "@/lib/types";
+import { locale } from "@/lib/i18n";
 
 // Calendario de contenido con IA: un plan de publicaciones para 30 días.
 // Cada día trae el tipo (post, reel o historia), el tema, una frase para la imagen,
@@ -28,8 +29,8 @@ const fromIso = (s: string) => {
   return new Date(y, m - 1, d);
 };
 const longDate = (s: string) =>
-  new Intl.DateTimeFormat("es-MX", { weekday: "long", day: "numeric", month: "long" }).format(fromIso(s));
-const shortDate = (s: string) => new Intl.DateTimeFormat("es-MX", { weekday: "short", day: "numeric", month: "short" }).format(fromIso(s));
+  new Intl.DateTimeFormat(locale(), { weekday: "long", day: "numeric", month: "long" }).format(fromIso(s));
+const shortDate = (s: string) => new Intl.DateTimeFormat(locale(), { weekday: "short", day: "numeric", month: "short" }).format(fromIso(s));
 
 function planDates(start: string, freq: Freq, total = 30): string[] {
   const days = FREQS.find((f) => f.id === freq)!.days;
@@ -250,7 +251,7 @@ export default function ContentCalendar({
                   onClick={() => setOpen(d)}
                 >
                   <span className="cal-num">
-                    {day.getDate() === 1 || d === grid[0] ? new Intl.DateTimeFormat("es-MX", { day: "numeric", month: "short" }).format(day) : day.getDate()}
+                    {day.getDate() === 1 || d === grid[0] ? new Intl.DateTimeFormat(locale(), { day: "numeric", month: "short" }).format(day) : day.getDate()}
                   </span>
                   {e && (
                     <>

@@ -75,7 +75,10 @@ function parseJson(text: string): Record<string, unknown> | null {
 export async function POST(req: Request) {
   const { prompt, platform, brand, model, provider, mode, scenes, dates, previous } = await req.json().catch(() => ({}));
   if (!prompt || typeof prompt !== "string") return jsonError("Escribe qué quieres crear.");
-  const brandBlock = brand ? `\nContexto de la marca:\n${brand}` : "";
+  const english = req.headers.get("x-lang") === "en";
+  const brandBlock =
+    (brand ? `\nContexto de la marca:\n${brand}` : "") +
+    (english ? "\nIMPORTANT: Write all the content in English (keep any required labels and JSON keys exactly as specified)." : "");
 
   try {
     // Modo calendario: un plan de publicaciones, una por fecha.

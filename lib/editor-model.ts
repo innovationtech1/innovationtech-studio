@@ -1,5 +1,6 @@
 import type { Brand } from "./brand";
 import { brandAccent, textOn } from "./brand";
+import { tr } from "./i18n";
 
 // Modelo del editor de imágenes: todo el diseño se describe con datos simples
 // (así se puede deshacer/rehacer y guardar el borrador en el navegador).
@@ -8,14 +9,14 @@ export type FormatId = "original" | "1:1" | "4:5" | "9:16" | "16:9" | "2:3" | "f
 
 // safe: zona donde va el contenido importante (en YouTube el banner se recorta según la pantalla)
 export const FORMATS: { id: FormatId; label: string; short?: string; size?: [number, number]; safe?: [number, number] }[] = [
-  { id: "original", label: "Original de la foto" },
-  { id: "1:1", label: "Cuadrado 1:1 · post", short: "Post cuadrado", size: [1080, 1080] },
-  { id: "4:5", label: "Vertical 4:5 · feed", short: "Post vertical", size: [1080, 1350] },
-  { id: "9:16", label: "Historia / Reel 9:16", short: "Historia / Reel", size: [1080, 1920] },
-  { id: "16:9", label: "Horizontal 16:9 · YouTube, web", short: "Horizontal 16:9", size: [1920, 1080] },
-  { id: "2:3", label: "Pinterest 2:3", short: "Pinterest", size: [1000, 1500] },
-  { id: "fb", label: "Portada de Facebook", short: "Portada de Facebook", size: [1640, 624], safe: [1400, 560] },
-  { id: "yt", label: "Banner de YouTube", short: "Banner de YouTube", size: [2560, 1440], safe: [1546, 423] },
+  { id: "original", label: tr("Original de la foto") },
+  { id: "1:1", label: tr("Cuadrado 1:1 · post"), short: tr("Post cuadrado"), size: [1080, 1080] },
+  { id: "4:5", label: tr("Vertical 4:5 · feed"), short: tr("Post vertical"), size: [1080, 1350] },
+  { id: "9:16", label: tr("Historia / Reel 9:16"), short: tr("Historia / Reel"), size: [1080, 1920] },
+  { id: "16:9", label: tr("Horizontal 16:9 · YouTube, web"), short: tr("Horizontal 16:9"), size: [1920, 1080] },
+  { id: "2:3", label: tr("Pinterest 2:3"), short: tr("Pinterest"), size: [1000, 1500] },
+  { id: "fb", label: tr("Portada de Facebook"), short: tr("Portada de Facebook"), size: [1640, 624], safe: [1400, 560] },
+  { id: "yt", label: tr("Banner de YouTube"), short: tr("Banner de YouTube"), size: [2560, 1440], safe: [1546, 423] },
 ];
 
 export type Adjust = {
@@ -47,18 +48,18 @@ export const NEUTRAL: Adjust = {
 };
 
 export const PRESETS: { name: string; adjust: Partial<Adjust> }[] = [
-  { name: "Original", adjust: {} },
-  { name: "Vívido", adjust: { saturation: 35, contrast: 15, brightness: 4 } },
-  { name: "Apetitoso", adjust: { saturation: 25, warmth: 22, contrast: 12, shadows: 10 } },
-  { name: "Cálido", adjust: { warmth: 35, saturation: 8 } },
-  { name: "Frío", adjust: { warmth: -32, tint: -5 } },
-  { name: "Dramático", adjust: { contrast: 45, saturation: -12, shadows: -15, vignette: 55 } },
-  { name: "Mate", adjust: { contrast: -22, brightness: 8, shadows: 25, saturation: -10 } },
-  { name: "Vintage", adjust: { warmth: 25, saturation: -30, contrast: -8, grain: 30, vignette: 40, mode: "none" } },
-  { name: "Noche", adjust: { brightness: -15, warmth: -25, saturation: -10, vignette: 45, contrast: 15 } },
-  { name: "B/N", adjust: { mode: "gray", contrast: 20 } },
-  { name: "B/N suave", adjust: { mode: "gray", contrast: -10, brightness: 6, grain: 15 } },
-  { name: "Sepia", adjust: { mode: "sepia", contrast: 5, vignette: 25 } },
+  { name: tr("Original"), adjust: {} },
+  { name: tr("Vívido"), adjust: { saturation: 35, contrast: 15, brightness: 4 } },
+  { name: tr("Apetitoso"), adjust: { saturation: 25, warmth: 22, contrast: 12, shadows: 10 } },
+  { name: tr("Cálido"), adjust: { warmth: 35, saturation: 8 } },
+  { name: tr("Frío"), adjust: { warmth: -32, tint: -5 } },
+  { name: tr("Dramático"), adjust: { contrast: 45, saturation: -12, shadows: -15, vignette: 55 } },
+  { name: tr("Mate"), adjust: { contrast: -22, brightness: 8, shadows: 25, saturation: -10 } },
+  { name: tr("Vintage"), adjust: { warmth: 25, saturation: -30, contrast: -8, grain: 30, vignette: 40, mode: "none" } },
+  { name: tr("Noche"), adjust: { brightness: -15, warmth: -25, saturation: -10, vignette: 45, contrast: 15 } },
+  { name: tr("B/N"), adjust: { mode: "gray", contrast: 20 } },
+  { name: tr("B/N suave"), adjust: { mode: "gray", contrast: -10, brightness: 6, grain: 15 } },
+  { name: tr("Sepia"), adjust: { mode: "sepia", contrast: 5, vignette: 25 } },
 ];
 
 type Base = {
@@ -380,11 +381,11 @@ export type TextPreset = { name: string; make: (doc: Doc) => Partial<TextLayer> 
 export const TEXT_PRESETS: TextPreset[] = [
   {
     name: "Título",
-    make: (d) => ({ text: "TÍTULO", fontFamily: "Anton", fontSize: d.width * 0.12, fill: "#ffffff", stroke: "#000000", strokeWidth: 0, shadow: true, uppercase: true }),
+    make: (d) => ({ text: tr("TÍTULO"), fontFamily: "Anton", fontSize: d.width * 0.12, fill: "#ffffff", stroke: "#000000", strokeWidth: 0, shadow: true, uppercase: true }),
   },
   {
     name: "Subtítulo",
-    make: (d) => ({ text: "Subtítulo de tu publicación", fontFamily: "Montserrat", bold: true, fontSize: d.width * 0.05, fill: "#ffffff", shadow: true }),
+    make: (d) => ({ text: tr("Subtítulo de tu publicación"), fontFamily: "Montserrat", bold: true, fontSize: d.width * 0.05, fill: "#ffffff", shadow: true }),
   },
   {
     name: "Precio",
@@ -392,15 +393,15 @@ export const TEXT_PRESETS: TextPreset[] = [
   },
   {
     name: "Etiqueta",
-    make: (d) => ({ text: "SOLO HOY", fontFamily: "Montserrat", bold: true, fontSize: d.width * 0.045, fill: "#0d1630", bg: "#ffd23f", padding: d.width * 0.018, bgRadius: d.width * 0.05, letterSpacing: 2 }),
+    make: (d) => ({ text: tr("SOLO HOY"), fontFamily: "Montserrat", bold: true, fontSize: d.width * 0.045, fill: "#0d1630", bg: "#ffd23f", padding: d.width * 0.018, bgRadius: d.width * 0.05, letterSpacing: 2 }),
   },
   {
     name: "Texto",
-    make: (d) => ({ text: "Escribe tu mensaje aquí", fontFamily: "Poppins", fontSize: d.width * 0.042, fill: "#ffffff" }),
+    make: (d) => ({ text: tr("Escribe tu mensaje aquí"), fontFamily: "Poppins", fontSize: d.width * 0.042, fill: "#ffffff" }),
   },
   {
     name: "Manuscrito",
-    make: (d) => ({ text: "¡Delicioso!", fontFamily: "Pacifico", fontSize: d.width * 0.08, fill: "#ffffff", shadow: true }),
+    make: (d) => ({ text: tr("¡Delicioso!"), fontFamily: "Pacifico", fontSize: d.width * 0.08, fill: "#ffffff", shadow: true }),
   },
 ];
 
@@ -409,7 +410,7 @@ export function newText(doc: Doc, p: Partial<TextLayer> = {}): TextLayer {
     id: uid(),
     type: "text",
     ...base(doc),
-    text: "Texto",
+    text: tr("Texto"),
     fontFamily: "Montserrat",
     fontSize: doc.width * 0.06,
     fill: "#ffffff",
@@ -429,14 +430,14 @@ export function newText(doc: Doc, p: Partial<TextLayer> = {}): TextLayer {
 }
 
 export const BADGES: { text: string; shape: BadgeShape; fill: string; color: string }[] = [
-  { text: "2x1", shape: "star", fill: "#e5243b", color: "#ffffff" },
-  { text: "OFERTA", shape: "circle", fill: "#ffd23f", color: "#0d1630" },
-  { text: "NUEVO", shape: "pill", fill: "#e5243b", color: "#ffffff" },
-  { text: "-50%", shape: "star", fill: "#ffd23f", color: "#e5243b" },
-  { text: "¡HOY!", shape: "ribbon", fill: "#e5243b", color: "#ffffff" },
-  { text: "GRATIS", shape: "circle", fill: "#32c48d", color: "#ffffff" },
-  { text: "TOP", shape: "star", fill: "#0d1630", color: "#ffd23f" },
-  { text: "PROMO", shape: "ribbon", fill: "#0d1630", color: "#ffffff" },
+  { text: tr("2x1"), shape: "star", fill: "#e5243b", color: "#ffffff" },
+  { text: tr("OFERTA"), shape: "circle", fill: "#ffd23f", color: "#0d1630" },
+  { text: tr("NUEVO"), shape: "pill", fill: "#e5243b", color: "#ffffff" },
+  { text: tr("-50%"), shape: "star", fill: "#ffd23f", color: "#e5243b" },
+  { text: tr("¡HOY!"), shape: "ribbon", fill: "#e5243b", color: "#ffffff" },
+  { text: tr("GRATIS"), shape: "circle", fill: "#32c48d", color: "#ffffff" },
+  { text: tr("TOP"), shape: "star", fill: "#0d1630", color: "#ffd23f" },
+  { text: tr("PROMO"), shape: "ribbon", fill: "#0d1630", color: "#ffffff" },
 ];
 
 export function newBadge(doc: Doc, p: Partial<BadgeLayer>): BadgeLayer {
@@ -530,7 +531,7 @@ export function brandNameLayer(doc: Doc, b: Brand): TextLayer {
   const fs = Math.min(doc.width, doc.height) * 0.05;
   return newText(doc, {
     tag: "brand-name",
-    text: b.name || "Mi negocio",
+    text: b.name || tr("Mi negocio"),
     fontFamily: brandFont(b),
     bold: true,
     fontSize: fs,
@@ -549,7 +550,7 @@ export function brandContactLayer(doc: Doc, b: Brand): TextLayer {
   const fs = Math.min(doc.width, doc.height) * 0.032;
   return newText(doc, {
     tag: "brand-contact",
-    text: b.contact || "tu teléfono o web",
+    text: b.contact || tr("tu teléfono o web"),
     fontFamily: "Montserrat",
     bold: true,
     fontSize: fs,

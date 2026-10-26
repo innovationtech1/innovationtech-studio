@@ -1,0 +1,35 @@
+name: Reportar un problema / Report a problem
+description: Algo no funciona como esperabas. / Something isn't working as expected.
+labels: ["error"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ¡Gracias por avisarnos! **No pegues aquí tus claves ni tokens.**
+        Thanks for letting us know! **Don't paste your keys or tokens here.**
+  - type: textarea
+    id: que-paso
+    attributes:
+      label: ¿Qué pasó? / What happened?
+      description: Describe el problema y, si apareció, copia el mensaje de error. / Describe the problem and copy the error message if one appeared.
+    validations:
+      required: true
+  - type: textarea
+    id: pasos
+    attributes:
+      label: ¿Cómo lo repetimos? / How can we reproduce it?
+      placeholder: |
+        1. Fui a Imágenes…
+        2. Toqué…
+  - type: input
+    id: seccion
+    attributes:
+      label: Sección / Section
+  - type: input
+    id: dispositivo
+    attributes:
+      label: Dispositivo y navegador / Device and browser
+  - type: input
+    id: version
+    attributes:
+      label: Versión / Version

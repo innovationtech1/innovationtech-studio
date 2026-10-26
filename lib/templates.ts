@@ -2,6 +2,7 @@
 // con los colores, la letra, el nombre y el contacto de «Mi marca».
 
 import { Brand, brandAccent, brandDark, luminance, textOn } from "./brand";
+import { tr } from "./i18n";
 import {
   BadgeLayer,
   brandContactLayer,
@@ -22,12 +23,12 @@ import {
 export type Giro = "comida" | "belleza" | "inmuebles" | "tienda" | "eventos" | "servicios";
 
 export const GIROS: { id: Giro; label: string }[] = [
-  { id: "comida", label: "Restaurantes y comida" },
-  { id: "belleza", label: "Barbería y belleza" },
-  { id: "inmuebles", label: "Bienes raíces" },
-  { id: "tienda", label: "Tiendas y ropa" },
-  { id: "eventos", label: "Eventos" },
-  { id: "servicios", label: "Servicios" },
+  { id: "comida", label: tr("Restaurantes y comida") },
+  { id: "belleza", label: tr("Barbería y belleza") },
+  { id: "inmuebles", label: tr("Bienes raíces") },
+  { id: "tienda", label: tr("Tiendas y ropa") },
+  { id: "eventos", label: tr("Eventos") },
+  { id: "servicios", label: tr("Servicios") },
 ];
 
 type Ctx = {
@@ -46,8 +47,9 @@ type Ctx = {
 export type Template = { id: string; giro: Giro; name: string; build: (c: Ctx) => { background: string; layers: Layer[]; overlay?: boolean; frame?: string } };
 
 // Atajos para escribir plantillas con medidas relativas
-const text = (c: Ctx, t: string, o: { y: number; size: number; x?: number; w?: number } & Partial<TextLayer>): TextLayer => {
+const text = (c: Ctx, t0: string, o: { y: number; size: number; x?: number; w?: number } & Partial<TextLayer>): TextLayer => {
   const { y, size, x = 0.08, w = 0.84, ...rest } = o;
+  const t = tr(t0);
   return newText(c.doc, { text: t, x: c.W * x, y: c.H * y, width: c.W * w, fontSize: c.u * size, align: "center", fontFamily: c.F, fill: "#ffffff", ...rest });
 };
 const rect = (c: Ctx, o: { x: number; y: number; w: number; h: number; fill: string; r?: number; rot?: number; opacity?: number }): ShapeLayer => ({
@@ -75,7 +77,7 @@ const circle = (c: Ctx, o: { cx: number; cy: number; d: number; fill: string; op
   locked: true,
 });
 const badge = (c: Ctx, t: string, o: { x: number; y: number; d: number; shape: BadgeLayer["shape"]; fill: string; color?: string; rot?: number }): BadgeLayer =>
-  newBadge(c.doc, { text: t, x: c.W * o.x, y: c.H * o.y, size: c.u * o.d, shape: o.shape, fill: o.fill, color: o.color || textOn(o.fill), rotation: o.rot ?? -10, fontFamily: c.F });
+  newBadge(c.doc, { text: tr(t), x: c.W * o.x, y: c.H * o.y, size: c.u * o.d, shape: o.shape, fill: o.fill, color: o.color || textOn(o.fill), rotation: o.rot ?? -10, fontFamily: c.F });
 const footer = (c: Ctx, light = false): Layer[] => {
   const n = brandNameLayer(c.doc, c.b);
   const ct = brandContactLayer(c.doc, c.b);
@@ -87,7 +89,7 @@ export const TEMPLATES: Template[] = [
   {
     id: "comida-2x1",
     giro: "comida",
-    name: "Promo 2x1",
+    name: tr("Promo 2x1"),
     build: (c) => ({
       background: c.A,
       layers: [
@@ -103,7 +105,7 @@ export const TEMPLATES: Template[] = [
   {
     id: "comida-nuevo",
     giro: "comida",
-    name: "Nuevo en el menú",
+    name: tr("Nuevo en el menú"),
     build: (c) => ({
       background: c.D,
       overlay: true,
@@ -119,7 +121,7 @@ export const TEMPLATES: Template[] = [
   {
     id: "comida-abierto",
     giro: "comida",
-    name: "Abierto hoy",
+    name: tr("Abierto hoy"),
     build: (c) => ({
       background: "#f5e6c8",
       layers: [
@@ -136,7 +138,7 @@ export const TEMPLATES: Template[] = [
   {
     id: "belleza-cita",
     giro: "belleza",
-    name: "Agenda tu cita",
+    name: tr("Agenda tu cita"),
     build: (c) => ({
       background: c.D,
       overlay: true,
@@ -153,7 +155,7 @@ export const TEMPLATES: Template[] = [
   {
     id: "belleza-descuento",
     giro: "belleza",
-    name: "Descuento primera visita",
+    name: tr("Descuento primera visita"),
     build: (c) => ({
       background: c.A,
       layers: [
@@ -169,7 +171,7 @@ export const TEMPLATES: Template[] = [
   {
     id: "inmuebles-venta",
     giro: "inmuebles",
-    name: "Casa en venta",
+    name: tr("Casa en venta"),
     build: (c) => ({
       background: "#ffffff",
       overlay: false,
@@ -185,7 +187,7 @@ export const TEMPLATES: Template[] = [
   {
     id: "inmuebles-open",
     giro: "inmuebles",
-    name: "Open house",
+    name: tr("Open house"),
     build: (c) => ({
       background: c.D,
       overlay: true,
@@ -203,7 +205,7 @@ export const TEMPLATES: Template[] = [
   {
     id: "tienda-coleccion",
     giro: "tienda",
-    name: "Nueva colección",
+    name: tr("Nueva colección"),
     build: (c) => ({
       background: "#f5e6c8",
       layers: [
@@ -217,7 +219,7 @@ export const TEMPLATES: Template[] = [
   {
     id: "tienda-liquidacion",
     giro: "tienda",
-    name: "Liquidación",
+    name: tr("Liquidación"),
     build: (c) => ({
       background: c.D,
       overlay: true,
@@ -235,7 +237,7 @@ export const TEMPLATES: Template[] = [
   {
     id: "eventos-inauguracion",
     giro: "eventos",
-    name: "Gran inauguración",
+    name: tr("Gran inauguración"),
     build: (c) => ({
       background: c.D,
       layers: [
@@ -252,7 +254,7 @@ export const TEMPLATES: Template[] = [
   {
     id: "eventos-invitacion",
     giro: "eventos",
-    name: "Te invitamos",
+    name: tr("Te invitamos"),
     build: (c) => ({
       background: c.A,
       layers: [
@@ -269,7 +271,7 @@ export const TEMPLATES: Template[] = [
   {
     id: "servicios-contratanos",
     giro: "servicios",
-    name: "Contrátanos",
+    name: tr("Contrátanos"),
     build: (c) => ({
       background: c.D,
       layers: [
@@ -284,7 +286,7 @@ export const TEMPLATES: Template[] = [
   {
     id: "servicios-aviso",
     giro: "servicios",
-    name: "Aviso importante",
+    name: tr("Aviso importante"),
     build: (c) => ({
       background: c.Y,
       layers: [
@@ -299,7 +301,7 @@ export const TEMPLATES: Template[] = [
   {
     id: "servicios-gracias",
     giro: "servicios",
-    name: "Gracias",
+    name: tr("Gracias"),
     build: (c) => ({
       background: c.A,
       layers: [

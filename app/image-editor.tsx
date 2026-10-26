@@ -1098,7 +1098,7 @@ export default function ImageEditor({
             ["plantillas", LayoutTemplate, "Plantillas"],
             ["marca", BadgeCheck, "Mi marca"],
             ["filtros", Aperture, "Filtros"],
-            ["ajustes", SlidersHorizontal, "Ajustes"],
+            ["ajustes", SlidersHorizontal, "Ajustar"],
             ["texto", Type, "Texto"],
             ["stickers", Tag, "Stickers"],
             ["formas", Square, "Formas"],

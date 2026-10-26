@@ -1,0 +1,15 @@
+name: Proponer una mejora / Suggest an improvement
+description: Una idea para que InnovationTECH Studio sea más útil. / An idea to make InnovationTECH Studio more useful.
+labels: ["mejora"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: ¿Qué te gustaría? / What would you like?
+      description: Cuéntanos qué quieres lograr, no solo la solución. / Tell us what you want to achieve, not only the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: por-que
+    attributes:
+      label: ¿Para qué te sirve? / Why would it help?
