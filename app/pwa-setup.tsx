@@ -1,5 +1,6 @@
 "use client";
 
+import { Share } from "lucide-react";
 import { useEffect, useState } from "react";
 
 // Registra el service worker y muestra un botón para instalar la app:
@@ -69,7 +70,7 @@ export default function PwaSetup() {
         <strong>Instala InnovationTECH Studio</strong>
         {showIosHelp ? (
           <span>
-            Toca <b>Compartir</b> <span aria-hidden>⬆️</span> en Safari y luego <b>Agregar a pantalla de inicio</b>.
+            Toca <b>Compartir</b> <Share size={15} aria-hidden style={{ verticalAlign: "-2px" }} /> en Safari y luego <b>Agregar a pantalla de inicio</b>.
           </span>
         ) : (
           <span>Ábrela como app desde tu pantalla de inicio o escritorio.</span>

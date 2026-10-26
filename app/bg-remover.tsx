@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ColorRemoval, hasTransparency, removeByColor, removeWithAI, trimTransparent } from "@/lib/bg-remove";
 
+import { Bot, Brush, Check, Eraser, Eye, Hand, Lasso, Pipette, Scissors, SquareDashed, Trash2, type LucideIcon, Undo2, WandSparkles } from "lucide-react";
 const MAX = 2048;
 const HISTORY = 8;
 
@@ -380,13 +381,13 @@ export default function BgRemover({
     onApply(c.toDataURL("image/png"), { w: img.width, h: img.height }, { trimmed: trim });
   };
 
-  const tools: [Tool, string, string][] = [
-    ["wand", "🪄", "Varita"],
-    ["erase", "🧽", "Borrador"],
-    ["restore", "♻️", "Restaurar"],
-    ["rect", "▭", "Rectángulo"],
-    ["lasso", "➰", "Lazo"],
-    ["pan", "✋", "Mover"],
+  const tools: [Tool, LucideIcon, string][] = [
+    ["wand", WandSparkles, "Varita"],
+    ["erase", Eraser, "Borrador"],
+    ["restore", Brush, "Restaurar"],
+    ["rect", SquareDashed, "Rectángulo"],
+    ["lasso", Lasso, "Lazo"],
+    ["pan", Hand, "Mover"],
   ];
   const help: Record<Tool, string> = {
     wand: "Toca un color para borrarlo (y todo lo parecido que esté conectado).",
@@ -406,7 +407,7 @@ export default function BgRemover({
   return (
     <div className="props bg-remover">
       <div className="card-head">
-        <strong>✂️ Quitar fondo y borrar · {title}</strong>
+        <strong>Quitar fondo y borrar · {title}</strong>
         <button className="btn ghost small" onClick={onClose}>
           Cancelar
         </button>
@@ -414,23 +415,25 @@ export default function BgRemover({
 
       <div className="seg">
         <button className={mode === "color" ? "active" : ""} onClick={() => setMode("color")} disabled={!!busy}>
-          🎯 Logos y fondos de un color
+          <Pipette size={16} aria-hidden /> Logos y fondos de un color
         </button>
         <button className={mode === "ia" ? "active" : ""} onClick={aiResult ? () => setMode("ia") : runAI} disabled={!!busy || !ready}>
-          🤖 Fotos con IA
+          <Bot size={16} aria-hidden /> Fotos con IA
         </button>
       </div>
 
       {/* Herramientas manuales */}
       <div className="erase-tools">
-        {tools.map(([id, icon, label]) => (
+        {tools.map(([id, Icon, label]) => (
           <button key={id} className={tool === id ? "active" : ""} onClick={() => (setTool(id), setSelection(null))} title={label}>
-            <span>{icon}</span>
+            <span>
+              <Icon size={18} aria-hidden />
+            </span>
             {label}
           </button>
         ))}
         <button onClick={undo} disabled={!history.current.length && !opts.seeds.length} title="Deshacer">
-          <span>↶</span>Deshacer
+          <span><Undo2 size={18} aria-hidden /></span>Deshacer
         </button>
       </div>
       <p className="hint" style={{ margin: "2px 0" }}>
@@ -457,10 +460,10 @@ export default function BgRemover({
       {selection && (
         <div className="actions sel-actions">
           <button className="btn small" onClick={() => applySelection(false)}>
-            🗑️ Borrar área
+            <Trash2 size={16} aria-hidden /> Borrar área
           </button>
           <button className="btn small" onClick={() => applySelection(true)}>
-            ✂️ Conservar solo el área
+            <Scissors size={16} aria-hidden /> Conservar solo el área
           </button>
           <button className="btn ghost small" onClick={() => setSelection(null)}>
             Cancelar selección
@@ -471,7 +474,7 @@ export default function BgRemover({
       <div className="row">
         <div className="slider">
           <div className="slider-head">
-            <span>🔍 Zoom</span>
+            <span>Zoom</span>
             <span>{zoom}x</span>
           </div>
           <input type="range" min={1} max={6} step={0.5} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} />
@@ -503,7 +506,7 @@ export default function BgRemover({
           onPointerUp={() => setView("result")}
           onPointerLeave={() => setView("result")}
         >
-          👁️ Mantén para ver el original
+          <Eye size={16} aria-hidden /> Mantén para ver el original
         </button>
         <button className="btn ghost small" onClick={resetManual} disabled={!ready}>
           Quitar retoques manuales
@@ -555,7 +558,7 @@ export default function BgRemover({
       </label>
       <div className="actions">
         <button className="btn" onClick={apply} disabled={!ready || !!busy || (mode === "ia" && !aiResult)}>
-          ✓ Aplicar
+          <Check size={16} aria-hidden /> Aplicar
         </button>
       </div>
     </div>

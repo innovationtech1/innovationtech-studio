@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ShapeId, shapePath, SHAPES } from "@/lib/shapes";
 
+import { Check, Dices, Shapes, Sparkles } from "lucide-react";
 type Bg = "none" | "color" | "gradient";
 type Style = {
   outline: number; // grosor del borde (0 = sin borde), % del lado
@@ -267,7 +268,7 @@ export default function ShapeCrop({
   return (
     <div className="props shape-crop">
       <div className="card-head">
-        <strong>🔷 Recortar con forma · {title}</strong>
+        <strong>Recortar con forma · {title}</strong>
         <button className="btn ghost small" onClick={onClose}>
           Cancelar
         </button>
@@ -292,10 +293,10 @@ export default function ShapeCrop({
 
       <div className="seg">
         <button className={panel === "forma" ? "active" : ""} onClick={() => setPanel("forma")}>
-          🔷 Forma
+          <Shapes size={16} aria-hidden /> Forma
         </button>
         <button className={panel === "estilo" ? "active" : ""} onClick={() => setPanel("estilo")}>
-          ✨ Estilo moderno
+          <Sparkles size={16} aria-hidden /> Estilo moderno
         </button>
       </div>
 
@@ -308,7 +309,7 @@ export default function ShapeCrop({
           </div>
           {shape === "blob" && (
             <button className="btn ghost small" onClick={() => setSeed((s) => s + 1)} style={{ alignSelf: "flex-start" }}>
-              🎲 Otra forma orgánica
+              <Dices size={16} aria-hidden /> Otra forma orgánica
             </button>
           )}
           <label>Proporción</label>
@@ -321,7 +322,7 @@ export default function ShapeCrop({
           </div>
           {usesRadius && <Range label="Redondeo de esquinas" min={0} max={50} value={radius} onChange={setRadius} />}
           {usesPoints && <Range label={shape === "star" ? "Puntas" : "Pétalos / ondas"} min={4} max={12} value={points} onChange={setPoints} />}
-          <Range label="🔍 Zoom de la foto" min={1} max={5} step={0.05} value={zoom} onChange={setZoom} />
+          <Range label="Zoom de la foto" min={1} max={5} step={0.05} value={zoom} onChange={setZoom} />
           <Range label="⟳ Girar la foto" min={-180} max={180} value={rotation} onChange={setRotation} />
           <div className="actions">
             <button className="btn ghost small" onClick={() => (setPan({ x: 0, y: 0 }), setZoom(1), setRotation(0))}>
@@ -383,7 +384,7 @@ export default function ShapeCrop({
 
       <div className="actions">
         <button className="btn" onClick={apply} disabled={!img}>
-          ✓ Aplicar recorte
+          <Check size={16} aria-hidden /> Aplicar recorte
         </button>
       </div>
     </div>

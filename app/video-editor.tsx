@@ -20,6 +20,7 @@ import { deleteFile, getFile, putFile, toBlob } from "@/lib/media-store";
 import { usePersistentState } from "@/lib/persist";
 import type { Item } from "@/lib/types";
 
+import { ChevronLeft, ChevronRight, Clapperboard, Copy, Dices, Download, Film, FolderOpen, ImageIcon, Music, Pause, Play, Scissors, Trash2, Type, Upload, Video } from "lucide-react";
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 const SW = ["#ffffff", "#000000", "#ffd23f", "#e5243b", "#0d1630", "#32c48d", "#2f80ed"];
 
@@ -223,7 +224,7 @@ export default function VideoEditor({
   };
   const listen = async (style = project.music.style, seed = project.music.seed) => {
     stopPreview();
-    setBusy("🎵 Componiendo una muestra…");
+    setBusy("Componiendo una muestra…");
     try {
       const buf = await renderMusic({ style, seed, duration: 12 });
       if (!previewCtx.current) previewCtx.current = new AudioContext();
@@ -348,13 +349,13 @@ export default function VideoEditor({
       </div>
       <div className="vedit-controls">
         <button className="btn small" onClick={togglePlay} disabled={!project.clips.length || busy.startsWith("Exportando")}>
-          {playing ? "⏸ Pausa" : "▶ Reproducir"}
+          {playing ? <><Pause size={16} aria-hidden /> Pausa</> : <><Play size={16} aria-hidden /> Reproducir</>}
         </button>
         <span className="muted">
           {fmt(time)} / {fmt(total)}
         </span>
         <button className="btn ghost small" onClick={split} disabled={!project.clips.length || playing}>
-          ✂️ Dividir aquí
+          <Scissors size={16} aria-hidden /> Dividir aquí
         </button>
       </div>
       <input
@@ -390,7 +391,7 @@ export default function VideoEditor({
           >
             {c.thumb && <img src={c.thumb} alt="" />}
             <span>
-              {c.kind === "image" ? "🖼️" : "🎬"} {clipLength(c).toFixed(1)}s{c.speed !== 1 ? ` · ${c.speed}x` : ""}
+              {c.kind === "image" ? <ImageIcon size={11} aria-hidden /> : <Video size={11} aria-hidden />} {clipLength(c).toFixed(1)}s{c.speed !== 1 ? ` · ${c.speed}x` : ""}
             </span>
             {i < project.clips.length - 1 && c.transition !== "cut" && <i className="tl-tr" title={c.transition}>⟷</i>}
           </button>
@@ -411,7 +412,7 @@ export default function VideoEditor({
             />
           </label>
           <button className="btn ghost small" onClick={() => setShowGallery((v) => !v)}>
-            📁 Galería
+            <FolderOpen size={16} aria-hidden /> Galería
           </button>
         </div>
       </div>
@@ -454,13 +455,13 @@ export default function VideoEditor({
       {/* Paneles */}
       <div className="tool-tabs">
         <button className={panel === "clip" ? "active" : ""} onClick={() => setPanel("clip")}>
-          🎞️ Clip
+          <Film size={16} aria-hidden /> Clip
         </button>
         <button className={panel === "textos" ? "active" : ""} onClick={() => setPanel("textos")}>
-          🔤 Textos ({project.texts.length})
+          <Type size={16} aria-hidden /> Textos ({project.texts.length})
         </button>
         <button className={panel === "musica" ? "active" : ""} onClick={() => setPanel("musica")}>
-          🎵 Música y audio
+          <Music size={16} aria-hidden /> Música y audio
         </button>
       </div>
 
@@ -473,17 +474,17 @@ export default function VideoEditor({
                   Clip {selIdx + 1} de {project.clips.length} · {sel.kind === "image" ? "foto" : "video"}
                 </strong>
                 <div className="actions">
-                  <button className="btn ghost small" onClick={() => moveClip(sel.id, -1)} disabled={selIdx === 0}>
-                    ◀
+                  <button className="btn ghost small" onClick={() => moveClip(sel.id, -1)} disabled={selIdx === 0} title="Mover antes" aria-label="Mover antes">
+                    <ChevronLeft size={16} aria-hidden />
                   </button>
-                  <button className="btn ghost small" onClick={() => moveClip(sel.id, 1)} disabled={selIdx === project.clips.length - 1}>
-                    ▶
+                  <button className="btn ghost small" onClick={() => moveClip(sel.id, 1)} disabled={selIdx === project.clips.length - 1} title="Mover después" aria-label="Mover después">
+                    <ChevronRight size={16} aria-hidden />
                   </button>
-                  <button className="btn ghost small" onClick={() => duplicate(sel)}>
-                    ⧉
+                  <button className="btn ghost small" onClick={() => duplicate(sel)} title="Duplicar" aria-label="Duplicar">
+                    <Copy size={16} aria-hidden />
                   </button>
-                  <button className="btn ghost small" onClick={() => removeClip(sel.id)}>
-                    🗑️
+                  <button className="btn ghost small" onClick={() => removeClip(sel.id)} title="Eliminar" aria-label="Eliminar">
+                    <Trash2 size={16} aria-hidden />
                   </button>
                 </div>
               </div>
@@ -597,7 +598,7 @@ export default function VideoEditor({
                   <button className="layer-name" onClick={() => (setSelText(t.id), engine.current?.seek(t.start + 0.5))}>
                     {t.text.slice(0, 24)} · {fmt(t.start)}–{fmt(t.end)}
                   </button>
-                  <button onClick={() => update((p) => ({ ...p, texts: p.texts.filter((x) => x.id !== t.id) }))}>🗑️</button>
+                  <button onClick={() => update((p) => ({ ...p, texts: p.texts.filter((x) => x.id !== t.id) }))}><Trash2 size={16} aria-hidden /></button>
                 </div>
               ))}
             </div>
@@ -661,10 +662,10 @@ export default function VideoEditor({
                 Sin música
               </button>
               <button className={project.music.source === "generated" ? "active" : ""} onClick={() => update((p) => ({ ...p, music: { ...p.music, source: "generated" } }))}>
-                🎵 Música gratis
+                <Music size={16} aria-hidden /> Música gratis
               </button>
               <button className={project.music.source === "upload" ? "active" : ""} onClick={() => update((p) => ({ ...p, music: { ...p.music, source: "upload" } }))}>
-                📂 Mi canción
+                <Upload size={16} aria-hidden /> Mi canción
               </button>
             </div>
 
@@ -689,7 +690,7 @@ export default function VideoEditor({
                 </div>
                 <div className="actions">
                   <button className="btn small" onClick={() => listen()} disabled={!!busy}>
-                    ▶ Escuchar muestra
+                    <Play size={15} aria-hidden /> Escuchar muestra
                   </button>
                   <button
                     className="btn ghost small"
@@ -700,7 +701,7 @@ export default function VideoEditor({
                     }}
                     disabled={!!busy}
                   >
-                    🎲 Otra versión
+                    <Dices size={16} aria-hidden /> Otra versión
                   </button>
                   <button className="btn ghost small" onClick={stopPreview}>
                     ⏹ Detener
@@ -714,12 +715,12 @@ export default function VideoEditor({
               <>
                 <p className="hint">Sube una canción que tengas derecho a usar (MP3, M4A, WAV). Si es más corta que el video, se repite.</p>
                 <label className="btn small" style={{ margin: 0 }}>
-                  📂 Elegir canción
+                  <Upload size={16} aria-hidden /> Elegir canción
                   <input type="file" accept="audio/*" hidden onChange={(e) => (e.target.files?.[0] && uploadSong(e.target.files[0]), (e.target.value = ""))} />
                 </label>
                 {project.music.uploadName && (
                   <p className="muted">
-                    {uploaded ? "✅" : "⚠️ Vuelve a elegirla (no se guarda al cerrar la app):"} {project.music.uploadName}
+                    {uploaded ? "" : "Vuelve a elegirla (no se guarda al cerrar la app):"} {project.music.uploadName}
                   </p>
                 )}
               </>
@@ -750,7 +751,7 @@ export default function VideoEditor({
       {/* Exportar */}
       <div className="editor-export">
         <button className="btn" onClick={exportVideo} disabled={!project.clips.length || !!busy || missing}>
-          🎬 Exportar video ({fmt(total)})
+          <Clapperboard size={16} aria-hidden /> Exportar video ({fmt(total)})
         </button>
       </div>
       {result && !busy && (
@@ -758,9 +759,9 @@ export default function VideoEditor({
           <video src={result.url} controls playsInline />
           <div className="meta actions">
             <a href={result.url} download={`video-innovationtech.${result.ext}`}>
-              ⬇️ Descargar ({result.ext.toUpperCase()})
+              <Download size={16} aria-hidden /> Descargar ({result.ext.toUpperCase()})
             </a>
-            <span className="muted">· ✅ Guardado en tu galería</span>
+            <span className="muted">· Guardado en tu galería</span>
           </div>
         </div>
       )}

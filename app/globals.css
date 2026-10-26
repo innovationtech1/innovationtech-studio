@@ -35,6 +35,7 @@
 }
 
 * { box-sizing: border-box; }
+button, input, select, textarea { font-family: inherit; }
 html { color-scheme: dark; -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
@@ -494,6 +495,25 @@ h3.step { font-size: 18px; margin: 28px 0 8px; }
 .size-thumb i { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 13px; font-weight: 800; background: rgba(0,0,0,0.5); border: 1.5px solid #fff; color: #fff; }
 .size-card.on .size-thumb i { background: var(--signal); border-color: var(--signal); }
 .size-meta { display: flex; justify-content: space-between; gap: 6px; font-size: 13px; }
+
+
+/* Íconos en botones */
+.btn svg, .tool-tabs svg, .mode-switch svg, .presets svg, .seg svg { flex: none; }
+.tool-tabs button, .mode-switch button, .layer-row button, .gallery-actions button, .gallery-actions a { display: inline-flex; align-items: center; gap: 7px; }
+.mode-switch button { gap: 10px; }
+.mode-switch button svg { color: var(--fog); }
+.mode-switch button.active svg { color: var(--signal); }
+.tool-tabs button.active svg { color: #fff; }
+.gallery-actions button, .gallery-actions a { color: var(--fog); border-radius: 8px; }
+.gallery-actions button:hover, .gallery-actions a:hover { color: var(--paper); background: var(--console); }
+.layer-row button { color: var(--fog); border-radius: 6px; }
+.layer-row button:hover { color: var(--paper); background: var(--console); }
+.layer-row .layer-name { color: var(--paper); }
+.erase-tools button span { display: grid; place-items: center; height: 22px; }
+.checklist .check-ic { display: grid; place-items: center; }
+.checklist li.ok .check-ic { color: var(--go); }
+.checklist li.bad .check-ic { color: var(--signal); }
+.tl-clip span { display: inline-flex; align-items: center; gap: 3px; }
 
 /* ---------- Responsive ---------- */
 .bottom-nav { display: none; }

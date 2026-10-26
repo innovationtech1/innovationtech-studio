@@ -10,7 +10,7 @@ import { fileToResizedDataUrl } from "@/lib/resize";
 import { usePersistentState } from "@/lib/persist";
 import { useGallery } from "@/lib/use-gallery";
 import { useDemo } from "@/lib/use-demo";
-import { Clapperboard, FolderOpen, ImageIcon, Palette, PenLine, Settings as SettingsIcon, Wand2, type LucideIcon } from "lucide-react";
+import { Bot, CalendarDays, Clapperboard, Download, Eraser, Film, FolderOpen, ImageIcon, ImagePlus, Images, Palette, Pencil, PenLine, Plug, RefreshCw, Rocket, Scissors, Settings as SettingsIcon, Shapes, Trash2, type LucideIcon, Wand2 } from "lucide-react";
 import { CheckList, CloudflareWizard, testCloudflare, Welcome } from "./setup-wizard";
 import { formatBytes, storageUsage, toDataUrl } from "@/lib/media-store";
 import type { Item, Settings } from "@/lib/types";
@@ -211,7 +211,7 @@ export default function Home() {
       {demoActive && tab !== "config" && (
         <div className="demo-banner">
           <span>
-            🚀 <strong>Modo demo</strong> · hoy te quedan {demo?.remaining?.image ?? 0} imágenes, {demo?.remaining?.text ?? 0} textos y{" "}
+            <Rocket size={16} aria-hidden /> <strong>Modo demo</strong> · hoy te quedan {demo?.remaining?.image ?? 0} imágenes, {demo?.remaining?.text ?? 0} textos y{" "}
             {demo?.remaining?.voice ?? 0} voces
           </span>
           <button className="btn small" onClick={openSetup}>
@@ -221,7 +221,7 @@ export default function Home() {
       )}
       {missingKeys && tab !== "config" && (
         <div className="demo-banner">
-          <span>👋 Para crear con IA, conecta tu cuenta gratis de Cloudflare (toma unos 5 minutos).</span>
+          <span>Para crear con IA, conecta tu cuenta gratis de Cloudflare (toma unos 5 minutos).</span>
           <button className="btn small" onClick={openSetup}>
             Empezar
           </button>
@@ -240,10 +240,10 @@ export default function Home() {
       <div hidden={tab !== "texto"}>
         <div className="mode-switch" role="tablist">
           <button className={textMode === "post" ? "active" : ""} onClick={() => setTextMode("post")}>
-            ✍️ Una publicación
+            <PenLine size={16} aria-hidden /> Una publicación
           </button>
           <button className={textMode === "calendario" ? "active" : ""} onClick={() => setTextMode("calendario")}>
-            🗓️ Calendario de 30 días
+            <CalendarDays size={16} aria-hidden /> Calendario de 30 días
           </button>
         </div>
         <div hidden={textMode !== "post"}>
@@ -300,13 +300,13 @@ export default function Home() {
       <div hidden={tab !== "video"}>
           <div className="mode-switch" role="tablist">
             <button className={videoMode === "reel" ? "active" : ""} onClick={() => setVideoMode("reel")}>
-              🎞️ Reel con mis imágenes · gratis
+              <Film size={16} aria-hidden /> Reel con mis imágenes · gratis
             </button>
             <button className={videoMode === "editor" ? "active" : ""} onClick={() => setVideoMode("editor")}>
-              ✂️ Editor de video + música
+              <Scissors size={16} aria-hidden /> Editor de video + música
             </button>
             <button className={videoMode === "ia" ? "active" : ""} onClick={() => setVideoMode("ia")}>
-              🤖 Video con IA · Replicate (de pago)
+              <Bot size={16} aria-hidden /> Video con IA · Replicate (de pago)
             </button>
           </div>
           <div hidden={videoMode !== "reel"}>
@@ -482,12 +482,12 @@ function TextStudio({
             </button>
             {imgP && (
               <button className="btn small" onClick={() => onUseImage(imgP)}>
-                Crear la imagen →
+                Crear la imagen
               </button>
             )}
             {vidP && (
               <button className="btn small" onClick={() => onUseVideo(vidP)}>
-                Crear el video →
+                Crear el video
               </button>
             )}
             <button className="btn ghost small" onClick={() => setPicking((v) => !v)}>
@@ -618,7 +618,7 @@ function ImageStudio({
         </div>
         <div className="actions">
           <label className="btn" style={{ margin: 0 }}>
-            📷 Quitar fondo
+            <ImagePlus size={16} aria-hidden /> Quitar fondo
             <input
               type="file"
               accept="image/*"
@@ -631,7 +631,7 @@ function ImageStudio({
             />
           </label>
           <label className="btn ghost" style={{ margin: 0 }}>
-            🔷 Recortar con forma
+            <Shapes size={16} aria-hidden /> Recortar con forma
             <input
               type="file"
               accept="image/*"
@@ -644,7 +644,7 @@ function ImageStudio({
             />
           </label>
           <label className="btn ghost" style={{ margin: 0 }}>
-            🧽 Borrador
+            <Eraser size={16} aria-hidden /> Borrador
             <input
               type="file"
               accept="image/*"
@@ -694,11 +694,11 @@ function ImageStudio({
               </div>
               <div className="meta actions">
                 <a href={u} download="innovationtech-sin-fondo.png">
-                  ⬇️ Descargar PNG
+                  <Download size={16} aria-hidden /> Descargar PNG
                 </a>
                 ·
                 <a href="#" onClick={(e) => (e.preventDefault(), onEdit(u))}>
-                  ✏️ Editar
+                  <Pencil size={16} aria-hidden /> Editar
                 </a>
                 · <span className="muted">Guardado en la galería</span>
               </div>
@@ -786,7 +786,7 @@ function ImageStudio({
           {flagged && (
             <div className="actions" style={{ marginTop: 8 }}>
               <button className="btn small" disabled={loading} onClick={() => generate()}>
-                🔄 Intentar otra vez
+                <RefreshCw size={16} aria-hidden /> Intentar otra vez
               </button>
               {refs.length > 0 && (
                 <button className="btn ghost small" disabled={loading} onClick={() => generate(true)}>
@@ -797,7 +797,7 @@ function ImageStudio({
           )}
         </div>
       )}
-      {warning && <div className="notice">⚠️ {warning}</div>}
+      {warning && <div className="notice">{warning}</div>}
       {urls.length > 0 && (
         <div className="grid">
           {urls.map((u) => (
@@ -809,7 +809,7 @@ function ImageStudio({
                 </a>
                 ·
                 <a href="#" onClick={(e) => (e.preventDefault(), onEdit(u))}>
-                  ✏️ Editar
+                  <Pencil size={16} aria-hidden /> Editar
                 </a>
                 ·
                 <a
@@ -821,7 +821,7 @@ function ImageStudio({
                     window.scrollTo({ top: 0, behavior: "smooth" });
                   }}
                 >
-                  ✂️ Quitar fondo
+                  <Scissors size={16} aria-hidden /> Quitar fondo
                 </a>
                 ·
                 <a
@@ -833,7 +833,7 @@ function ImageStudio({
                     window.scrollTo({ top: 0, behavior: "smooth" });
                   }}
                 >
-                  🔷 Forma
+                  <Shapes size={16} aria-hidden /> Forma
                 </a>
                 ·
                 <a href="#" onClick={(e) => (e.preventDefault(), onAnimate(u, prompt))}>
@@ -1039,7 +1039,7 @@ function Gallery({
       </div>
       <p className="hint">
         Todo lo que creas se guarda aquí, en tu dispositivo, aunque cierres la app.
-        {persistent ? " ✅ Protegida: el navegador no la borrará." : ""}
+        {persistent ? " Protegida: el navegador no la borrará." : ""}
       </p>
       {storeError && <div className="error">{storeError}</div>}
 
@@ -1048,10 +1048,10 @@ function Gallery({
           Todo ({items.length})
         </button>
         <button className={filter === "imagen" ? "active" : ""} onClick={() => setFilter("imagen")}>
-          🖼️ Imágenes ({nImg})
+          <Images size={16} aria-hidden /> Imágenes ({nImg})
         </button>
         <button className={filter === "video" ? "active" : ""} onClick={() => setFilter("video")}>
-          🎬 Videos ({nVid})
+          <Clapperboard size={16} aria-hidden /> Videos ({nVid})
         </button>
       </div>
 
@@ -1067,7 +1067,7 @@ function Gallery({
               ) : (
                 <>
                   <video src={it.url} muted playsInline preload="metadata" />
-                  <span className="badge-video">▶ Video</span>
+                  <span className="badge-video">Video</span>
                 </>
               )}
             </button>
@@ -1076,17 +1076,17 @@ function Gallery({
               <div className="gallery-actions">
                 {it.kind === "imagen" && (
                   <button title="Editar" onClick={() => onEdit(it.url)}>
-                    ✏️
+                    <Pencil size={17} aria-hidden />
                   </button>
                 )}
                 <a title="Descargar" href={it.url} download={`innovationtech-${it.kind}.${ext(it)}`}>
-                  ⬇️
+                  <Download size={17} aria-hidden />
                 </a>
                 <button
                   title="Eliminar"
                   onClick={() => it.id && confirm("¿Eliminar este elemento de la galería?") && onRemove(it.id)}
                 >
-                  🗑️
+                  <Trash2 size={17} aria-hidden />
                 </button>
               </div>
             </div>
@@ -1112,11 +1112,11 @@ function Gallery({
             <div className="actions">
               {open.kind === "imagen" && (
                 <button className="btn small" onClick={() => (onEdit(open.url), setOpen(null))}>
-                  ✏️ Editar
+                  <Pencil size={16} aria-hidden /> Editar
                 </button>
               )}
               <a className="btn ghost small" href={open.url} download={`innovationtech-${open.kind}.${ext(open)}`}>
-                ⬇️ Descargar
+                <Download size={16} aria-hidden /> Descargar
               </a>
               <button className="btn ghost small" onClick={() => setOpen(null)}>
                 Cerrar
@@ -1310,7 +1310,7 @@ function Config({
         )}
       </div>
       {settings.cfAccountId && settings.cfToken ? (
-        <p className="ok" style={{ marginTop: 0 }}>✅ Tu cuenta de Cloudflare está conectada.</p>
+        <p className="ok" style={{ marginTop: 0 }}>Tu cuenta de Cloudflare está conectada.</p>
       ) : (
         <p className="hint" style={{ marginTop: 0 }}>
           Con tu cuenta gratis tienes uso diario de IA sin los límites del modo demo{demo ? "" : " (necesaria para crear con IA)"}.
@@ -1388,7 +1388,7 @@ function Config({
                 }
               }}
             >
-              {testing ? "Probando…" : "🔌 Probar conexión"}
+              <Plug size={16} aria-hidden /> {testing ? "Probando…" : "Probar conexión"}
             </button>
           </div>
           {checks && <CheckList checks={checks} />}

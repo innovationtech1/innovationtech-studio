@@ -48,6 +48,7 @@ import BgRemover from "./bg-remover";
 import ShapeCrop from "./shape-crop";
 import { toDataUrl } from "@/lib/media-store";
 
+import { AlignCenter, AlignCenterHorizontal, AlignCenterVertical, AlignLeft, AlignRight, Aperture, BadgeCheck, BringToFront, Check, ChevronDown, ChevronUp, Download, Eraser, Eye, EyeOff, FlipHorizontal2, FlipVertical2, FolderOpen, Frame, ImagePlus, Layers, LayoutTemplate, Lock, LockOpen, Ratio, Redo2, Save, Scissors, SendToBack, Shapes, Share2, SlidersHorizontal, Sparkles, Square, Tag, Trash2, Type, type LucideIcon, Undo2 } from "lucide-react";
 type Tool = "plantillas" | "marca" | "ajustes" | "filtros" | "texto" | "stickers" | "formas" | "imagen" | "marco" | "capas";
 
 export type EditorIncoming = { n: number; url?: string; text?: string; returnTo?: { scene: number } };
@@ -902,10 +903,10 @@ export default function ImageEditor({
         <h2>Editor de imágenes</h2>
         <div className="actions">
           <button className="btn ghost small" onClick={undo} disabled={!past.current.length} title="Deshacer (Ctrl+Z)">
-            ↶ Deshacer
+            <Undo2 size={16} aria-hidden /> Deshacer
           </button>
           <button className="btn ghost small" onClick={redo} disabled={!future.current.length} title="Rehacer">
-            ↷ Rehacer
+            <Redo2 size={16} aria-hidden /> Rehacer
           </button>
           <button className="btn ghost small" onClick={newDesign}>
             Nuevo
@@ -915,11 +916,11 @@ export default function ImageEditor({
 
       <div className="editor-top">
         <label className="btn small" style={{ margin: 0 }}>
-          📷 Abrir foto
+          <ImagePlus size={16} aria-hidden /> Abrir foto
           <input type="file" accept="image/*" hidden onChange={(e) => (uploadPhoto(e.target.files?.[0]), (e.target.value = ""))} />
         </label>
         <button className="btn ghost small" onClick={() => setShowGallery((v) => !v)}>
-          📁 De la galería
+          <FolderOpen size={16} aria-hidden /> De la galería
         </button>
         <button
           className="btn small"
@@ -934,7 +935,7 @@ export default function ImageEditor({
           }}
           title="Remover fondo (Background Removal)"
         >
-          ✂️ Remover fondo
+          <Scissors size={16} aria-hidden /> Remover fondo
         </button>
         <button
           className="btn ghost small"
@@ -948,7 +949,7 @@ export default function ImageEditor({
           }}
           title="Borrar zonas o áreas de la imagen"
         >
-          🧽 Borrador
+          <Eraser size={16} aria-hidden /> Borrador
         </button>
         <button
           className="btn ghost small"
@@ -963,7 +964,7 @@ export default function ImageEditor({
           }}
           title="Recortar la imagen con una figura"
         >
-          🔷 Recortar con forma
+          <Shapes size={16} aria-hidden /> Recortar con forma
         </button>
         <input
           ref={quickInput}
@@ -1025,10 +1026,10 @@ export default function ImageEditor({
               ⟳ Girar 90°
             </button>
             <button className="btn ghost small" onClick={() => setDoc((d) => ({ ...d, photo: { ...d.photo!, flipX: !d.photo!.flipX } }))}>
-              ⇋ Voltear
+              <FlipHorizontal2 size={16} aria-hidden /> Voltear
             </button>
             <button className="btn ghost small" onClick={() => setDoc((d) => ({ ...d, photo: { ...d.photo!, flipY: !d.photo!.flipY } }))}>
-              ⇵ Voltear vertical
+              <FlipVertical2 size={16} aria-hidden /> Voltear vertical
             </button>
             <button className="btn ghost small" onClick={() => setDoc((d) => ({ ...d, photo: coverPhoto(d.photo!, d.width, d.height) }))}>
               ⤢ Llenar lienzo
@@ -1045,7 +1046,7 @@ export default function ImageEditor({
               ⤡ Mostrar completa
             </button>
             <button className="btn small" onClick={() => setCutout("photo")}>
-              ✂️ Quitar fondo
+              <Scissors size={16} aria-hidden /> Quitar fondo
             </button>
             <button className="btn ghost small" onClick={() => (setDoc((d) => ({ ...d, photo: null })), setSelected(null))}>
               Quitar foto
@@ -1094,20 +1095,20 @@ export default function ImageEditor({
       <div className="tool-tabs">
         {(
           [
-            ["plantillas", "🧩 Plantillas"],
-            ["marca", "⭐ Mi marca"],
-            ["filtros", "🎨 Filtros"],
-            ["ajustes", "🎚️ Ajustes"],
-            ["texto", "🔤 Texto"],
-            ["stickers", "🏷️ Stickers"],
-            ["formas", "⬛ Formas"],
-            ["imagen", "🖼️ Logo/imagen"],
-            ["marco", "🖌️ Fondo y marco"],
-            ["capas", "📚 Capas"],
-          ] as [Tool, string][]
-        ).map(([id, label]) => (
+            ["plantillas", LayoutTemplate, "Plantillas"],
+            ["marca", BadgeCheck, "Mi marca"],
+            ["filtros", Aperture, "Filtros"],
+            ["ajustes", SlidersHorizontal, "Ajustes"],
+            ["texto", Type, "Texto"],
+            ["stickers", Tag, "Stickers"],
+            ["formas", Square, "Formas"],
+            ["imagen", ImagePlus, "Logo/imagen"],
+            ["marco", Frame, "Fondo y marco"],
+            ["capas", Layers, "Capas"],
+          ] as [Tool, LucideIcon, string][]
+        ).map(([id, Icon, label]) => (
           <button key={id} className={tool === id ? "active" : ""} onClick={() => setTool(id)}>
-            {label}
+            <Icon size={15} aria-hidden /> {label}
           </button>
         ))}
       </div>
@@ -1305,19 +1306,19 @@ export default function ImageEditor({
                   {layerLabel(l)}
                 </button>
                 <button title="Mostrar/ocultar" onClick={() => updateLayer(l.id, { hidden: !l.hidden })}>
-                  {l.hidden ? "🙈" : "👁️"}
+                  {l.hidden ? <EyeOff size={16} aria-hidden /> : <Eye size={16} aria-hidden />}
                 </button>
                 <button title="Bloquear" onClick={() => updateLayer(l.id, { locked: !l.locked })}>
-                  {l.locked ? "🔒" : "🔓"}
+                  {l.locked ? <Lock size={16} aria-hidden /> : <LockOpen size={16} aria-hidden />}
                 </button>
                 <button title="Subir" onClick={() => move(l.id, 1)}>
-                  ▲
+                  <ChevronUp size={16} aria-hidden />
                 </button>
                 <button title="Bajar" onClick={() => move(l.id, -1)}>
-                  ▼
+                  <ChevronDown size={16} aria-hidden />
                 </button>
                 <button title="Eliminar" onClick={() => removeLayer(l.id)}>
-                  🗑️
+                  <Trash2 size={16} aria-hidden />
                 </button>
               </div>
             ))}
@@ -1345,18 +1346,18 @@ export default function ImageEditor({
           <option value="png">PNG (máxima calidad)</option>
         </select>
         <button className="btn" onClick={download}>
-          ⬇️ Descargar
+          <Download size={16} aria-hidden /> Descargar
         </button>
         {canShare && (
           <button className="btn ghost" onClick={share}>
-            📤 Compartir
+            <Share2 size={16} aria-hidden /> Compartir
           </button>
         )}
         <button className="btn ghost" onClick={saveGallery}>
-          💾 Guardar en galería
+          <Save size={16} aria-hidden /> Guardar en galería
         </button>
         <button className={`btn ${sizesOpen ? "" : "ghost"}`} onClick={() => setSizesOpen((v) => !v)}>
-          📐 Todos los tamaños
+          <Ratio size={16} aria-hidden /> Todos los tamaños
         </button>
       </div>
       {sizesOpen && (
@@ -1429,7 +1430,7 @@ function LayerProps({
               <div className="seg">
                 {(["left", "center", "right"] as const).map((a) => (
                   <button key={a} className={l.align === a ? "active" : ""} onClick={() => onChange({ align: a } as Partial<TextLayer>)}>
-                    {a === "left" ? "⇤" : a === "center" ? "↔" : "⇥"}
+                    {a === "left" ? <AlignLeft size={16} aria-hidden /> : a === "center" ? <AlignCenter size={16} aria-hidden /> : <AlignRight size={16} aria-hidden />}
                   </button>
                 ))}
                 <button className={l.bold ? "active" : ""} onClick={() => onChange({ bold: !l.bold } as Partial<TextLayer>)}>
@@ -1492,7 +1493,7 @@ function LayerProps({
           <div className="seg" style={{ marginTop: 8 }}>
             {(["star", "circle", "pill", "ribbon"] as const).map((s) => (
               <button key={s} className={l.shape === s ? "active" : ""} onClick={() => onChange({ shape: s } as Partial<BadgeLayer>)}>
-                {{ star: "✸ Destello", circle: "● Círculo", pill: "▬ Píldora", ribbon: "🎀 Listón" }[s]}
+                {{ star: "✸ Destello", circle: "● Círculo", pill: "▬ Píldora", ribbon: "⯈ Listón" }[s]}
               </button>
             ))}
           </div>
@@ -1544,7 +1545,7 @@ function LayerProps({
 
       {l.type === "image" && onCutout && (
         <button className="btn small" onClick={onCutout} style={{ alignSelf: "flex-start" }}>
-          ✂️ Quitar fondo
+          <Scissors size={16} aria-hidden /> Quitar fondo
         </button>
       )}
       {l.type === "image" && (
@@ -1554,22 +1555,22 @@ function LayerProps({
       <Slider label="Opacidad" min={5} max={100} value={Math.round(l.opacity * 100)} onChange={(v) => onChange({ opacity: v / 100 }, true)} />
       <div className="actions">
         <button className="btn ghost small" onClick={() => onCenter("h")}>
-          ↔ Centrar
+          <AlignCenterHorizontal size={16} aria-hidden /> Centrar
         </button>
         <button className="btn ghost small" onClick={() => onCenter("v")}>
-          ↕ Centrar
+          <AlignCenterVertical size={16} aria-hidden /> Centrar
         </button>
         <button className="btn ghost small" onClick={() => onMove("top")}>
-          ⬆ Al frente
+          <BringToFront size={16} aria-hidden /> Al frente
         </button>
         <button className="btn ghost small" onClick={() => onMove("bottom")}>
-          ⬇ Al fondo
+          <SendToBack size={16} aria-hidden /> Al fondo
         </button>
         <button className="btn ghost small" onClick={onDuplicate}>
           ⧉ Duplicar
         </button>
         <button className="btn ghost small" onClick={onDelete}>
-          🗑️ Eliminar
+          <Trash2 size={16} aria-hidden /> Eliminar
         </button>
       </div>
     </div>
@@ -1699,7 +1700,7 @@ function BrandPanel({
         </button>
       </div>
       <button className="btn" onClick={onApply} style={{ marginTop: 12 }}>
-        ✨ Aplicar mi marca al diseño
+        <Sparkles size={16} aria-hidden /> Aplicar mi marca al diseño
       </button>
       <p className="muted">Pone tus colores y tu letra en el diseño y agrega tu logo, nombre y contacto.</p>
       <div className="presets" style={{ marginTop: 10 }}>
@@ -1900,7 +1901,7 @@ function SizesPanel({
                 title={on ? "Quitar de la descarga" : "Agregar a la descarga"}
               >
                 {thumbs[id] ? <img src={thumbs[id]} alt="" /> : <span className="muted">…</span>}
-                <i aria-hidden>{on ? "✓" : ""}</i>
+                <i aria-hidden>{on ? <Check size={13} strokeWidth={3} /> : null}</i>
               </button>
               <div className="size-meta">
                 <strong>{f.short}</strong>
@@ -1918,10 +1919,10 @@ function SizesPanel({
       </div>
       <div className="actions">
         <button className="btn" disabled={!picked.length || !!busy} onClick={downloadZip}>
-          ⬇️ Descargar {picked.length} {picked.length === 1 ? "tamaño" : "tamaños"} (.zip)
+          <Download size={16} aria-hidden /> Descargar {picked.length} {picked.length === 1 ? "tamaño" : "tamaños"} (.zip)
         </button>
         <button className="btn ghost" disabled={!picked.length || !!busy} onClick={saveAll}>
-          💾 Guardar en galería
+          <Save size={16} aria-hidden /> Guardar en galería
         </button>
       </div>
       {busy && <div className="notice">{busy}</div>}

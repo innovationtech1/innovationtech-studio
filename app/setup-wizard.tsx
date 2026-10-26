@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { Settings } from "@/lib/types";
 import type { DemoStatus } from "@/lib/use-demo";
 
+import { ArrowLeft, Check, CircleCheck, CircleX, ClipboardPaste, Cog, ExternalLink, Plug, Rocket } from "lucide-react";
 type Check = { ok: boolean; label: string; help?: string };
 
 const WORKERS_AI_URL = "https://dash.cloudflare.com/?to=/:account/ai/workers-ai";
@@ -31,7 +32,7 @@ export function CheckList({ checks }: { checks: Check[] }) {
     <ul className="checklist">
       {checks.map((c) => (
         <li key={c.label} className={c.ok ? "ok" : "bad"}>
-          <span>{c.ok ? "✅" : "❌"}</span>
+          <span className="check-ic">{c.ok ? <CircleCheck size={20} aria-hidden /> : <CircleX size={20} aria-hidden />}</span>
           <div>
             <strong>{c.label}</strong>
             {c.help && <p>{c.help}</p>}
@@ -85,7 +86,7 @@ export function CloudflareWizard({
       <div className="wizard-steps">
         {steps.map((s, i) => (
           <button key={s} className={step === i + 1 ? "active" : step > i + 1 ? "done" : ""} onClick={() => setStep(i + 1)}>
-            <span>{step > i + 1 ? "✓" : i + 1}</span>
+            <span>{step > i + 1 ? <Check size={15} strokeWidth={3} aria-hidden /> : i + 1}</span>
             {s}
           </button>
         ))}
@@ -99,10 +100,10 @@ export function CloudflareWizard({
           </p>
           <div className="actions">
             <a className="btn" href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noreferrer">
-              Crear cuenta gratis ↗
+              Crear cuenta gratis <ExternalLink size={14} aria-hidden />
             </a>
             <button className="btn ghost" onClick={() => setStep(2)}>
-              Ya tengo cuenta →
+              Ya tengo cuenta
             </button>
           </div>
         </div>
@@ -115,7 +116,7 @@ export function CloudflareWizard({
             <li>
               Abre la página de Workers AI:{" "}
               <a href={WORKERS_AI_URL} target="_blank" rel="noreferrer">
-                abrir Workers AI ↗
+                abrir Workers AI <ExternalLink size={14} aria-hidden />
               </a>
             </li>
             <li>
@@ -128,16 +129,16 @@ export function CloudflareWizard({
           <div className="paste-row">
             <input value={accountId} onChange={(e) => setAccountId(e.target.value.trim())} placeholder="Ej.: 6fe266a045b099db7c54b87da9397143" autoComplete="off" />
             <button className="btn ghost small" onClick={async () => setAccountId(await pasteFromClipboard())}>
-              📋 Pegar
+              <ClipboardPaste size={16} aria-hidden /> Pegar
             </button>
           </div>
-          {accountId && <p className={idValid ? "ok" : "warn"}>{idValid ? "✅ Formato correcto" : "⚠️ Debe tener 32 caracteres (0-9 y a-f)"}</p>}
+          {accountId && <p className={idValid ? "ok" : "warn"}>{idValid ? "Formato correcto" : "Debe tener 32 caracteres (0-9 y a-f)"}</p>}
           <div className="actions">
             <button className="btn ghost" onClick={() => setStep(1)}>
-              ← Atrás
+              <ArrowLeft size={16} aria-hidden /> Atrás
             </button>
             <button className="btn" disabled={!idValid} onClick={() => setStep(3)}>
-              Siguiente →
+              Siguiente
             </button>
           </div>
         </div>
@@ -162,16 +163,16 @@ export function CloudflareWizard({
           <div className="paste-row">
             <input type="password" value={token} onChange={(e) => setToken(e.target.value.trim())} placeholder="Tu token de Workers AI" autoComplete="off" />
             <button className="btn ghost small" onClick={async () => setToken(await pasteFromClipboard())}>
-              📋 Pegar
+              <ClipboardPaste size={16} aria-hidden /> Pegar
             </button>
           </div>
-          <p className="muted">🔒 El token es como una contraseña: no lo compartas con nadie. Se guarda solo en este dispositivo.</p>
+          <p className="muted">El token es como una contraseña: no lo compartas con nadie. Se guarda solo en este dispositivo.</p>
           <div className="actions">
             <button className="btn ghost" onClick={() => setStep(2)}>
-              ← Atrás
+              <ArrowLeft size={16} aria-hidden /> Atrás
             </button>
             <button className="btn" disabled={!token} onClick={() => (setStep(4), test())}>
-              Siguiente: probar →
+              Siguiente: probar
             </button>
           </div>
         </div>
@@ -181,23 +182,23 @@ export function CloudflareWizard({
         <div className="wizard-body">
           <h3>4. Probar la conexión</h3>
           {!checks && !testing && <p>Revisaremos que tu Account ID y tu token funcionen.</p>}
-          {testing && <div className="notice">🔌 Probando la conexión con Cloudflare…</div>}
+          {testing && <div className="notice">Probando la conexión con Cloudflare…</div>}
           {checks && <CheckList checks={checks} />}
           {done ? (
             <div className="success-box">
-              <strong>🎉 ¡Listo! Tu cuenta quedó conectada.</strong>
+              <strong>¡Listo! Tu cuenta quedó conectada.</strong>
               <p>Ya puedes crear textos, imágenes y voz con IA gratis, sin los límites del modo demo.</p>
               <button className="btn" onClick={onFinish}>
-                Empezar a crear →
+                Empezar a crear
               </button>
             </div>
           ) : (
             <div className="actions">
               <button className="btn ghost" onClick={() => setStep(checks?.[0] && !checks[0].ok ? 2 : 3)}>
-                ← Corregir
+                <ArrowLeft size={16} aria-hidden /> Corregir
               </button>
               <button className="btn" disabled={testing || !accountId || !token} onClick={test}>
-                🔌 Probar conexión
+                <Plug size={16} aria-hidden /> Probar conexión
               </button>
             </div>
           )}
@@ -228,14 +229,14 @@ export function Welcome({
         <div className="welcome-actions">
           {demo?.demo && (
             <button className="btn big" onClick={onDemo}>
-              🚀 Probar ahora (modo demo)
+              <Rocket size={16} aria-hidden /> Probar ahora (modo demo)
               <small>
                 Sin configurar nada · {demo.limits?.image} imágenes y {demo.limits?.text} textos al día
               </small>
             </button>
           )}
           <button className={`btn big ${demo?.demo ? "ghost" : ""}`} onClick={onSetup}>
-            ⚙️ Conectar mi cuenta gratis
+            <Cog size={16} aria-hidden /> Conectar mi cuenta gratis
             <small>Uso diario gratis, sin límites del demo · toma unos 5 minutos</small>
           </button>
           <button className="btn ghost small" onClick={onHaveKeys}>

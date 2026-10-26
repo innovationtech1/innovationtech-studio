@@ -218,7 +218,7 @@ export default function ContentCalendar({
         </>
       )}
 
-      {busy && <div className="notice">🗓️ {busy}</div>}
+      {busy && <div className="notice">{busy}</div>}
       {error && <div className="error">{error}</div>}
 
       {plan.length > 0 && (

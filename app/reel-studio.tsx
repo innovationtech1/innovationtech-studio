@@ -10,6 +10,7 @@ import { clearDrafts, usePersistentState } from "@/lib/persist";
 import { toDataUrl } from "@/lib/media-store";
 import { MUSIC_STYLES, MusicStyleId, renderMusic } from "@/lib/music";
 
+import { Clapperboard, Dices, Download, Mic, Play, Sparkles, VolumeX } from "lucide-react";
 type Scene = { image: string; caption: string; prompt: string; loading?: boolean };
 
 const emptyScene = (): Scene => ({ image: "", caption: "", prompt: "" });
@@ -71,7 +72,7 @@ export default function ReelStudio({
     listenNode.current = null;
   };
   const listenMusic = (seed: number) =>
-    run("🎵 Componiendo una muestra…", async () => {
+    run("Componiendo una muestra…", async () => {
       stopListen();
       const buf = await renderMusic({ style: musicStyle, seed, duration: 12 });
       if (!listenCtx.current) listenCtx.current = new AudioContext();
@@ -324,7 +325,7 @@ export default function ReelStudio({
       </div>
       <div className="actions">
         <button className="btn" disabled={!!busy || !topic.trim()} onClick={createAll}>
-          ✨ Crear todo con IA
+          <Sparkles size={16} aria-hidden /> Crear todo con IA
         </button>
         <button
           className="btn ghost"
@@ -460,7 +461,7 @@ export default function ReelStudio({
       />
       <div className="actions" style={{ alignItems: "center" }}>
         <button className="btn ghost small" disabled={!!busy || !script.trim()} onClick={makeVoice}>
-          🎙️ Generar voz
+          <Mic size={16} aria-hidden /> Generar voz
         </button>
         {voice && (
           <>
@@ -477,7 +478,7 @@ export default function ReelStudio({
       <h3 className="step">5. Música de fondo (gratis, sin derechos de autor)</h3>
       <div className="music-grid">
         <button className={!musicOn ? "active" : ""} onClick={() => setMusicOn(false)}>
-          <span className="emoji">🔇</span>
+          <VolumeX size={18} aria-hidden />
           <strong>Sin música</strong>
         </button>
         {MUSIC_STYLES.map((m) => (
@@ -495,10 +496,10 @@ export default function ReelStudio({
         <>
           <div className="actions">
             <button className="btn ghost small" disabled={!!busy} onClick={() => listenMusic(musicSeed)}>
-              ▶ Escuchar
+              <Play size={15} aria-hidden /> Escuchar
             </button>
             <button className="btn ghost small" disabled={!!busy} onClick={() => (setMusicSeed(musicSeed + 1), listenMusic(musicSeed + 1))}>
-              🎲 Otra versión
+              <Dices size={16} aria-hidden /> Otra versión
             </button>
             <button className="btn ghost small" onClick={stopListen}>
               ⏹
@@ -517,7 +518,7 @@ export default function ReelStudio({
       {/* 6. Crear */}
       <h3 className="step">6. Crear el video</h3>
       <button className="btn" disabled={!!busy || !canRecord || !scenes.some((s) => s.image)} onClick={buildReel}>
-        🎬 Crear reel
+        <Clapperboard size={16} aria-hidden /> Crear reel
       </button>
       {busy && (
         <div className="notice">
@@ -546,9 +547,9 @@ export default function ReelStudio({
             <video src={result.url} controls playsInline />
             <div className="meta actions">
               <a href={result.url} download={`reel-innovationtech.${result.ext}`}>
-                ⬇️ Descargar video ({result.seconds} s, {result.ext.toUpperCase()})
+                <Download size={16} aria-hidden /> Descargar video ({result.seconds} s, {result.ext.toUpperCase()})
               </a>
-              <span className="muted">· ✅ Guardado en tu galería</span>
+              <span className="muted">· Guardado en tu galería</span>
             </div>
           </div>
         )}
