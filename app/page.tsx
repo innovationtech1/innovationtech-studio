@@ -15,6 +15,7 @@ import { CheckList, CloudflareWizard, testCloudflare, Welcome } from "./setup-wi
 import { formatBytes, storageUsage, toDataUrl } from "@/lib/media-store";
 import type { Item, Settings } from "@/lib/types";
 import ReelStudio from "./reel-studio";
+import ContentCalendar from "./content-calendar";
 
 type Tab = "texto" | "imagen" | "editor" | "video" | "galeria" | "marca" | "config";
 
@@ -122,6 +123,8 @@ export default function Home() {
     setToEditor((h) => ({ text, n: (h?.n || 0) + 1 }));
     setTab("editor");
   };
+  const [textMode, setTextMode] = usePersistentState<"post" | "calendario">("texto:modo", "post");
+  const [reelTopic, setReelTopic] = useState<{ text: string; n: number } | null>(null);
   // Escena editada que vuelve al reel
   const [sceneUpdate, setSceneUpdate] = useState<{ scene: number; url: string; n: number } | null>(null);
   const [ready, setReady] = useState(false);
@@ -235,13 +238,32 @@ export default function Home() {
 
       {/* Todas las secciones permanecen abiertas en segundo plano: al cambiar de pestaña no se pierde nada. */}
       <div hidden={tab !== "texto"}>
-        <TextStudio
-          settings={settings}
-          brand={brand}
-          onUseImage={(p) => (setImagePrompt(p), setTab("imagen"))}
-          onToEditor={textToEditor}
-          onUseVideo={(p) => (setVideoPrompt(p), setVideoMode("ia"), setTab("video"))}
-        />
+        <div className="mode-switch" role="tablist">
+          <button className={textMode === "post" ? "active" : ""} onClick={() => setTextMode("post")}>
+            ✍️ Una publicación
+          </button>
+          <button className={textMode === "calendario" ? "active" : ""} onClick={() => setTextMode("calendario")}>
+            🗓️ Calendario de 30 días
+          </button>
+        </div>
+        <div hidden={textMode !== "post"}>
+          <TextStudio
+            settings={settings}
+            brand={brand}
+            onUseImage={(p) => (setImagePrompt(p), setTab("imagen"))}
+            onToEditor={textToEditor}
+            onUseVideo={(p) => (setVideoPrompt(p), setVideoMode("ia"), setTab("video"))}
+          />
+        </div>
+        <div hidden={textMode !== "calendario"}>
+          <ContentCalendar
+            settings={settings}
+            brand={brand}
+            onImage={(p) => (setImagePrompt(p), go("imagen"))}
+            onEditor={textToEditor}
+            onReel={(t) => (setReelTopic((r) => ({ text: t, n: (r?.n || 0) + 1 })), setVideoMode("reel"), go("video"))}
+          />
+        </div>
       </div>
       <div hidden={tab !== "imagen"}>
         <ImageStudio
@@ -296,6 +318,7 @@ export default function Home() {
               onVideo={(blob, prompt) => galleryStore.add([{ kind: "video", blob, prompt }])}
               handoff={handoff}
               sceneUpdate={sceneUpdate}
+              incomingTopic={reelTopic}
               onEditScene={(i, src) => openInEditor(src, { scene: i })}
               onOpenBrand={() => go("marca")}
             />

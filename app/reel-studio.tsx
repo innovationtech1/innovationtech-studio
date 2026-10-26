@@ -22,10 +22,12 @@ export default function ReelStudio({
   onVideo,
   handoff,
   sceneUpdate,
+  incomingTopic,
   onEditScene,
   onOpenBrand,
 }: {
   sceneUpdate: { scene: number; url: string; n: number } | null;
+  incomingTopic?: { text: string; n: number } | null;
   onEditScene: (i: number, src: string) => void;
   onOpenBrand: () => void;
   onVideo: (blob: Blob, prompt: string) => void;
@@ -106,6 +108,10 @@ export default function ReelStudio({
     });
   }, [handoff, setScenes]);
   useEffect(() => setBrandName((b) => b || brand.name), [brand.name]);
+  // Tema enviado desde el calendario de contenido
+  useEffect(() => {
+    if (incomingTopic) setTopic(incomingTopic.text);
+  }, [incomingTopic, setTopic]);
   // Escena que vuelve del editor
   useEffect(() => {
     if (!sceneUpdate) return;

@@ -73,11 +73,56 @@ function parseJson(text: string): Record<string, unknown> | null {
 }
 
 export async function POST(req: Request) {
-  const { prompt, platform, brand, model, provider, mode, scenes } = await req.json().catch(() => ({}));
+  const { prompt, platform, brand, model, provider, mode, scenes, dates, previous } = await req.json().catch(() => ({}));
   if (!prompt || typeof prompt !== "string") return jsonError("Escribe qué quieres crear.");
   const brandBlock = brand ? `\nContexto de la marca:\n${brand}` : "";
 
   try {
+    // Modo calendario: un plan de publicaciones, una por fecha.
+    if (mode === "calendar") {
+      const list: string[] = Array.isArray(dates) ? dates.map(String).slice(0, 12) : [];
+      if (!list.length) return jsonError("Faltan las fechas del calendario.");
+      const n = list.length;
+      const system = [
+        "Eres el estratega de contenido de una agencia de marketing para pequeños negocios.",
+        "Arma un calendario de publicaciones variado y realista para redes sociales.",
+        "Responde SOLO con un objeto JSON válido, sin texto adicional, con esta forma exacta:",
+        `{"items": [${n} objetos {"type": "post" | "reel" | "historia", "pillar": "texto", "title": "texto", "caption": "texto", "image_prompt": "texto"}]}`,
+        `- Exactamente ${n} objetos, uno por fecha y en el mismo orden de las fechas.`,
+        '- "type": alterna formatos; usa "reel" aprox. 1 de cada 3.',
+        '- "pillar": el tipo de contenido en 1–3 palabras (Promoción, Producto, Detrás de cámaras, Consejo, Cliente feliz, Pregunta, Fecha especial…). Varíalos.',
+        '- "title": frase corta para poner sobre la imagen, máximo 7 palabras.',
+        '- "caption": texto listo para publicar de 1 a 3 frases + 3 a 5 hashtags. Si la fecha es especial (día festivo, fin de semana, quincena), aprovéchala.',
+        '- "image_prompt": descripción EN INGLÉS de la foto (una línea, estilo fotografía publicitaria, sin texto dentro de la imagen).',
+        "No inventes testimonios ni datos de clientes reales. Escribe en el idioma del pedido (por defecto, español).",
+        brandBlock,
+      ].join("\n");
+      const user = [
+        `Negocio y objetivo: ${prompt}`,
+        platform ? `Red social principal: ${platform}` : "",
+        typeof previous === "string" && previous ? `Ya se planearon estos temas (no los repitas): ${previous.slice(0, 1200)}` : "",
+        `Fechas:\n${list.map((d, i) => `${i + 1}. ${d}`).join("\n")}`,
+      ]
+        .filter(Boolean)
+        .join("\n");
+      const text = await generate(req, provider, model, { system, user, maxTokens: 2600 });
+      const json = parseJson(text);
+      const raw = Array.isArray(json?.items) ? (json!.items as Record<string, unknown>[]) : [];
+      if (!raw.length) return jsonError("La IA no devolvió el calendario en el formato esperado. Intenta de nuevo.", 502);
+      const items = list.map((_, i) => {
+        const r = raw[i] || {};
+        const type = ["post", "reel", "historia"].includes(String(r.type)) ? String(r.type) : "post";
+        return {
+          type,
+          pillar: String(r.pillar || ""),
+          title: String(r.title || ""),
+          caption: String(r.caption || ""),
+          imagePrompt: String(r.image_prompt || ""),
+        };
+      });
+      return Response.json({ items });
+    }
+
     // Modo reel: textos cortos por escena + cierre + guion de voz.
     if (mode === "reel") {
       const n = Math.min(Math.max(Number(scenes) || 4, 1), 8);
