@@ -6,10 +6,12 @@ import { Dispatch, SetStateAction, useEffect, useRef, useState } from "react";
 // al cerrar la app o recargar la página. Si el navegador no permite guardar
 // (modo privado, sin espacio), sigue funcionando normal en memoria.
 // `fallback` se usa si el valor no cabe (por ejemplo, quitando las imágenes y dejando solo los textos).
+// `toStore` (opcional) transforma siempre el valor antes de guardarlo (por ejemplo, para no guardar fotos pesadas).
 export function usePersistentState<T>(
   key: string,
   initial: T,
-  fallback?: (value: T) => T
+  fallback?: (value: T) => T,
+  toStore?: (value: T) => T
 ): [T, Dispatch<SetStateAction<T>>] {
   const [value, setValue] = useState<T>(initial);
   const loaded = useRef(false);
@@ -30,7 +32,7 @@ export function usePersistentState<T>(
     if (!loaded.current) return;
     const t = setTimeout(() => {
       try {
-        localStorage.setItem(`its-draft:${key}`, JSON.stringify(value));
+        localStorage.setItem(`its-draft:${key}`, JSON.stringify(toStore ? toStore(value) : value));
       } catch {
         try {
           if (fallback) localStorage.setItem(`its-draft:${key}`, JSON.stringify(fallback(value)));

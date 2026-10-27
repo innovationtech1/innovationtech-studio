@@ -7,11 +7,21 @@ import { fileToResizedDataUrl } from "@/lib/resize";
 import { ReelFormat, renderReel, supportedRecording } from "@/lib/reel";
 import type { Item, Settings } from "@/lib/types";
 import { clearDrafts, usePersistentState } from "@/lib/persist";
-import { toDataUrl } from "@/lib/media-store";
+import { deleteFile, getFile, putFile, toBlob, toDataUrl } from "@/lib/media-store";
+
+const blobToDataUrl = (b: Blob) =>
+  new Promise<string>((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result));
+    r.onerror = () => rej(r.error);
+    r.readAsDataURL(b);
+  });
 import { MUSIC_STYLES, MusicStyleId, renderMusic } from "@/lib/music";
 
 import { Clapperboard, Dices, Download, Mic, Play, Sparkles, VolumeX } from "lucide-react";
-type Scene = { image: string; caption: string; prompt: string; loading?: boolean };
+// imageId: la foto de la escena guardada en el dispositivo (IndexedDB), para que no se pierda
+// al cambiar de sección, editar, cerrar o recargar la app.
+type Scene = { image: string; caption: string; prompt: string; loading?: boolean; imageId?: string };
 
 const emptyScene = (): Scene => ({ image: "", caption: "", prompt: "" });
 
@@ -45,9 +55,52 @@ export default function ReelStudio({
   const [scenes, setScenes] = usePersistentState<Scene[]>(
     "reel:escenas-datos",
     Array.from({ length: 4 }, emptyScene),
-    // Si las fotos no caben en el navegador, guardamos al menos los textos.
-    (s) => s.map((sc) => ({ ...sc, image: sc.image.startsWith("data:") ? "" : sc.image, loading: false }))
+    undefined,
+    // Las fotos van al almacenamiento del dispositivo (IndexedDB); aquí solo se guarda su id y los textos.
+    (s) => s.map((sc) => ({ ...sc, image: sc.imageId || !sc.image.startsWith("data:") ? (sc.imageId ? "" : sc.image) : "", loading: false }))
   );
+  // id guardado → foto que tiene (para saber si cambió)
+  const savedImages = useRef(new Map<string, string>());
+  const restored = useRef(false);
+
+  // Al abrir la app: recuperar las fotos de las escenas desde el dispositivo.
+  useEffect(() => {
+    if (restored.current) return;
+    const missing = scenes.filter((sc) => sc.imageId && !sc.image);
+    const t = setTimeout(async () => {
+      restored.current = true;
+      for (const sc of missing) {
+        const blob = await getFile(sc.imageId!).catch(() => null);
+        if (!blob) continue;
+        const url = await blobToDataUrl(blob);
+        savedImages.current.set(sc.imageId!, url);
+        setScenes((all) => all.map((x) => (x.imageId === sc.imageId && !x.image ? { ...x, image: url } : x)));
+      }
+    }, 400); // espera a que se cargue el borrador guardado
+    return () => clearTimeout(t);
+  }, [scenes, setScenes]);
+
+  // Cada foto nueva o cambiada se guarda en el dispositivo.
+  useEffect(() => {
+    if (!restored.current) return;
+    scenes.forEach((sc, i) => {
+      if (!sc.image) return;
+      if (sc.imageId && savedImages.current.get(sc.imageId) === sc.image) return;
+      if (sc.imageId && !savedImages.current.has(sc.imageId) && !sc.image.startsWith("data:")) return;
+      const old = sc.imageId;
+      const id = `reel-${Math.random().toString(36).slice(2, 10)}`;
+      savedImages.current.set(id, sc.image);
+      setScenes((all) => all.map((x, j) => (j === i && x.image === sc.image ? { ...x, imageId: id } : x)));
+      (async () => {
+        const blob = await toBlob(sc.image);
+        if (blob) await putFile(id, blob).catch(() => {});
+        if (old) {
+          savedImages.current.delete(old);
+          deleteFile(old).catch(() => {});
+        }
+      })();
+    });
+  }, [scenes, setScenes]);
   const [seconds, setSeconds] = usePersistentState("reel:segundos", 3);
   const [brandName, setBrandName] = usePersistentState("reel:negocio", brand.name);
   const [cta, setCta] = usePersistentState("reel:cta", "");
@@ -275,6 +328,7 @@ export default function ReelStudio({
             if (!confirm("¿Empezar un reel nuevo? Se borrarán el tema, las escenas y el guion actuales.")) return;
             clearDrafts("reel:");
             setTopic("");
+            scenes.forEach((sc) => sc.imageId && deleteFile(sc.imageId).catch(() => {}));
             setScenes(Array.from({ length: count }, emptyScene));
             setCta("");
             setScript("");
@@ -399,7 +453,7 @@ export default function ReelStudio({
                 </button>
               )}
               {sc.image && (
-                <button className="btn ghost small" onClick={() => setScene(i, { image: "" })}>
+                <button className="btn ghost small" onClick={() => (sc.imageId && deleteFile(sc.imageId).catch(() => {}), setScene(i, { image: "", imageId: undefined }))}>
                   Quitar
                 </button>
               )}
