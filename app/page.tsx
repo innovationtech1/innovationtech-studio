@@ -11,13 +11,16 @@ import { usePersistentState } from "@/lib/persist";
 import { useGallery } from "@/lib/use-gallery";
 import { useDemo } from "@/lib/use-demo";
 import { getLang, installLangHeader, locale, setLang, startDomTranslation } from "@/lib/i18n";
-import { Bug, Languages } from "lucide-react";
+import { Bug, Languages, MessagesSquare } from "lucide-react";
+import MicButton from "./mic-button";
 import { Bot, CalendarDays, Clapperboard, Download, Eraser, Film, FolderOpen, ImageIcon, ImagePlus, Images, Palette, Pencil, PenLine, Plug, RefreshCw, Rocket, Scissors, Settings as SettingsIcon, Shapes, Trash2, type LucideIcon, Wand2 } from "lucide-react";
 import { CheckList, CloudflareWizard, testCloudflare, Welcome } from "./setup-wizard";
 import { formatBytes, storageUsage, toDataUrl } from "@/lib/media-store";
 import type { Item, Settings } from "@/lib/types";
 import ReelStudio from "./reel-studio";
 import ContentCalendar from "./content-calendar";
+import AssistantChat from "./assistant-chat";
+import { extract, phrases } from "@/lib/phrases";
 
 type Tab = "texto" | "imagen" | "editor" | "video" | "galeria" | "marca" | "config";
 
@@ -84,24 +87,6 @@ function save(key: string, value: unknown) {
   }
 }
 
-// Frases cortas del texto generado que sirven para poner sobre una imagen.
-function phrases(text: string): string[] {
-  const out: string[] = [];
-  for (const raw of text.split(/\n+/)) {
-    if (/^\s*(#[^\s#]+[\s,]*)+$/.test(raw)) continue; // solo hashtags
-    let l = raw.replace(/\*+|^#+\s+|^[-•]\s*|^\d+[.)]\s*/g, "").trim();
-    if (!l || /^PROMPT DE/i.test(l)) continue;
-    l = l.replace(/^[A-ZÁÉÍÓÚÑ ]{3,30}:\s*/, "").trim(); // «GANCHO: …» → «…»
-    if (l.length < 4 || l.length > 140 || /:$/.test(l)) continue;
-    if (!out.includes(l)) out.push(l);
-  }
-  return out.slice(0, 12);
-}
-
-function extract(text: string, label: string): string {
-  const m = text.match(new RegExp(`${label}:?\\**\\s*(.+)`, "i"));
-  return m ? m[1].replace(/\*+/g, "").trim() : "";
-}
 
 export default function Home() {
   const [tab, setTab] = usePersistentState<Tab>("tab", "texto");
@@ -125,7 +110,7 @@ export default function Home() {
     setToEditor((h) => ({ text, n: (h?.n || 0) + 1 }));
     setTab("editor");
   };
-  const [textMode, setTextMode] = usePersistentState<"post" | "calendario">("texto:modo", "post");
+  const [textMode, setTextMode] = usePersistentState<"chat" | "post" | "calendario">("texto:modo-v2", "chat");
   const [reelTopic, setReelTopic] = useState<{ text: string; n: number } | null>(null);
   // Escena editada que vuelve al reel
   const [sceneUpdate, setSceneUpdate] = useState<{ scene: number; url: string; n: number } | null>(null);
@@ -268,12 +253,23 @@ export default function Home() {
       {/* Todas las secciones permanecen abiertas en segundo plano: al cambiar de pestaña no se pierde nada. */}
       <div hidden={tab !== "texto"}>
         <div className="mode-switch" role="tablist">
+          <button className={textMode === "chat" ? "active" : ""} onClick={() => setTextMode("chat")}>
+            <MessagesSquare size={16} aria-hidden /> Asistente
+          </button>
           <button className={textMode === "post" ? "active" : ""} onClick={() => setTextMode("post")}>
             <PenLine size={16} aria-hidden /> Una publicación
           </button>
           <button className={textMode === "calendario" ? "active" : ""} onClick={() => setTextMode("calendario")}>
             <CalendarDays size={16} aria-hidden /> Calendario de 30 días
           </button>
+        </div>
+        <div hidden={textMode !== "chat"}>
+          <AssistantChat
+            settings={settings}
+            brand={brand}
+            onImage={(p) => (setImagePrompt(p), go("imagen"))}
+            onEditor={textToEditor}
+          />
         </div>
         <div hidden={textMode !== "post"}>
           <TextStudio
@@ -508,7 +504,13 @@ function TextStudio({
           </select>
         </div>
       </div>
-      <label>¿Qué quieres publicar?</label>
+      <div className="label-row">
+        <label>¿Qué quieres publicar?</label>
+        <MicButton
+          cfHeaders={{ "x-cf-account": settings.cfAccountId, "x-cf-token": settings.cfToken }}
+          onText={(t) => setPrompt((v) => (v && !v.endsWith(" ") ? `${v} ${t}` : v + t))}
+        />
+      </div>
       <textarea
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}

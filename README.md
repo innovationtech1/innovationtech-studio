@@ -25,6 +25,7 @@ Cada persona usa **sus propias claves de API** y paga solo lo que genera. El có
 | 🎬 Video con IA (opcional) | Clips generados por IA desde texto o animando una foto | Modelos de video en Replicate (de pago) |
 | 🎨 Mi marca | Logo, paleta de colores, letra de títulos, contacto, giro, público y tono. La IA la usa en cada pedido y en el editor y los reels se aplica con un toque | — |
 | 🧩 Plantillas | 14 diseños por giro (comida, belleza, bienes raíces, tiendas, eventos, servicios) que salen con tu marca; los títulos se ajustan solos | Navegador |
+| 💬 Asistente | Chat de marketing que recuerda la conversación, responde en tiempo real y acepta cambios con un toque (más corto, más formal, variantes…); dictado por voz, leer en voz alta, llevar al editor y crear la imagen; conversaciones guardadas en el dispositivo | Cloudflare Workers AI (gratis) o Claude |
 | 🗓️ Calendario de contenido | Plan de 30 días con la IA: tipo de publicación, frase para la imagen, texto listo y descripción de la foto; cada día se convierte en imagen, diseño o reel; descarga para Excel | Cloudflare Workers AI (gratis) o Claude |
 | 📐 Todos los tamaños | Un diseño adaptado a post, post vertical, historia, horizontal, Pinterest, portada de Facebook y banner de YouTube (con zona segura); descarga en .zip | Navegador |
 | 💬 Subtítulos y efectos | Subtítulos automáticos de tus videos (Whisper de Cloudflare, gratis), textos palabra por palabra o con la palabra resaltada, stickers animados; subtítulos de la voz en off en los reels | Navegador + Cloudflare Workers AI |

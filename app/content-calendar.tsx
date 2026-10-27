@@ -6,6 +6,7 @@ import { friendlyError } from "@/lib/errors";
 import { usePersistentState } from "@/lib/persist";
 import type { Settings } from "@/lib/types";
 import { locale } from "@/lib/i18n";
+import MicButton from "./mic-button";
 
 // Calendario de contenido con IA: un plan de publicaciones para 30 días.
 // Cada día trae el tipo (post, reel o historia), el tema, una frase para la imagen,
@@ -183,7 +184,13 @@ export default function ContentCalendar({
 
       {plan.length === 0 && (
         <>
-          <label>¿Qué quieres lograr este mes?</label>
+          <div className="label-row">
+            <label>¿Qué quieres lograr este mes?</label>
+            <MicButton
+              cfHeaders={{ "x-cf-account": settings.cfAccountId, "x-cf-token": settings.cfToken }}
+              onText={(t) => setGoal((v) => (v && !v.endsWith(" ") ? `${v} ${t}` : v + t))}
+            />
+          </div>
           <textarea
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
