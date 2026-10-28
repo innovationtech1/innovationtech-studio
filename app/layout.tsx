@@ -4,7 +4,14 @@ import "@fontsource-variable/instrument-sans/index.css";
 import "./globals.css";
 import PwaSetup from "./pwa-setup";
 
+// Dirección pública de la app, para que la vista previa al compartir el enlace (WhatsApp, Facebook…)
+// muestre la imagen. En Vercel se detecta sola, también en las copias (forks) de otras personas.
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL
+  || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "")
+  || "https://innovationtech-studio.vercel.app";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: "InnovationTECH Studio",
   description: "Crea textos, imágenes y videos de marketing con IA. Open source.",
   applicationName: "InnovationTECH Studio",
@@ -39,6 +46,14 @@ export const metadata: Metadata = {
     description: "Crea textos, imágenes y videos de marketing con IA. Open source.",
     images: [{ url: "/icons/og-1024.jpg", width: 1024, height: 1024 }],
     type: "website",
+    siteName: "InnovationTECH Studio",
+    locale: "es_MX",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "InnovationTECH Studio",
+    description: "Crea textos, imágenes y videos de marketing con IA. Open source.",
+    images: ["/icons/og-1024.jpg"],
   },
 };
 

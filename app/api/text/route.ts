@@ -126,6 +126,36 @@ export async function POST(req: Request) {
       return Response.json({ items });
     }
 
+    // Modo carrusel: portada + puntos + cierre, y el texto para publicar.
+    if (mode === "carousel") {
+      const n = Math.min(Math.max(Number(scenes) || 6, 3), 10);
+      const system = [
+        "Eres el estratega de contenido de una agencia de marketing. Escribes carruseles de Instagram que la gente guarda y comparte.",
+        "Responde SOLO con un objeto JSON válido, sin texto adicional, con esta forma exacta:",
+        `{"slides": [${n} objetos {"title": "texto", "body": "texto"}], "cover_image_prompt": "texto", "caption": "texto"}`,
+        `- Exactamente ${n} diapositivas, en orden.`,
+        '- Diapositiva 1 = PORTADA: "title" es un gancho que obligue a deslizar (máximo 8 palabras); "body" es un subtítulo de máximo 12 palabras.',
+        `- Diapositivas 2 a ${n - 1} = UN punto cada una (consejo, paso, razón, beneficio o error): "title" de máximo 7 palabras, "body" de 12 a 28 palabras, concreto y útil. Sin numerar (la app pone el número).`,
+        `- Diapositiva ${n} = CIERRE: "title" con la llamada a la acción (máximo 8 palabras); "body" de máximo 18 palabras (por ejemplo, invitar a escribir, visitar o guardar el post).`,
+        '- "cover_image_prompt": descripción EN INGLÉS de una foto para la portada (una línea, fotografía publicitaria, sin texto dentro de la imagen).',
+        '- "caption": texto para publicar con el carrusel: 2 a 4 frases + 4 a 6 hashtags.',
+        "No inventes testimonios, cifras ni datos de clientes reales. Sin emojis dentro de title y body. Escribe en el idioma del pedido (por defecto, español).",
+        brandBlock,
+      ].join("\n");
+      const user = [`Tema del carrusel: ${prompt}`, platform ? `Red social: ${platform}` : ""].filter(Boolean).join("\n");
+      const text = await generate(req, provider, model, { system, user, maxTokens: 500 + n * 160 });
+      const json = parseJson(text);
+      const raw = Array.isArray(json?.slides) ? (json!.slides as Record<string, unknown>[]) : [];
+      if (raw.length < 2) return jsonError("La IA no devolvió el carrusel en el formato esperado. Intenta de nuevo.", 502);
+      const clean = (v: unknown) => String(v ?? "").replace(/^\s*\d+[.)-]\s*/, "").trim();
+      const slides = raw.slice(0, n).map((r) => ({ title: clean(r?.title), body: String(r?.body ?? "").trim() }));
+      return Response.json({
+        slides,
+        coverImagePrompt: typeof json?.cover_image_prompt === "string" ? json.cover_image_prompt : "",
+        caption: typeof json?.caption === "string" ? json.caption : "",
+      });
+    }
+
     // Modo reel: textos cortos por escena + cierre + guion de voz.
     if (mode === "reel") {
       const n = Math.min(Math.max(Number(scenes) || 4, 1), 8);

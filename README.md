@@ -27,6 +27,7 @@ Cada persona usa **sus propias claves de API** y paga solo lo que genera. El có
 | 🧩 Plantillas | 14 diseños por giro (comida, belleza, bienes raíces, tiendas, eventos, servicios) que salen con tu marca; los títulos se ajustan solos | Navegador |
 | 💬 Asistente | Chat de marketing que recuerda la conversación, responde en tiempo real y acepta cambios con un toque (más corto, más formal, variantes…); dictado por voz, leer en voz alta, llevar al editor y crear la imagen; conversaciones guardadas en el dispositivo | Cloudflare Workers AI (gratis) o Claude |
 | 🗓️ Calendario de contenido | Plan de 30 días con la IA: tipo de publicación, frase para la imagen, texto listo y descripción de la foto; cada día se convierte en imagen, diseño o reel; descarga para Excel | Cloudflare Workers AI (gratis) o Claude |
+| 🎠 Carrusel para Instagram | La IA escribe la portada, los puntos y el cierre (4 a 10 diapositivas) y la app los diseña con tu marca: 3 estilos, formato 4:5 o 1:1, barra de avance continua, foto propia o con IA por diapositiva, ajuste fino en el editor. Descarga en .zip, compartir directo a Instagram desde el celular y texto para publicar | Cloudflare Workers AI (gratis) o Claude + navegador |
 | 📐 Todos los tamaños | Un diseño adaptado a post, post vertical, historia, horizontal, Pinterest, portada de Facebook y banner de YouTube (con zona segura); descarga en .zip | Navegador |
 | 💬 Subtítulos y efectos | Subtítulos automáticos de tus videos (Whisper de Cloudflare, gratis), textos palabra por palabra o con la palabra resaltada, stickers animados; subtítulos de la voz en off en los reels | Navegador + Cloudflare Workers AI |
 | 🌎 Idiomas | Interfaz en español e inglés; la IA escribe en el idioma elegido | — |
@@ -103,8 +104,9 @@ app/
   reel-studio.tsx         Creador de reels
   video-editor.tsx        Editor de video, stickers y subtítulos automáticos
   content-calendar.tsx    Calendario de contenido
+  carousel-studio.tsx     Carrusel para Instagram
   setup-wizard.tsx        Asistente para conectar Cloudflare y bienvenida
-  api/text/               Textos, guiones de reel y calendario (Cloudflare o Claude)
+  api/text/               Textos, guiones de reel, carruseles y calendario (Cloudflare o Claude)
   api/image/              Imágenes (Cloudflare o Replicate)
   api/voice/              Voz en off (Cloudflare MeloTTS)
   api/transcribe/         Subtítulos automáticos (Cloudflare Whisper)
@@ -114,6 +116,7 @@ lib/
   brand.ts                Kit de marca
   editor-model.ts         Modelo del diseño, formatos y adaptación a otros tamaños
   templates.ts            Plantillas por giro
+  carousel.ts             Diseño de las diapositivas del carrusel
   captions.ts             Subtítulos palabra por palabra
   video-engine.ts, reel.ts, music.ts   Video, reels y música generada
   i18n.ts, locales/en.ts  Idiomas

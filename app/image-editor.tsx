@@ -51,7 +51,9 @@ import { toDataUrl } from "@/lib/media-store";
 import { AlignCenter, AlignCenterHorizontal, AlignCenterVertical, AlignLeft, AlignRight, Aperture, BadgeCheck, BringToFront, Check, ChevronDown, ChevronUp, Download, Eraser, Eye, EyeOff, FlipHorizontal2, FlipVertical2, FolderOpen, Frame, ImagePlus, Layers, LayoutTemplate, Lock, LockOpen, Ratio, Redo2, Save, Scissors, SendToBack, Shapes, Share2, SlidersHorizontal, Sparkles, Square, Tag, Trash2, Type, type LucideIcon, Undo2 } from "lucide-react";
 type Tool = "plantillas" | "marca" | "ajustes" | "filtros" | "texto" | "stickers" | "formas" | "imagen" | "marco" | "capas";
 
-export type EditorIncoming = { n: number; url?: string; text?: string; returnTo?: { scene: number } };
+// A dónde se devuelve el diseño al terminar: una escena del reel o una diapositiva del carrusel.
+export type ReturnTarget = { scene: number } | { slide: number };
+export type EditorIncoming = { n: number; url?: string; text?: string; doc?: Doc; returnTo?: ReturnTarget };
 
 // Colores de la marca para mostrarlos primero en todos los selectores de color
 const BrandColors = createContext<string[]>([]);
@@ -223,9 +225,9 @@ export default function ImageEditor({
   onSaveToGallery: (dataUrl: string) => void;
   brand: Brand;
   onOpenBrand: () => void;
-  onReturn: (dataUrl: string, to: { scene: number }) => void;
+  onReturn: (dataUrl: string, to: ReturnTarget) => void;
 }) {
-  const [returnTo, setReturnTo] = useState<{ scene: number } | null>(null);
+  const [returnTo, setReturnTo] = useState<ReturnTarget | null>(null);
   const [doc, setDocRaw] = usePersistentState<Doc>("editor:doc", emptyDoc(), (d) => ({
     ...d,
     photo: d.photo && d.photo.src.startsWith("data:") ? null : d.photo,
@@ -359,6 +361,11 @@ export default function ImageEditor({
   useEffect(() => {
     if (!incoming) return;
     setReturnTo(incoming.returnTo || null);
+    if (incoming.doc) {
+      setDoc(incoming.doc);
+      setSelected(null);
+      setTool("texto");
+    }
     if (incoming.url) openPhoto(incoming.url);
     if (incoming.text) {
       const l = textFromCopy(docRef.current, incoming.text, brandRef.current);
@@ -887,14 +894,22 @@ export default function ImageEditor({
       {returnTo && (
         <div className="return-bar">
           <span>
-            Estás editando la <strong>escena {returnTo.scene + 1}</strong> de tu reel.
+            {"slide" in returnTo ? (
+              <>
+                Estás editando la <strong>{`diapositiva ${returnTo.slide + 1}`}</strong> de tu carrusel.
+              </>
+            ) : (
+              <>
+                Estás editando la <strong>escena {returnTo.scene + 1}</strong> de tu reel.
+              </>
+            )}
           </span>
           <div className="actions">
             <button className="btn ghost small" onClick={() => setReturnTo(null)}>
               Seguir aquí
             </button>
             <button className="btn small" onClick={backToReel}>
-              Usar en el reel
+              {"slide" in returnTo ? "Usar en el carrusel" : "Usar en el reel"}
             </button>
           </div>
         </div>
@@ -1728,7 +1743,7 @@ function BrandPanel({
 // ---------- Plantillas ----------
 
 // Dibuja un diseño completo fuera de pantalla (foto con filtros, degradado, capas y marco).
-async function renderDocImage(
+export async function renderDocImage(
   doc: Doc,
   o: { width?: number; mime?: "image/png" | "image/jpeg"; quality?: number; images?: Map<string, HTMLImageElement> } = {}
 ): Promise<string> {

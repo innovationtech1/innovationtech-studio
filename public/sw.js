@@ -2,7 +2,18 @@
 // Permite instalar la app y que abra rápido; si no hay internet muestra una pantalla de aviso.
 // Nunca guarda en caché las llamadas a /api (claves y contenido generado).
 
-const VERSION = "its-v1";
+const VERSION = "its-v2";
+const MAX_ENTRIES = 120; // evita que la caché crezca sin fin con archivos de versiones anteriores
+
+// Borra los archivos más viejos cuando la caché pasa del límite (se guardan en orden de llegada).
+async function trim(cache) {
+  const keys = await cache.keys();
+  const extra = keys.length - MAX_ENTRIES;
+  for (let i = 0; i < extra; i++) {
+    const path = new URL(keys[i].url).pathname;
+    if (!SHELL.includes(path)) await cache.delete(keys[i]);
+  }
+}
 const SHELL = ["/", "/offline.html", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/favicon.ico"];
 
 self.addEventListener("install", (event) => {
@@ -48,7 +59,7 @@ self.addEventListener("fetch", (event) => {
           fetch(req).then((res) => {
             if (res.ok) {
               const copy = res.clone();
-              caches.open(VERSION).then((c) => c.put(req, copy));
+              caches.open(VERSION).then((c) => c.put(req, copy).then(() => trim(c)));
             }
             return res;
           })

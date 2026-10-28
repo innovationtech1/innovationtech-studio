@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { Brand, brandAccent, brandContext, brandVisual, emptyBrand, normalizeBrand, textOn } from "@/lib/brand";
 import { FONTS } from "@/lib/editor-model";
-import type { EditorIncoming } from "./image-editor";
+import type { EditorIncoming, ReturnTarget } from "./image-editor";
+import type { Doc } from "@/lib/editor-model";
 import { friendlyError } from "@/lib/errors";
 import { fileToResizedDataUrl } from "@/lib/resize";
 import { usePersistentState } from "@/lib/persist";
@@ -13,7 +14,7 @@ import { useDemo } from "@/lib/use-demo";
 import { getLang, installLangHeader, locale, setLang, startDomTranslation } from "@/lib/i18n";
 import { Bug, Languages, MessagesSquare } from "lucide-react";
 import MicButton from "./mic-button";
-import { Bot, CalendarDays, Clapperboard, Download, Eraser, Film, FolderOpen, ImageIcon, ImagePlus, Images, Palette, Pencil, PenLine, Plug, RefreshCw, Rocket, Scissors, Settings as SettingsIcon, Shapes, Trash2, type LucideIcon, Wand2 } from "lucide-react";
+import { Bot, CalendarDays, GalleryHorizontal, Clapperboard, Download, Eraser, Film, FolderOpen, ImageIcon, ImagePlus, Images, Palette, Pencil, PenLine, Plug, RefreshCw, Rocket, Scissors, Settings as SettingsIcon, Shapes, Trash2, type LucideIcon, Wand2 } from "lucide-react";
 import { CheckList, CloudflareWizard, testCloudflare, Welcome } from "./setup-wizard";
 import { formatBytes, storageUsage, toDataUrl } from "@/lib/media-store";
 import type { Item, Settings } from "@/lib/types";
@@ -30,6 +31,12 @@ const ShapeCrop = dynamic(() => import("./shape-crop"), { ssr: false });
 const VideoEditor = dynamic(() => import("./video-editor"), {
   ssr: false,
   loading: () => <section className="card">Cargando editor de video…</section>,
+});
+
+// Carrusel: dibuja en el lienzo del navegador, como el editor.
+const CarouselStudio = dynamic(() => import("./carousel-studio"), {
+  ssr: false,
+  loading: () => <section className="card">Cargando carrusel…</section>,
 });
 
 // El editor usa el lienzo del navegador: se carga solo en el navegador.
@@ -101,10 +108,14 @@ export default function Home() {
   const [handoff, setHandoff] = useState<{ url: string; n: number } | null>(null);
   // Imagen enviada al editor con «Editar»
   const [toEditor, setToEditor] = useState<EditorIncoming | null>(null);
-  const openInEditor = async (src: string, returnTo?: { scene: number }) => {
+  const openInEditor = async (src: string, returnTo?: ReturnTarget) => {
     const url = await toDataUrl(src); // los enlaces locales temporales se convierten para el borrador
     setToEditor((h) => ({ url, returnTo, n: (h?.n || 0) + 1 }));
     setTab("editor");
+  };
+  const docToEditor = (doc: Doc, returnTo: ReturnTarget) => {
+    setToEditor((h) => ({ doc, returnTo, n: (h?.n || 0) + 1 }));
+    go("editor");
   };
   const textToEditor = (text: string) => {
     setToEditor((h) => ({ text, n: (h?.n || 0) + 1 }));
@@ -114,6 +125,9 @@ export default function Home() {
   const [reelTopic, setReelTopic] = useState<{ text: string; n: number } | null>(null);
   // Escena editada que vuelve al reel
   const [sceneUpdate, setSceneUpdate] = useState<{ scene: number; url: string; n: number } | null>(null);
+  // Diapositiva editada que vuelve al carrusel
+  const [slideUpdate, setSlideUpdate] = useState<{ slide: number; url: string; n: number } | null>(null);
+  const [imageMode, setImageMode] = usePersistentState<"ia" | "carrusel">("imagen:modo", "ia");
   const [ready, setReady] = useState(false);
   const [videoMode, setVideoMode] = usePersistentState<"reel" | "editor" | "ia">("video:mode", "reel");
   const { status: demo } = useDemo();
@@ -291,6 +305,24 @@ export default function Home() {
         </div>
       </div>
       <div hidden={tab !== "imagen"}>
+        <div className="mode-switch" role="tablist">
+          <button className={imageMode === "ia" ? "active" : ""} onClick={() => setImageMode("ia")}>
+            <ImageIcon size={16} aria-hidden /> Imagen con IA
+          </button>
+          <button className={imageMode === "carrusel" ? "active" : ""} onClick={() => setImageMode("carrusel")}>
+            <GalleryHorizontal size={16} aria-hidden /> Carrusel para Instagram
+          </button>
+        </div>
+        <div hidden={imageMode !== "carrusel"}>
+          <CarouselStudio
+            settings={settings}
+            brand={brand}
+            onSave={addToGallery}
+            onEditSlide={(doc, i) => docToEditor(doc, { slide: i })}
+            slideUpdate={slideUpdate}
+          />
+        </div>
+        <div hidden={imageMode !== "ia"}>
         <ImageStudio
           settings={settings}
           brand={brand}
@@ -305,6 +337,7 @@ export default function Home() {
             setTab("video");
           }}
         />
+        </div>
       </div>
       <div hidden={tab !== "editor"}>
         <ImageEditor
@@ -312,6 +345,12 @@ export default function Home() {
           brand={brand}
           onOpenBrand={() => go("marca")}
           onReturn={(url, to) => {
+            if ("slide" in to) {
+              setSlideUpdate((u) => ({ slide: to.slide, url, n: (u?.n || 0) + 1 }));
+              setImageMode("carrusel");
+              go("imagen");
+              return;
+            }
             setSceneUpdate((u) => ({ scene: to.scene, url, n: (u?.n || 0) + 1 }));
             setVideoMode("reel");
             go("video");
