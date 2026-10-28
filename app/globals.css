@@ -710,3 +710,4 @@ h3.step { font-size: 18px; margin: 28px 0 8px; }
 .voice-play { width: 44px; flex: 0 0 44px; border: 0; border-left: 1px solid var(--line-soft); background: transparent; color: var(--paper); display: grid; place-items: center; cursor: pointer; }
 .voice-play:hover { background: var(--console); }
 .voice-play:disabled { opacity: 0.4; cursor: default; }
+.music-groups { margin: 4px 0 8px; }

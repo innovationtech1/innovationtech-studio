@@ -18,7 +18,8 @@ import {
   uid,
   VideoEngine,
 } from "@/lib/video-engine";
-import { MUSIC_STYLES, renderMusic } from "@/lib/music";
+import { describeVersion, renderMusic } from "@/lib/music";
+import MusicPicker from "./music-picker";
 import { deleteFile, getFile, putFile, toBlob } from "@/lib/media-store";
 import { usePersistentState } from "@/lib/persist";
 import type { Item, Settings } from "@/lib/types";
@@ -315,7 +316,7 @@ export default function VideoEditor({
     stopPreview();
     setBusy("Componiendo una muestra…");
     try {
-      const buf = await renderMusic({ style, seed, duration: 12 });
+      const buf = await renderMusic({ style, seed, duration: 15 });
       if (!previewCtx.current) previewCtx.current = new AudioContext();
       await previewCtx.current.resume();
       const s = previewCtx.current.createBufferSource();
@@ -830,19 +831,13 @@ export default function VideoEditor({
                   Música compuesta por la app, <strong>libre de derechos</strong>: puedes usarla en Instagram, TikTok, Facebook y YouTube sin
                   reclamos. Se ajusta sola a la duración de tu video.
                 </p>
-                <div className="music-grid">
-                  {MUSIC_STYLES.map((m) => (
-                    <button
-                      key={m.id}
-                      className={project.music.style === m.id ? "active" : ""}
-                      onClick={() => update((p) => ({ ...p, music: { ...p.music, style: m.id, seed: 1 } }))}
-                    >
-                      <span className="emoji">{m.emoji}</span>
-                      <strong>{m.label}</strong>
-                      <small>{m.desc}</small>
-                    </button>
-                  ))}
-                </div>
+                <MusicPicker
+                  value={project.music.style}
+                  onPick={(id) => {
+                    update((p) => ({ ...p, music: { ...p.music, style: id, seed: 1 } }));
+                    if (!busy) listen(id, 1);
+                  }}
+                />
                 <div className="actions">
                   <button className="btn small" onClick={() => listen()} disabled={!!busy}>
                     <Play size={15} aria-hidden /> Escuchar muestra
@@ -862,7 +857,7 @@ export default function VideoEditor({
                     ⏹ Detener
                   </button>
                 </div>
-                <p className="muted">Versión #{project.music.seed}</p>
+                <p className="muted">{describeVersion(project.music.style, project.music.seed)}</p>
               </>
             )}
 

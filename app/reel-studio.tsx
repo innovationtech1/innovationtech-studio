@@ -16,12 +16,13 @@ const blobToDataUrl = (b: Blob) =>
     r.onerror = () => rej(r.error);
     r.readAsDataURL(b);
   });
-import { MUSIC_STYLES, MusicStyleId, renderMusic } from "@/lib/music";
+import { describeVersion, MusicStyleId, renderMusic } from "@/lib/music";
+import MusicPicker from "./music-picker";
 import { DEFAULT_VOICE, findVoice } from "@/lib/voices";
 import { getLang } from "@/lib/i18n";
 import VoicePicker from "./voice-picker";
 
-import { Clapperboard, Dices, Download, Mic, Play, Sparkles, VolumeX } from "lucide-react";
+import { Clapperboard, Dices, Download, Mic, Play, Sparkles } from "lucide-react";
 // imageId: la foto de la escena guardada en el dispositivo (IndexedDB), para que no se pierda
 // al cambiar de sección, editar, cerrar o recargar la app.
 type Scene = { image: string; caption: string; prompt: string; loading?: boolean; imageId?: string };
@@ -128,10 +129,10 @@ export default function ReelStudio({
     }
     listenNode.current = null;
   };
-  const listenMusic = (seed: number) =>
+  const listenMusic = (seed: number, style: MusicStyleId = musicStyle) =>
     run("Componiendo una muestra…", async () => {
       stopListen();
-      const buf = await renderMusic({ style: musicStyle, seed, duration: 12 });
+      const buf = await renderMusic({ style, seed, duration: 15 });
       if (!listenCtx.current) listenCtx.current = new AudioContext();
       await listenCtx.current.resume();
       const s = listenCtx.current.createBufferSource();
@@ -558,22 +559,18 @@ export default function ReelStudio({
 
       {/* 5. Música */}
       <h3 className="step">5. Música de fondo (gratis, sin derechos de autor)</h3>
-      <div className="music-grid">
-        <button className={!musicOn ? "active" : ""} onClick={() => setMusicOn(false)}>
-          <VolumeX size={18} aria-hidden />
-          <strong>Sin música</strong>
-        </button>
-        {MUSIC_STYLES.map((m) => (
-          <button
-            key={m.id}
-            className={musicOn && musicStyle === m.id ? "active" : ""}
-            onClick={() => (setMusicOn(true), setMusicStyle(m.id), setMusicSeed(1))}
-          >
-            <span className="emoji">{m.emoji}</span>
-            <strong>{m.label}</strong>
-          </button>
-        ))}
-      </div>
+      <p className="hint" style={{ marginTop: 0 }}>Toca un estilo para escucharlo. «Otra versión» cambia tempo, tono, instrumentos y melodía.</p>
+      <MusicPicker
+        value={musicStyle}
+        on={musicOn}
+        onNone={() => (stopListen(), setMusicOn(false))}
+        onPick={(id) => {
+          setMusicOn(true);
+          setMusicStyle(id);
+          setMusicSeed(1);
+          if (!busy) listenMusic(1, id);
+        }}
+      />
       {musicOn && (
         <>
           <div className="actions">
@@ -584,9 +581,10 @@ export default function ReelStudio({
               <Dices size={16} aria-hidden /> Otra versión
             </button>
             <button className="btn ghost small" onClick={stopListen}>
-              ⏹
+              ⏹ Detener
             </button>
           </div>
+          <p className="muted" style={{ margin: "6px 0 0" }}>{describeVersion(musicStyle, musicSeed)}</p>
           <div className="slider">
             <div className="slider-head">
               <span>Volumen de la música{voice ? " (baja sola mientras habla la voz)" : ""}</span>
