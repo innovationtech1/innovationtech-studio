@@ -850,6 +850,12 @@ export const EN: Record<string, string> = {
   "Explica aquí este punto en una o dos frases.": "Explain this point here in one or two sentences.",
   "de tu carrusel.": "of your carousel.",
   "Usar en el carrusel": "Use in the carousel",
+  // Selector de voz
+  "Elige la voz (toca ▶ para escucharla)": "Choose the voice (tap ▶ to listen)",
+  "Para que suene más natural, escribe como hablas: usa comas para las pausas, puntos para respirar y signos de ¡exclamación! o ¿pregunta? para dar emoción.": "To sound more natural, write the way you talk: use commas for pauses, periods to breathe, and exclamation or question marks to add emotion.",
+  "Mujer": "Woman",
+  "Hombre": "Man",
+  "Gasta menos uso gratis": "Uses less of the free quota",
 };
 
 // Textos con números u otras partes que cambian
@@ -876,6 +882,9 @@ export const EN_PATTERNS: [RegExp, string][] = [
   [/^Sube hasta (\d+) foto\(s\) de tu producto, local o logo para crear imágenes a partir de ellas, o déjalo vacío para crear desde cero\.$/, "Upload up to $1 photo(s) of your product, shop or logo to create images from them, or leave it empty to create from scratch."],
   [/^Texto en pantalla (\d+)$/, "On-screen text $1"],
   [/^Clip (\d+) de (\d+) · (foto|video)$/, "Clip $1 of $2 · $3"],
+  [/^Mujer · (.+)$/, "Woman · $1"],
+  [/^Hombre · (.+)$/, "Man · $1"],
+  [/^Escuchar a (.+)$/, "Listen to $1"],
   [/^Descargar (\d+) diapositivas \(\.zip\)$/, "Download $1 slides (.zip)"],
   [/^(\d+)\. Portada$/, "$1. Cover"],
   [/^(\d+)\. Cierre$/, "$1. Closing"],

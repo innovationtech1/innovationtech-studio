@@ -17,6 +17,9 @@ const blobToDataUrl = (b: Blob) =>
     r.readAsDataURL(b);
   });
 import { MUSIC_STYLES, MusicStyleId, renderMusic } from "@/lib/music";
+import { DEFAULT_VOICE, findVoice } from "@/lib/voices";
+import { getLang } from "@/lib/i18n";
+import VoicePicker from "./voice-picker";
 
 import { Clapperboard, Dices, Download, Mic, Play, Sparkles, VolumeX } from "lucide-react";
 // imageId: la foto de la escena guardada en el dispositivo (IndexedDB), para que no se pierda
@@ -140,6 +143,7 @@ export default function ReelStudio({
       listenNode.current = s;
     });
   const [voice, setVoice] = useState("");
+  const [voiceId, setVoiceId] = usePersistentState<string>("reel:voz", DEFAULT_VOICE[getLang()]);
   const [picking, setPicking] = useState<number | null>(null);
   const [busy, setBusy] = useState("");
   const [progress, setProgress] = useState(0);
@@ -280,7 +284,7 @@ export default function ReelStudio({
       const res = await fetch("/api/voice", {
         method: "POST",
         headers: { "content-type": "application/json", ...cfHeaders },
-        body: JSON.stringify({ text: script, lang: "es" }),
+        body: JSON.stringify({ text: script, lang: getLang(), voice: findVoice(voiceId)?.lang === getLang() ? voiceId : DEFAULT_VOICE[getLang()] }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -522,6 +526,11 @@ export default function ReelStudio({
         placeholder="Lo que dirá la voz. «Crear todo con IA» lo escribe por ti."
         style={{ minHeight: 70 }}
       />
+      <label>Elige la voz (toca ▶ para escucharla)</label>
+      <VoicePicker value={voiceId} onChange={(id) => (setVoiceId(id), setVoice(""))} headers={cfHeaders} />
+      <p className="hint" style={{ marginTop: 6 }}>
+        Para que suene más natural, escribe como hablas: usa comas para las pausas, puntos para respirar y signos de ¡exclamación! o ¿pregunta? para dar emoción.
+      </p>
       <div className="actions" style={{ alignItems: "center" }}>
         <button className="btn ghost small" disabled={!!busy || !script.trim()} onClick={makeVoice}>
           <Mic size={16} aria-hidden /> Generar voz

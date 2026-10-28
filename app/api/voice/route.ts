@@ -1,27 +1,40 @@
 import { jsonError } from "@/lib/replicate";
 import { getCreds, refund } from "@/lib/cf-auth";
+import { DEFAULT_VOICE, findVoice } from "@/lib/voices";
 
 export const maxDuration = 60;
 
-// Voz en off gratis con Cloudflare Workers AI (MeloTTS). Devuelve el audio MP3 como data URL.
+// Voz en off gratis con Cloudflare Workers AI. Devuelve el audio MP3 como data URL.
+// Voces naturales: Deepgram Aura-2 (español e inglés). Voz básica: MeloTTS.
 export async function POST(req: Request) {
-  const { text, lang, model } = await req.json().catch(() => ({}));
+  const { text, lang, voice: voiceId } = await req.json().catch(() => ({}));
   if (!text || typeof text !== "string") return jsonError("Escribe el texto de la voz en off.");
   const c = getCreds(req, "voice");
   if ("error" in c) return jsonError(c.error, c.status);
   const { accountId, token } = c;
 
-  const m = (!c.demo && model) || "@cf/myshell-ai/melotts";
-  const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${m}`, {
+  const l = lang === "en" ? "en" : "es";
+  // Solo voces de la lista (no se acepta cualquier modelo desde el navegador).
+  const voice = findVoice(voiceId) || findVoice(DEFAULT_VOICE[l])!;
+  const body = voice.speaker
+    ? { text: text.slice(0, 1800), speaker: voice.speaker, encoding: "mp3" }
+    : { prompt: text.slice(0, 1500), lang: voice.lang };
+
+  const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${voice.model}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt: text.slice(0, 1500), lang: lang || "es" }),
+    body: JSON.stringify(body),
   });
 
   const type = res.headers.get("content-type") || "";
   if (res.ok && type.startsWith("audio/")) {
     const buf = Buffer.from(await res.arrayBuffer());
     return Response.json({ audio: `data:${type.split(";")[0]};base64,${buf.toString("base64")}` });
+  }
+  if (res.ok && !type.includes("json")) {
+    // Algunas respuestas llegan como binario sin tipo de audio: es MP3.
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > 1000) return Response.json({ audio: `data:audio/mpeg;base64,${buf.toString("base64")}` });
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data?.success === false) {
