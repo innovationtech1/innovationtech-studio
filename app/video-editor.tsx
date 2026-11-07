@@ -29,6 +29,7 @@ import type { Item, Settings } from "@/lib/types";
 import { blobToBase64, cuesFromWords, toWav16k, type Word } from "@/lib/captions";
 import { friendlyError } from "@/lib/errors";
 import { tr } from "@/lib/i18n";
+import { ProTag } from "./account-context";
 
 import { Captions, ChevronLeft, Library, Plus, Smile, Zap, ChevronRight, Clapperboard, Copy, Dices, Download, Film, FolderOpen, ImageIcon, Music, Pause, Play, Scissors, Trash2, Type, Upload, Video } from "lucide-react";
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -727,7 +728,7 @@ export default function VideoEditor({
               <button onClick={() => addText("etiqueta")}>+ Etiqueta</button>
             </div>
             <button className="btn small" onClick={autoSubtitles} disabled={!!busy}>
-              <Captions size={16} aria-hidden /> Subtítulos automáticos
+              <Captions size={16} aria-hidden /> Subtítulos automáticos<ProTag h="subtitulos" />
             </button>
             <p className="muted">La IA escucha tus videos y escribe lo que se dice, palabra por palabra (gratis con tu cuenta de Cloudflare).</p>
             <p className="muted">El texto aparece desde el momento actual de la reproducción (puedes ajustarlo).</p>

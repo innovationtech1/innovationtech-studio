@@ -22,6 +22,7 @@ import ReelStudio from "./reel-studio";
 import ContentCalendar from "./content-calendar";
 import AssistantChat from "./assistant-chat";
 import { extract, phrases } from "@/lib/phrases";
+import { BotonCuenta, MejorarPro, ProTag } from "./account-context";
 
 type Tab = "texto" | "imagen" | "editor" | "video" | "galeria" | "marca" | "config";
 
@@ -219,6 +220,7 @@ export default function Home() {
           ))}
         </nav>
         <div className="rail-foot">
+          <BotonCuenta />
           <button className={`status-chip ${estado.cls}`} onClick={() => go("config")} title="Ver configuración">
             <i aria-hidden />
             {estado.text}
@@ -364,16 +366,17 @@ export default function Home() {
       <div hidden={tab !== "video"}>
           <div className="mode-switch" role="tablist">
             <button className={videoMode === "reel" ? "active" : ""} onClick={() => setVideoMode("reel")}>
-              <Film size={16} aria-hidden /> Reel con mis imágenes · gratis
+              <Film size={16} aria-hidden /> Reel con mis imágenes · gratis<ProTag h="reels" />
             </button>
             <button className={videoMode === "editor" ? "active" : ""} onClick={() => setVideoMode("editor")}>
-              <Scissors size={16} aria-hidden /> Editor de video + música
+              <Scissors size={16} aria-hidden /> Editor de video + música<ProTag h="editor_video" />
             </button>
             <button className={videoMode === "ia" ? "active" : ""} onClick={() => setVideoMode("ia")}>
-              <Bot size={16} aria-hidden /> Video con IA · Replicate (de pago)
+              <Bot size={16} aria-hidden /> Video con IA · Replicate (de pago)<ProTag h="video_ia" />
             </button>
           </div>
           <div hidden={videoMode !== "reel"}>
+            <MejorarPro h="reels" />
             <ReelStudio
               settings={settings}
               brand={brand}
@@ -388,6 +391,7 @@ export default function Home() {
             />
           </div>
           <div hidden={videoMode !== "editor"}>
+            <MejorarPro h="editor_video" />
             <VideoEditor
               gallery={gallery}
               settings={settings}
@@ -396,6 +400,7 @@ export default function Home() {
             />
           </div>
           <div hidden={videoMode !== "ia"}>
+            <MejorarPro h="video_ia" />
             <VideoStudio
               settings={settings}
               brand={brand}
