@@ -42,7 +42,28 @@ export interface AccountStore {
   quitarMiembro(negocioId: string, uid: string): Promise<void>;
   // Contadores del día (ceros si todavía no hay).
   getUso(negocioId: string, dia: string): Promise<Uso>;
+
+  // Panel del administrador
+  // Todos los negocios, del más nuevo al más viejo (son pocas decenas: sin paginar).
+  listarNegocios(): Promise<Negocio[]>;
+  // Cambia solo los campos dados (el id no se toca).
+  actualizarNegocio(id: string, cambios: Partial<Negocio>): Promise<void>;
+  registrarPagoManual(p: PagoManual): Promise<void>;
+  // Pagos a mano de un negocio, del más reciente al más viejo.
+  listarPagosManuales(negocioId: string): Promise<PagoManual[]>;
 }
+
+export type PagoManual = {
+  id: string;
+  negocioId: string;
+  plan: "basico" | "pro";
+  monto: number;
+  metodo: "efectivo" | "zelle" | "cashapp" | "otro";
+  hasta: number; // hasta cuándo quedó pagado (ms)
+  nota?: string;
+  registradoPor: string; // correo del administrador
+  fecha: number; // cuándo se registró (ms)
+};
 
 export type Invitacion = { negocioId: string; invitadoPor: string; creado: number };
 
@@ -51,6 +72,7 @@ export const COL_NEGOCIOS = "studio_negocios";
 export const COL_USO = "studio_uso";
 export const COL_INVITACIONES = "studio_invitaciones";
 export const COL_CONFIG = "studio_config";
+export const COL_PAGOS_MANUALES = "studio_pagos_manuales";
 
 export const idUso = (negocioId: string, dia: string) => `${negocioId}_${dia}`;
 
@@ -190,6 +212,33 @@ export function firestoreStore(): AccountStore {
         voces: numero(d.voces),
         subtitulos: numero(d.subtitulos),
       };
+    },
+
+    async listarNegocios() {
+      const q = await db().collection(COL_NEGOCIOS).get();
+      return q.docs
+        .map((d) => ({ ...(d.data() as Omit<Negocio, "id">), id: d.id }) as Negocio)
+        .sort((a, b) => b.creado - a.creado);
+    },
+
+    async actualizarNegocio(id, cambios) {
+      const { id: _id, ...datos } = cambios; // el id nunca se guarda dentro del documento
+      void _id;
+      await db().collection(COL_NEGOCIOS).doc(id).update(datos);
+    },
+
+    async registrarPagoManual(p) {
+      const { id, ...datos } = p;
+      // Firestore no acepta valores undefined
+      const limpio = Object.fromEntries(Object.entries(datos).filter(([, v]) => v !== undefined));
+      await db().collection(COL_PAGOS_MANUALES).doc(id).set(limpio);
+    },
+
+    async listarPagosManuales(negocioId) {
+      const q = await db().collection(COL_PAGOS_MANUALES).where("negocioId", "==", negocioId).get();
+      return q.docs
+        .map((d) => ({ ...(d.data() as Omit<PagoManual, "id">), id: d.id }) as PagoManual)
+        .sort((a, b) => b.fecha - a.fecha);
     },
   };
 }

@@ -815,3 +815,33 @@ body.acct-con-aviso .rail { top: var(--acct-aviso); }
 @media (max-width: 760px) {
   .acct-toast { bottom: calc(80px + env(safe-area-inset-bottom)); }
 }
+
+/* ---------- Panel del administrador (/admin) ---------- */
+.adm { max-width: 1100px; margin: 0 auto; padding: max(20px, env(safe-area-inset-top)) 14px calc(48px + env(safe-area-inset-bottom)); }
+.adm h1 { font: 750 26px var(--display); letter-spacing: -0.03em; margin: 0 0 14px; }
+.adm-barra { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
+.adm-barra input { flex: 1; min-width: 0; }
+.adm-barra .btn { margin-top: 0; }
+.adm-error { color: #ff9aa6; margin: 8px 0; font-size: 14px; }
+.adm-fila, .adm-cab { display: grid; gap: 8px 12px; align-items: center; grid-template-columns: 1.3fr 1.5fr 0.7fr 0.8fr 0.7fr 1fr 2fr; }
+.adm-cab { padding: 0 14px 6px; color: var(--fog); font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+.adm-cab span:last-child { display: none; }
+.adm-fila { background: var(--deck); border: 1px solid var(--line); border-radius: var(--radius-inner); padding: 12px 14px; margin-bottom: 10px; font-size: 14px; }
+.adm-fila > span, .adm-nombre { min-width: 0; overflow-wrap: anywhere; }
+.adm-acciones { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
+.adm-acciones .btn { margin-top: 0; }
+.adm-ancho { grid-column: 1 / -1; }
+.adm-estado { font-style: normal; padding: 1px 9px; border-radius: 99px; border: 1px solid var(--line); font-size: 12.5px; }
+.adm-estado.activo { color: var(--go); border-color: var(--go); }
+.adm-estado.pausado, .adm-estado.sin_plan { color: #ff9aa6; border-color: rgba(229, 36, 59, 0.55); }
+.adm-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; padding-top: 6px; border-top: 1px solid var(--line-soft); }
+.adm-form label { display: grid; gap: 4px; font-size: 13px; color: var(--fog); }
+.adm-form .adm-nota { grid-column: 1 / -1; }
+.adm-historial ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+@media (max-width: 600px) {
+  .adm-cab { display: none; }
+  .adm-fila { grid-template-columns: 1fr; }
+  .adm-fila > span[data-et]::before, .adm-nombre::before { content: attr(data-et) ": "; color: var(--fog); }
+  .adm-nombre { font-size: 17px; }
+  .adm-acciones .btn { flex: 1 1 40%; }
+}

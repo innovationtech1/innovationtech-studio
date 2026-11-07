@@ -1,5 +1,5 @@
 // Versión falsa del AccountStore, guardada en memoria. Solo para pruebas.
-import type { AccountStore, Invitacion, Usuario, Uso } from "./account-store";
+import type { AccountStore, Invitacion, PagoManual, Usuario, Uso } from "./account-store";
 import type { Contador, Negocio, PlanesConfig } from "./plans";
 import { mezclarConfig } from "./plans";
 
@@ -27,6 +27,7 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
     Object.entries(seed.uso ?? {}).map(([k, v]) => [k, { ...vacio(), ...v }]),
   );
   const config = mezclarConfig(seed.config);
+  const pagos: PagoManual[] = [];
   const invitaciones = new Map<string, Invitacion>(
     Object.entries(seed.invitaciones ?? {}).map(([k, v]) => [k.toLowerCase(), { ...v }]),
   );
@@ -118,6 +119,22 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
     },
     async getUso(negocioId, dia) {
       return { ...(uso.get(`${negocioId}_${dia}`) ?? vacio()) };
+    },
+    async listarNegocios() {
+      return [...negocios.values()].map(copia).sort((a, b) => b.creado - a.creado);
+    },
+    async actualizarNegocio(id, cambios) {
+      const n = negocios.get(id);
+      if (!n) throw new Error(`No existe el negocio ${id}`);
+      const { id: _id, ...datos } = copia(cambios);
+      void _id;
+      Object.assign(n, datos);
+    },
+    async registrarPagoManual(p) {
+      pagos.push(copia(p));
+    },
+    async listarPagosManuales(negocioId) {
+      return pagos.filter((p) => p.negocioId === negocioId).map(copia).sort((a, b) => b.fecha - a.fecha);
     },
     cantidadNegocios() {
       return negocios.size;
