@@ -1,5 +1,6 @@
 import { jsonError } from "@/lib/replicate";
-import { getCreds, refund } from "@/lib/cf-auth";
+import { clavePropiaCF, getCreds, refund } from "@/lib/cf-auth";
+import { jsonAcceso, requireAccess } from "@/lib/account";
 import { DEFAULT_VOICE, findVoice } from "@/lib/voices";
 
 export const maxDuration = 60;
@@ -9,8 +10,14 @@ export const maxDuration = 60;
 export async function POST(req: Request) {
   const { text, lang, voice: voiceId } = await req.json().catch(() => ({}));
   if (!text || typeof text !== "string") return jsonError("Escribe el texto de la voz en off.");
+  // Guardián: sesión, plan y límite diario, antes de llamar a Cloudflare.
+  const acceso = await requireAccess(req, { herramienta: "voz", contador: "voces", clavePropia: clavePropiaCF(req) });
+  if (!acceso.ok) return jsonAcceso(acceso);
   const c = getCreds(req, "voice");
-  if ("error" in c) return jsonError(c.error, c.status);
+  if ("error" in c) {
+    await acceso.devolver();
+    return jsonError(c.error, c.status);
+  }
   const { accountId, token } = c;
 
   const l = lang === "en" ? "en" : "es";
@@ -39,9 +46,13 @@ export async function POST(req: Request) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data?.success === false) {
     if (c.demo) refund(req, "voice");
+    await acceso.devolver();
     return jsonError(data?.errors?.[0]?.message || `Cloudflare respondió ${res.status}`, 502);
   }
   const audio = data?.result?.audio ?? data?.audio;
-  if (!audio || typeof audio !== "string") return jsonError("Cloudflare no devolvió audio. Intenta de nuevo.", 502);
+  if (!audio || typeof audio !== "string") {
+    await acceso.devolver();
+    return jsonError("Cloudflare no devolvió audio. Intenta de nuevo.", 502);
+  }
   return Response.json({ audio: audio.startsWith("data:") ? audio : `data:audio/mpeg;base64,${audio}` });
 }

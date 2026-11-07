@@ -157,3 +157,135 @@ Para que las personas prueben la app sin configurar nada, el dueño del desplieg
 | `DEMO_MODE` | Opcional. `off` lo desactiva |
 
 El conteo es aproximado (en memoria, por IP y por día). Quien conecta su propia cuenta en **Ajustes → Conectar tu cuenta gratis** usa sus claves y no tiene los límites del demo. En el plan Workers Free, Cloudflare corta al llegar al límite diario gratuito, así que no hay cobros.
+
+## Cuentas y planes de pago
+
+Studio puede funcionar con **cuentas de usuario** (inicio de sesión, un negocio por cuenta, planes Básico y Pro, cobro mensual con Stripe y un panel de administración en `/admin`). Todo está **apagado por defecto**: mientras la variable `STUDIO_CUENTAS` no sea `on`, Studio funciona como siempre, sin cuentas. Puedes preparar todo con calma y encenderlo al final.
+
+> Haz primero todo en **modo de prueba** de Stripe (dinero de mentira), en una **versión de prueba** del sitio con sus propios datos (Paso 4). El sitio principal pasa a claves reales **en la misma publicación** en que se encienden las cuentas (Paso 5).
+>
+> **Importante:** los dos modos de Stripe no se mezclan. Studio guarda de qué modo es cada pago y solo acepta los avisos del modo de sus claves: una suscripción pagada con tarjeta de prueba **no da plan** cuando el sitio usa claves reales (la persona tiene que pagar de nuevo), y al revés.
+
+### Paso 1: Firebase (inicio de sesión)
+
+Se usa el proyecto de Firebase `innovationtech-nova`, base `(default)`.
+
+1. Entra a la consola de Firebase → **Authentication → Sign-in method**.
+2. Activa el proveedor **Google**.
+3. Activa también el proveedor **Correo electrónico/contraseña**.
+4. Ve a **Authentication → Settings → Authorized domains** y agrega `innovationtech-studio.netlify.app`.
+5. El correo de administrador debe estar **verificado**. Con una cuenta de Google ya lo está. Si entras con correo y contraseña, abre el enlace de verificación que te llega al correo; sin eso, `/admin` no te deja pasar.
+
+### Paso 2: variables de entorno en Netlify
+
+Entra a Netlify → proyecto **innovationtech-studio** → *Project configuration → Environment variables* y crea estas variables.
+
+**Secretas** (marca *Contains secret values* cuando Netlify lo pregunte):
+
+| Variable | Qué es |
+| --- | --- |
+| `FIREBASE_CLIENT_EMAIL` | Correo de la cuenta de servicio de Firebase |
+| `FIREBASE_PRIVATE_KEY` | Clave privada de esa cuenta de servicio |
+| `STRIPE_SECRET_KEY` | Clave secreta de Stripe (`sk_test_...` en pruebas) |
+| `STRIPE_WEBHOOK_SECRET` | Secreto de firma del webhook (se obtiene en el Paso 3) |
+| `CF_API_TOKEN` | Token de Workers AI de Cloudflare |
+
+**No secretas** (son datos públicos o ajustes; no son claves):
+
+| Variable | Qué es |
+| --- | --- |
+| `FIREBASE_PROJECT_ID` | ID del proyecto de Firebase |
+| `NEXT_PUBLIC_FIREBASE_API_KEY` | Configuración web de Firebase (es pública) |
+| `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` | Configuración web de Firebase (es pública) |
+| `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | Configuración web de Firebase (es pública) |
+| `STUDIO_ADMIN_EMAILS` | Tu correo de administrador (varios, separados por coma) |
+| `CF_ACCOUNT_ID` | Account ID de Cloudflare |
+| `STUDIO_CUENTAS` | Interruptor de cuentas (ver Paso 5) |
+| `NEXT_PUBLIC_STUDIO_CUENTAS` | El mismo interruptor, para las pantallas |
+| `STUDIO_COLECCION_PREFIJO` | Opcional. Inicio del nombre de las colecciones de Firestore (`studio_` si no la pones). Solo para las versiones de prueba: `prueba_studio_` (ver Paso 4) |
+
+Netlify bloquea la publicación si encuentra en el código un valor igual a una variable. Como las variables no secretas sí aparecen en el sitio, agrega una variable más:
+
+- `SECRETS_SCAN_OMIT_KEYS` con este valor, **separado por comas y sin espacios**:
+
+```
+FIREBASE_PROJECT_ID,NEXT_PUBLIC_FIREBASE_API_KEY,NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,NEXT_PUBLIC_FIREBASE_PROJECT_ID,STUDIO_ADMIN_EMAILS,CF_ACCOUNT_ID,STUDIO_CUENTAS,NEXT_PUBLIC_STUDIO_CUENTAS,STUDIO_COLECCION_PREFIJO
+```
+
+Nunca pongas una clave secreta en una variable que empiece con `NEXT_PUBLIC_`.
+
+### Paso 3: Stripe (modo de prueba primero)
+
+1. Crea la cuenta en <https://dashboard.stripe.com>, registra el negocio y la cuenta de banco. Deja activado el **modo de prueba**.
+2. Copia la clave secreta de prueba (`sk_test_...`) en `STRIPE_SECRET_KEY`, **solo para las versiones de prueba** (ver Paso 4). El sitio principal recibe la clave real en el Paso 5.
+3. **Portal de clientes:** *Settings → Billing → Customer portal*. Configúralo así:
+   - Permitir **actualizar el método de pago**.
+   - Permitir **cambiar de plan** entre los dos precios de Studio (Básico y Pro).
+   - Permitir **cancelar la suscripción**, con cancelación **inmediata** (no "al final del periodo") y **sin prorrateo ni reembolso**. Esto es lo que hace que, al cancelar, la cuenta se pause al instante.
+4. (Opcional) *Settings → Payment methods*: activa **Cash App Pay**.
+5. **Webhook:** *Developers → Webhooks → Add endpoint*.
+   - URL en modo de prueba: la de tu versión de prueba, por ejemplo `https://pruebas--innovationtech-studio.netlify.app/api/stripe/webhook` (Paso 4). En modo real (Paso 5): `https://innovationtech-studio.netlify.app/api/stripe/webhook`.
+   - Versión de la API: **`2026-10-28.endive`**
+   - Eventos (exactamente estos seis):
+     - `checkout.session.completed`
+     - `customer.subscription.created`
+     - `customer.subscription.updated`
+     - `customer.subscription.deleted`
+     - `invoice.paid`
+     - `invoice.payment_failed`
+6. Al crear el webhook, copia el **Signing secret** (`whsec_...`) en `STRIPE_WEBHOOK_SECRET` (Netlify, en el mismo contexto que su clave: el de prueba para las versiones de prueba).
+7. **Preparar Stripe, antes de usar las cuentas:** entra a `/admin` con tu correo de administrador y presiona **Preparar Stripe**. Crea los precios (Básico $19 y Pro $39 al mes). Hay que hacerlo una vez en cada lugar: en la versión de prueba (con la clave de prueba) y en el sitio principal (con la clave real). Si lo olvidas y alguien paga antes, Studio reconoce igual los precios por su nombre interno (`studio_basico_mensual` / `studio_pro_mensual`); un precio desconocido se toma como Básico.
+
+Tarjetas de prueba (cualquier fecha futura y cualquier CVC):
+
+- `4242 4242 4242 4242`: el pago funciona.
+- `4000 0000 0000 0341`: se acepta al guardarla, pero falla al cobrar la renovación (sirve para probar la pausa por pago fallido).
+
+### Paso 4: probar en una versión de prueba (con sus propios datos)
+
+La versión de prueba es una copia del sitio con otra dirección. Usa **claves de prueba** de Stripe y **sus propias colecciones** en Firestore, así nada de lo que pruebes (tarjetas de prueba, negocios de prueba) llega al sitio principal.
+
+**a) Crear la versión de prueba (branch deploy).** Una *rama* (branch) es una copia del código en GitHub con otro nombre.
+
+1. En Netlify: *Project configuration → Build & deploy → Continuous deployment → Branches and deploy contexts → Configure*. En **Branch deploys** elige *Let me add individual branches*, escribe `pruebas` y guarda.
+2. En GitHub crea una rama llamada `pruebas` (en la página del repositorio: botón de ramas → escribe `pruebas` → *Create branch*). Cada vez que subas cambios a esa rama, Netlify la construye sola.
+3. Su dirección será `https://pruebas--innovationtech-studio.netlify.app`. Agrégala en Firebase (*Authentication → Settings → Authorized domains*: `pruebas--innovationtech-studio.netlify.app`).
+
+**b) Variables solo para la versión de prueba.** En *Project configuration → Environment variables*, al crear o editar una variable elige **Different value for each deploy context** (un valor distinto por contexto). Así se pone un valor en **Branch deploys** (y en **Deploy Previews**, las versiones que Netlify arma para cada *pull request*) sin tocar **Production** (el sitio principal):
+
+| Variable | Production (sitio principal) | Branch deploys y Deploy Previews |
+| --- | --- | --- |
+| `STRIPE_SECRET_KEY` | `sk_live_...` (en el Paso 5) | `sk_test_...` |
+| `STRIPE_WEBHOOK_SECRET` | el del webhook real (Paso 5) | el del webhook de prueba |
+| `STUDIO_COLECCION_PREFIJO` | (vacía) | `prueba_studio_` |
+| `STUDIO_CUENTAS` / `NEXT_PUBLIC_STUDIO_CUENTAS` | `off` hasta el Paso 5 | `on` |
+
+Las demás variables (Firebase, Cloudflare, administrador) pueden tener el mismo valor en todos los contextos. Después de cambiar variables, vuelve a construir la versión de prueba (sube un cambio a la rama `pruebas` o usa *Deploys → Trigger deploy*).
+
+**c) Probar.** En la versión de prueba entra a `/admin` y presiona **Preparar Stripe**. Luego prueba: registrarte con Google y con correo, la prueba de 10 minutos, pagar Básico, mejorar a Pro, invitar a un miembro, una tarjeta rechazada (se pausa), pagar para reactivar, cancelar (se pausa) y activar a mano con Cash App.
+
+### Paso 5: encender las cuentas en el sitio principal (con claves reales)
+
+Todo en **una sola publicación**: el sitio principal nunca debe tener las cuentas encendidas con claves de prueba (un pago con tarjeta de prueba no debe convertirse en un plan gratis).
+
+1. En Stripe, cambia a **modo real** y crea el webhook real (mismos seis eventos, misma versión de la API) con la URL `https://innovationtech-studio.netlify.app/api/stripe/webhook`. Si antes creaste un webhook de prueba con esa misma URL, bórralo.
+2. En Netlify, en el contexto **Production**, pon a la vez: `STRIPE_SECRET_KEY` = `sk_live_...`, `STRIPE_WEBHOOK_SECRET` = el *Signing secret* del webhook real, `STUDIO_CUENTAS=on` y `NEXT_PUBLIC_STUDIO_CUENTAS=on`. No pongas `STUDIO_COLECCION_PREFIJO` en Production.
+3. **Vuelve a publicar** el sitio (*Deploys → Trigger deploy*). Las variables que empiezan con `NEXT_PUBLIC_` se fijan al construir el sitio; si solo las cambias, no pasa nada hasta la nueva publicación.
+4. Entra a `/admin` del sitio principal y presiona **Preparar Stripe** (los precios reales son distintos de los de prueba).
+5. Haz una prueba rápida: entra, crea un negocio y revisa `/admin`.
+6. Para **apagar** todo: pon `STUDIO_CUENTAS` y `NEXT_PUBLIC_STUDIO_CUENTAS` en `off` (o bórralas) y publica de nuevo.
+
+### Cómo usar `/admin`
+
+- **Activar a mano:** para quien paga en efectivo o con Cash App. Al vencer la fecha, el negocio se pausa solo.
+- **Pausar / Reactivar:** ojo, **Pausar en un negocio que paga con tarjeta no dura**: el próximo aviso de Stripe lo vuelve a activar. A esos clientes pausa o cancélalos desde el panel de Stripe.
+- No se puede activar a mano un negocio cuya suscripción de tarjeta todavía puede cobrar (activa, con pago pendiente o en pausa en Stripe): primero cancélala en Stripe.
+
+### Limitaciones conocidas
+
+- La **galería** y **Mi marca** siguen guardándose en el dispositivo, no en la cuenta. Si varias personas usan el mismo aparato, verán lo mismo. Al **cerrar sesión** (o si entra otra persona) Studio borra del dispositivo las claves propias guardadas y pregunta si también quieres borrar la galería y «Mi marca». Cambiará con la Parte 2 (Memoria en la nube).
+- Para cuidar las lecturas gratis de Firestore (compartidas con NOVA), la cuenta se vuelve a leer cada 5 minutos solo con la pestaña a la vista, al volver a ella y después de cada acción.
+- El inicio de sesión con Google por redirección, en la app instalada del iPhone, a veces vuelve sin sesión. En ese caso usa correo y contraseña.
+- El dictado con subtítulos (respaldo cuando el navegador no dicta) es solo del plan Pro.
+- La cuota gratuita diaria de Cloudflare puede acabarse con muchos clientes; habrá que pasar al plan de pago de Workers.
+- Antes del primer cliente: Netlify plan Personal ($9) y consultar a un contador sobre el impuesto de ventas de Texas.

@@ -1,0 +1,109 @@
+"use client";
+
+import { createContext, useContext } from "react";
+import dynamic from "next/dynamic";
+import { UserRound } from "lucide-react";
+import type { EstadoCuenta } from "@/lib/account-api";
+import type { Herramienta } from "@/lib/plans";
+
+// Estado de la cuenta que comparte AccountGate con el resto de la app.
+// Este archivo no carga Firebase: page.tsx lo puede importar aunque las cuentas estén apagadas.
+
+export const CUENTAS_ON = process.env.NEXT_PUBLIC_STUDIO_CUENTAS === "on";
+
+// La puerta de las cuentas (AccountGate) se descarga aparte, solo cuando se usa:
+// con las cuentas apagadas ni su código ni Firebase llegan al navegador.
+const AccountGate = dynamic(() => import("./account-gate"), {
+  loading: () => <div className="acct-pantalla" />,
+});
+export function CuentasRaiz({ children }: { children: React.ReactNode }) {
+  return <AccountGate>{children}</AccountGate>;
+}
+
+export type Cuenta = EstadoCuenta;
+export type CuentaConNegocio = Extract<EstadoCuenta, { negocio: unknown }>;
+
+export type ValorCuenta = {
+  // true solo dentro de AccountGate (cuentas encendidas)
+  activo: boolean;
+  cargando: boolean;
+  cuenta: Cuenta | null;
+  refrescar: () => Promise<void>;
+  abrirMiCuenta: () => void;
+  abrirPlanes: () => void;
+};
+
+const nada = async () => {};
+
+export const ContextoCuenta = createContext<ValorCuenta>({
+  activo: false,
+  cargando: false,
+  cuenta: null,
+  refrescar: nada,
+  abrirMiCuenta: () => {},
+  abrirPlanes: () => {},
+});
+
+export function useCuenta(): ValorCuenta {
+  return useContext(ContextoCuenta);
+}
+
+// Para quien no está dentro de React (por ejemplo, un manejador de errores): vuelve a leer la cuenta.
+let refrescoActual: () => Promise<void> = nada;
+export function registrarRefresco(f: () => Promise<void>): () => void {
+  refrescoActual = f;
+  return () => {
+    if (refrescoActual === f) refrescoActual = nada;
+  };
+}
+export function refrescarCuenta(): Promise<void> {
+  return refrescoActual();
+}
+
+// ¿Puede usar esta herramienta? Con las cuentas apagadas, siempre sí.
+export function usePuede(h: Herramienta): boolean {
+  const { activo, cuenta } = useCuenta();
+  if (!activo || !cuenta || !cuenta.usuario) return true;
+  return cuenta.herramientas.includes(h);
+}
+
+// Etiqueta «Pro» junto al nombre de una herramienta que el plan no incluye
+export function ProTag({ h }: { h: Herramienta }) {
+  const puede = usePuede(h);
+  if (puede) return null;
+  return (
+    <>
+      {" "}
+      <span className="acct-pro">Pro</span>
+    </>
+  );
+}
+
+// Aviso con «Mejorar a Pro» encima de una herramienta que el plan no incluye
+export function MejorarPro({ h }: { h: Herramienta }) {
+  const puede = usePuede(h);
+  const { abrirPlanes } = useCuenta();
+  if (puede) return null;
+  return (
+    <div className="acct-upsell">
+      <span>
+        <span className="acct-pro">Pro</span> Esta herramienta es del plan Pro.
+      </span>
+      <button className="btn small" onClick={abrirPlanes}>
+        Mejorar a Pro
+      </button>
+    </div>
+  );
+}
+
+// Botón «Mi cuenta» para el menú de la app (solo con cuentas encendidas)
+export function BotonCuenta() {
+  const { activo, abrirMiCuenta } = useCuenta();
+  if (!activo) return null;
+  return (
+    <button className="acct-btn" onClick={abrirMiCuenta} title="Mi cuenta">
+      <UserRound size={16} aria-hidden />
+      <span>Mi cuenta</span>
+    </button>
+  );
+}

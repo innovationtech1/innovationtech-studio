@@ -23,6 +23,7 @@ import { loadSong } from "@/lib/library";
 import { DEFAULT_VOICE, findVoice } from "@/lib/voices";
 import { getLang } from "@/lib/i18n";
 import VoicePicker from "./voice-picker";
+import { ProTag } from "./account-context";
 
 import { Clapperboard, Dices, Download, Mic, Play, Sparkles } from "lucide-react";
 // imageId: la foto de la escena guardada en el dispositivo (IndexedDB), para que no se pierda
@@ -524,7 +525,7 @@ export default function ReelStudio({
       )}
 
       {/* 4. Voz */}
-      <h3 className="step">4. Voz en off (opcional, gratis con Cloudflare)</h3>
+      <h3 className="step">4. Voz en off (opcional, gratis con Cloudflare)<ProTag h="voz" /></h3>
       <textarea
         value={script}
         onChange={(e) => (setScript(e.target.value), setVoice(""))}
@@ -553,7 +554,7 @@ export default function ReelStudio({
         <>
           <label className="check">
             <input type="checkbox" checked={subtitlesOn} onChange={(e) => setSubtitlesOn(e.target.checked)} />
-            Subtítulos de la voz, palabra por palabra (estilo TikTok)
+            Subtítulos de la voz, palabra por palabra (estilo TikTok)<ProTag h="subtitulos" />
           </label>
           <p className="hint" style={{ marginTop: 6 }}>
             El reel durará lo necesario para que la voz se escuche completa. Si cambias el guion, vuelve a generar la voz para que los subtítulos coincidan.

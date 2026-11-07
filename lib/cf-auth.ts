@@ -7,6 +7,8 @@
 //   CF_ACCOUNT_ID = tu Account ID   ·   CF_API_TOKEN = tu token de Workers AI
 // Opcional: DEMO_LIMIT_TEXT, DEMO_LIMIT_IMAGE, DEMO_LIMIT_VOICE (usos por persona al día), DEMO_MODE=off para apagarlo.
 
+import { cuentasActivas } from "./account";
+
 export type Kind = "text" | "image" | "voice";
 
 const LIMITS: Record<Kind, number> = {
@@ -39,12 +41,40 @@ export function demoRemaining(req: Request, kind: Kind) {
   return Math.max(0, LIMITS[kind] - (usage.get(`${who(req)}|${kind}`) || 0));
 }
 
+// Lo que responde /api/status. Con cuentas activas no hay modo demo (el plan de cada negocio lo reemplaza).
+export function estadoDemo(req: Request) {
+  const demo = !cuentasActivas() && demoEnabled();
+  return {
+    demo,
+    limits: demo ? demoLimits() : null,
+    remaining: demo
+      ? { text: demoRemaining(req, "text"), image: demoRemaining(req, "image"), voice: demoRemaining(req, "voice") }
+      : null,
+  };
+}
+
 export type Creds = { accountId: string; token: string; demo: boolean; remaining?: number };
+
+// ¿El pedido trae la clave propia de Cloudflare del usuario? (ambos encabezados con contenido)
+export function clavePropiaCF(req: Request): boolean {
+  return !!req.headers.get("x-cf-account")?.trim() && !!req.headers.get("x-cf-token")?.trim();
+}
 
 export function getCreds(req: Request, kind: Kind, units = 1): Creds | { error: string; status: number } {
   const accountId = req.headers.get("x-cf-account")?.trim();
   const token = req.headers.get("x-cf-token")?.trim();
   if (accountId && token) return { accountId, token, demo: false };
+
+  // Con cuentas activas el límite lo lleva el guardián (requireAccess), no el conteo por IP:
+  // se usan las credenciales del dueño de la plataforma, sin modo demo.
+  if (cuentasActivas()) {
+    const envAcc = process.env.CF_ACCOUNT_ID;
+    const envTok = process.env.CF_API_TOKEN;
+    if (!envAcc || !envTok) {
+      return { error: "Faltan tu Account ID o tu token de Cloudflare. Configúralos en ⚙️ Configuración (es gratis).", status: 401 };
+    }
+    return { accountId: envAcc, token: envTok, demo: false };
+  }
 
   if (!demoEnabled()) {
     return { error: "Faltan tu Account ID o tu token de Cloudflare. Configúralos en ⚙️ Configuración (es gratis).", status: 401 };
@@ -64,6 +94,7 @@ export function getCreds(req: Request, kind: Kind, units = 1): Creds | { error: 
 
 // Si el pedido falló, devolvemos el uso consumido (para no gastar el límite en errores).
 export function refund(req: Request, kind: Kind, units = 1) {
+  if (cuentasActivas()) return; // con cuentas activas se devuelve con acceso.devolver()
   const key = `${who(req)}|${kind}`;
   usage.set(key, Math.max(0, (usage.get(key) || 0) - units));
 }

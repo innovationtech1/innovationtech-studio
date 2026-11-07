@@ -1,6 +1,7 @@
 import { createPrediction, getPrediction, jsonError, outputUrls, Prediction } from "@/lib/replicate";
 import { cloudflareImage, isFlagged } from "@/lib/cloudflare";
-import { getCreds, refund } from "@/lib/cf-auth";
+import { clavePropiaCF, getCreds, refund } from "@/lib/cf-auth";
+import { jsonAcceso, requireAccess } from "@/lib/account";
 
 export const maxDuration = 60;
 
@@ -16,9 +17,21 @@ export async function POST(req: Request) {
     ? references.filter((r: unknown) => typeof r === "string" && r.startsWith("data:image/")).slice(0, 4)
     : [];
 
+  // Guardián: reserva una unidad por imagen pedida, antes de llamar a cualquier proveedor.
+  const acceso = await requireAccess(req, {
+    herramienta: "imagenes",
+    contador: "imagenes",
+    unidades: n,
+    clavePropia: provider === "cloudflare" ? clavePropiaCF(req) : !!req.headers.get("x-replicate-key"),
+  });
+  if (!acceso.ok) return jsonAcceso(acceso);
+
   if (provider === "cloudflare") {
     const c = getCreds(req, "image", n);
-    if ("error" in c) return jsonError(c.error, c.status);
+    if ("error" in c) {
+      await acceso.devolver();
+      return jsonError(c.error, c.status);
+    }
     const { accountId, token } = c;
     try {
       // Si una imagen se bloquea, entregamos las demás en vez de fallar todo.
@@ -38,6 +51,9 @@ export async function POST(req: Request) {
       const urls = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
       const errors = results.flatMap((r) => (r.status === "rejected" ? [(r.reason as Error).message] : []));
       if (c.demo && errors.length) refund(req, "image", errors.length); // no cuentan las que fallaron
+      // El guardián solo puede devolver TODAS las unidades reservadas: si fallaron todas se devuelven;
+      // si fallaron solo algunas, se quedan contadas (un pequeño exceso es aceptable).
+      if (!urls.length) await acceso.devolver();
       if (urls.length) {
         const flagged = errors.filter(isFlagged).length;
         return Response.json({
@@ -52,12 +68,16 @@ export async function POST(req: Request) {
       const msg = errors[0] || "No se pudo generar la imagen.";
       return Response.json({ error: msg, flagged: isFlagged(msg) }, { status: isFlagged(msg) ? 422 : 502 });
     } catch (e) {
+      await acceso.devolver();
       return jsonError((e as Error).message, 502);
     }
   }
 
   const token = req.headers.get("x-replicate-key");
-  if (!token) return jsonError("Falta tu clave de Replicate. Agrégala en Configuración.", 401);
+  if (!token) {
+    await acceso.devolver();
+    return jsonError("Falta tu clave de Replicate. Agrégala en Configuración.", 401);
+  }
 
   const finish = async (p: Prediction) => {
     const start = Date.now();
@@ -102,6 +122,7 @@ export async function POST(req: Request) {
     );
     return Response.json({ urls });
   } catch (e) {
+    await acceso.devolver();
     return jsonError((e as Error).message, 502);
   }
 }

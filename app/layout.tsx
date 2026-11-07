@@ -3,6 +3,10 @@ import "@fontsource-variable/bricolage-grotesque/opsz.css";
 import "@fontsource-variable/instrument-sans/index.css";
 import "./globals.css";
 import PwaSetup from "./pwa-setup";
+import { CuentasRaiz } from "./account-context";
+
+// Cuentas y planes: apagado mientras NEXT_PUBLIC_STUDIO_CUENTAS no sea "on" (la app queda igual que antes).
+const CUENTAS = process.env.NEXT_PUBLIC_STUDIO_CUENTAS === "on";
 
 // Dirección pública de la app, para que la vista previa al compartir el enlace (WhatsApp, Facebook…)
 // muestre la imagen. En Netlify (URL) y en Vercel se detecta sola, también en las copias (forks) de otras personas.
@@ -79,7 +83,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body>
-        {children}
+        {CUENTAS ? <CuentasRaiz>{children}</CuentasRaiz> : children}
         <PwaSetup />
       </body>
     </html>

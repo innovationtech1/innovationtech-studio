@@ -1,8 +1,13 @@
 import { createPrediction, jsonError } from "@/lib/replicate";
+import { jsonAcceso, requireAccess } from "@/lib/account";
 
 // Inicia la generación de un video. Tarda varios minutos, así que
 // devolvemos el id y la página consulta el estado en /api/video/[id].
 export async function POST(req: Request) {
+  // Guardián: el video con IA exige plan Pro y la clave propia de Replicate.
+  const acceso = await requireAccess(req, { herramienta: "video_ia", clavePropia: !!req.headers.get("x-replicate-key") });
+  if (!acceso.ok) return jsonAcceso(acceso);
+
   const token = req.headers.get("x-replicate-key");
   if (!token) return jsonError("Falta tu clave de Replicate. Agrégala en Configuración.", 401);
 
