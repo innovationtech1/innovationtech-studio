@@ -168,7 +168,7 @@ Ruta `/admin` dentro de Studio, solo para correos en `STUDIO_ADMIN_EMAILS`:
 ## 8. Lanzamiento sin cortar el servicio
 
 - Todo queda detrás de la variable **`STUDIO_CUENTAS`**. Mientras no sea `on`, Studio funciona como hoy. Así se puede publicar por partes y probar en una versión de prueba de Netlify.
-- Orden: (1) inicio de sesión y negocio; (2) planes, herramientas y límites en el servidor; (3) pantallas por estado; (4) panel mínimo y pagos a mano; (5) Stripe en modo de prueba; (6) encender `STUDIO_CUENTAS=on` en producción; (7) cambiar Stripe a claves reales.
+- Orden: (1) inicio de sesión y negocio; (2) planes, herramientas y límites en el servidor; (3) pantallas por estado; (4) panel mínimo y pagos a mano; (5) Stripe en modo de prueba, en una versión de prueba de Netlify con datos aparte (`STUDIO_COLECCION_PREFIJO=prueba_studio_`); (6) en **una misma publicación** de producción: claves reales de Stripe, «Preparar Stripe» con esas claves y `STUDIO_CUENTAS=on` (ver README, Paso 5).
 
 ## 9. Pruebas
 
