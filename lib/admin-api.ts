@@ -2,6 +2,7 @@ import "server-only";
 import { firestoreStore, type AccountStore, type PagoManual } from "./account-store";
 import { esCorreoAdmin, type Falla } from "./account-api";
 import { diaChicago, estadoEfectivo, type Contador, type Efectivo, type Negocio } from "./plans";
+import { SUSCRIPCION_VIVA } from "./stripe-events";
 import { stripeModoLive } from "./stripe-server";
 
 // Lo que hacen las rutas /api/admin. Son funciones sin Request/Response para poder probarlas.
@@ -43,8 +44,9 @@ export function finDelDiaChicago(fecha: string): number {
   const [y, mes, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
   const base = Date.UTC(y, mes - 1, d, 23, 59, 59);
   if (new Date(base).getUTCMonth() !== mes - 1) return Number.NaN; // p. ej. 31 de febrero
-  // Chicago va 5 h (verano) o 6 h (invierno) detrás de UTC: se prueba cuál da 23:59:59 ese día
-  const reloj = new Intl.DateTimeFormat("en-CA", {
+  // Chicago va 5 h (verano) o 6 h (invierno) detrás de UTC: se prueba cuál da 23:59:59 ese día.
+  // Se comparan las partes (año, mes, día, hora…) y no el texto, que depende de cómo se formatea.
+  const reloj = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Chicago",
     year: "numeric",
     month: "2-digit",
@@ -54,10 +56,11 @@ export function finDelDiaChicago(fecha: string): number {
     second: "2-digit",
     hourCycle: "h23",
   });
-  const esperado = `${m[1]}-${m[2]}-${m[3]}, 23:59:59`;
+  const esperado = { year: m[1], month: m[2], day: m[3], hour: "23", minute: "59", second: "59" };
   for (const horas of [5, 6]) {
     const t = base + horas * 3600_000;
-    if (reloj.format(t) === esperado) return t;
+    const p = Object.fromEntries(reloj.formatToParts(t).map((x) => [x.type, x.value]));
+    if (Object.entries(esperado).every(([k, v]) => p[k] === v)) return t;
   }
   return Number.NaN;
 }
@@ -122,8 +125,11 @@ export async function activarManual(
 
   const negocio = await store.getNegocio(negocioId);
   if (!negocio) return NO_NEGOCIO();
-  // Si ya paga con tarjeta, activarlo a mano cobraría dos veces
-  if (negocio.origen === "stripe" && stripeAlDia(negocio)) {
+  // Si su suscripción de tarjeta todavía puede cobrar (también past_due, unpaid o paused, que Stripe
+  // reintenta), activarlo a mano cobraría dos veces. Una suscripción del otro modo de Stripe no cobra aquí.
+  const st = negocio.stripe;
+  const otroModo = st?.livemode !== undefined && st.livemode !== modo(deps).stripeLive;
+  if (SUSCRIPCION_VIVA.has(st?.status ?? "") && !otroModo) {
     return falla(400, "Este negocio ya paga con tarjeta. Cancela su suscripción en Stripe antes de activarlo a mano.");
   }
 

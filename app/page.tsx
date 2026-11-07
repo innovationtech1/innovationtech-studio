@@ -22,7 +22,7 @@ import ReelStudio from "./reel-studio";
 import ContentCalendar from "./content-calendar";
 import AssistantChat from "./assistant-chat";
 import { extract, phrases } from "@/lib/phrases";
-import { BotonCuenta, MejorarPro, ProTag } from "./account-context";
+import { BotonCuenta, CUENTAS_ON, MejorarPro, ProTag } from "./account-context";
 
 type Tab = "texto" | "imagen" | "editor" | "video" | "galeria" | "marca" | "config";
 
@@ -157,7 +157,9 @@ export default function Home() {
   const textKeysMissing = settings.textProvider === "anthropic" && !settings.anthropicKey;
   const hasOwnCf = !!(settings.cfAccountId && settings.cfToken);
   const demoActive = !!demo?.demo && usesCf && !hasOwnCf;
+  // Con cuentas encendidas no hay modo demo ni avisos de «conecta Cloudflare»: el plan de cada negocio los reemplaza
   const missingKeys =
+    !CUENTAS_ON &&
     ready && (textKeysMissing || (imageKeysMissing && !(settings.imageProvider === "cloudflare" && demoActive)) || (usesCf && !hasOwnCf && !demoActive));
   const openSetup = () => {
     setWelcomeDone(true);
@@ -221,10 +223,12 @@ export default function Home() {
         </nav>
         <div className="rail-foot">
           <BotonCuenta />
-          <button className={`status-chip ${estado.cls}`} onClick={() => go("config")} title="Ver configuración">
-            <i aria-hidden />
-            {estado.text}
-          </button>
+          {(!CUENTAS_ON || hasOwnCf) && (
+            <button className={`status-chip ${estado.cls}`} onClick={() => go("config")} title="Ver configuración">
+              <i aria-hidden />
+              {estado.text}
+            </button>
+          )}
           <button className="lang-btn" onClick={() => setLang(lang === "es" ? "en" : "es")} title={lang === "es" ? "Switch to English" : "Cambiar a español"} data-no-translate>
             <Languages size={16} aria-hidden />
             <span>{lang === "es" ? "English" : "Español"}</span>
@@ -238,7 +242,7 @@ export default function Home() {
 
       <main className="shell">
 
-      {demoActive && tab !== "config" && (
+      {!CUENTAS_ON && demoActive && tab !== "config" && (
         <div className="demo-banner">
           <span>
             <Rocket size={16} aria-hidden /> <strong>Modo demo</strong> · hoy te quedan {demo?.remaining?.image ?? 0} imágenes, {demo?.remaining?.text ?? 0} textos y{" "}
@@ -257,7 +261,7 @@ export default function Home() {
           </button>
         </div>
       )}
-      {ready && !welcomeDone && !hasOwnCf && demo && (
+      {!CUENTAS_ON && ready && !welcomeDone && !hasOwnCf && demo && (
         <Welcome
           demo={demo}
           onDemo={() => setWelcomeDone(true)}

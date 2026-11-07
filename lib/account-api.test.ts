@@ -198,8 +198,11 @@ test("obtenerCuenta del dueño: plan, herramientas, límites, uso y equipo", asy
   assert.ok(r.herramientas?.includes("video_ia"));
   assert.deepEqual(r.precios, { basico: 19, pro: 39 });
   assert.equal(r.esDueno, true);
-  assert.deepEqual(r.equipo, { miembros: 2, invitaciones: ["a@x.com"] });
-  const m = await cuenta("u2", "u2@x.com", true, { store, now: AHORA });
+  // Sin pedirlo, no se leen las invitaciones (cuida las lecturas de Firestore)
+  assert.deepEqual(r.equipo, { miembros: 2 });
+  const conEquipo = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA }, { equipo: true });
+  assert.deepEqual(conEquipo.equipo, { miembros: 2, invitaciones: ["a@x.com"] });
+  const m = await cuenta("u2", "u2@x.com", true, { store, now: AHORA }, { equipo: true });
   assert.equal(m.esDueno, false);
   assert.equal(m.equipo, undefined);
 });
@@ -318,4 +321,38 @@ test("obtenerCuenta: suscripción del otro modo de Stripe queda sin plan", async
   assert.deepEqual(real.herramientas, []);
   const prueba = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA, stripeLive: false });
   assert.deepEqual(prueba.efectivo, { estado: "activo", plan: "pro" });
+});
+
+test("obtenerCuenta sin equipo=1 no consulta las invitaciones", async () => {
+  const base = memoryStore({ usuarios: [dueno], negocios: [negocio()] });
+  let consultas = 0;
+  const store = { ...base, listarInvitaciones: async (id: string) => (consultas++, base.listarInvitaciones(id)) };
+  await obtenerCuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA });
+  assert.equal(consultas, 0);
+  await obtenerCuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA }, { equipo: true });
+  assert.equal(consultas, 1);
+});
+
+/* ---------- Unirse a un equipo solo si el negocio es Pro (I3) ---------- */
+
+test("invitación de un negocio que bajó a Básico: no se une y crea el suyo", async () => {
+  const store = memoryStore({ usuarios: [dueno], negocios: [negocio({ plan: "basico" })] });
+  await store.crearInvitacion("ana@gmail.com", { negocioId: "n1", invitadoPor: "u1", creado: AHORA });
+  const r = await crearCuenta("u2", "ana@gmail.com", true, "Lo mío", { store, now: AHORA });
+  assert.ok(r.ok);
+  const u = await store.getUsuario("u2");
+  assert.equal(u?.rol, "dueno");
+  assert.notEqual(u?.negocioId, "n1");
+  assert.deepEqual((await store.getNegocio("n1"))?.miembros, ["u1"]);
+});
+
+test("invitación de un negocio en prueba no cuenta como Pro: no se une", async () => {
+  const store = memoryStore({
+    usuarios: [dueno],
+    negocios: [negocio({ estado: "prueba", origen: null, pagadoHasta: undefined, pruebaHasta: AHORA + 5 * MIN })],
+  });
+  await store.crearInvitacion("ana@gmail.com", { negocioId: "n1", invitadoPor: "u1", creado: AHORA });
+  const r = await crearCuenta("u2", "ana@gmail.com", true, "Lo mío", { store, now: AHORA });
+  assert.ok(r.ok);
+  assert.notEqual((await store.getUsuario("u2"))?.negocioId, "n1");
 });

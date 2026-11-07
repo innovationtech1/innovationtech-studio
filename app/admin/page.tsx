@@ -201,6 +201,9 @@ function Fila({ fila, onCambio }: { fila: FilaNegocio; onCambio: () => Promise<v
         <button className="btn small ghost" disabled={ocupado} onClick={() => void accion({ accion: "reactivar" })}>Reactivar</button>
         <button className="btn small ghost" disabled={ocupado} onClick={() => alternar("historial")}>Historial</button>
       </div>
+      {negocio.origen === "stripe" && (
+        <p className="muted adm-ancho">Si paga con tarjeta, pausa o cancela en Stripe; el siguiente aviso de Stripe puede reactivarlo.</p>
+      )}
       {error && <p className="adm-error adm-ancho" role="alert">{error}</p>}
       {abierto === "activar" && (
         <FormActivar

@@ -127,18 +127,28 @@ test("monto 0 es válido (cortesía)", async () => {
   assert.equal(r.ok, true);
 });
 
-test("activarManual sobre un negocio con Stripe activo: 400", async () => {
-  for (const status of ["active", "trialing"]) {
-    const store = nuevo({ plan: "pro", estado: "activo", origen: "stripe", stripe: { status } });
+test("activarManual sobre una suscripción de tarjeta que todavía puede cobrar: 400", async () => {
+  // past_due, unpaid y paused también: Stripe puede volver a cobrar (sería un doble cobro)
+  for (const status of ["active", "trialing", "past_due", "unpaid", "paused"]) {
+    const store = nuevo({ plan: "pro", estado: "activo", origen: "stripe", stripe: { subscriptionId: "sub_1", status } });
     const r = await activarManual(ADMIN, true, "n1", datos(), { store, now: AHORA });
-    assert.ok(!r.ok && r.status === 400);
-    if (!r.ok) assert.match(r.error, /ya paga con tarjeta/);
+    assert.ok(!r.ok && r.status === 400, status);
+    if (!r.ok) assert.equal(r.error, "Este negocio ya paga con tarjeta. Cancela su suscripción en Stripe antes de activarlo a mano.");
     assert.equal((await store.listarPagosManuales("n1")).length, 0);
   }
-  // Con Stripe vencido (past_due) sí se puede pasar a manual
-  const store = nuevo({ plan: "pro", estado: "activo", origen: "stripe", stripe: { status: "past_due" } });
-  const r = await activarManual(ADMIN, true, "n1", datos(), { store, now: AHORA });
-  assert.equal(r.ok, true);
+  // Aunque el origen ya sea manual, si la suscripción guardada sigue viva no se activa
+  const manual = nuevo({ plan: "pro", estado: "activo", origen: "manual", pagadoHasta: AHORA + DIA, stripe: { subscriptionId: "sub_1", status: "past_due" } });
+  assert.equal((await activarManual(ADMIN, true, "n1", datos(), { store: manual, now: AHORA })).ok, false);
+});
+
+test("activarManual con la suscripción cancelada (o del otro modo de Stripe): sí se puede", async () => {
+  for (const status of ["canceled", "incomplete_expired"]) {
+    const store = nuevo({ plan: "pro", estado: "pausado", origen: "stripe", stripe: { subscriptionId: "sub_1", status } });
+    assert.equal((await activarManual(ADMIN, true, "n1", datos(), { store, now: AHORA })).ok, true, status);
+  }
+  // Una suscripción de prueba «activa» no cobra en modo real
+  const prueba = nuevo({ plan: "pro", estado: "activo", origen: "stripe", stripe: { subscriptionId: "sub_1", status: "active", livemode: false } });
+  assert.equal((await activarManual(ADMIN, true, "n1", datos(), { store: prueba, now: AHORA, stripeLive: true })).ok, true);
 });
 
 test("reactivar un negocio de Stripe con past_due: error", async () => {

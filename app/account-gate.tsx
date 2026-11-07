@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { X } from "lucide-react";
 import { installAuthFetch } from "@/lib/auth-fetch";
 import { mensajeAuth } from "@/lib/auth-mensajes";
+import { guardarUltimoUid, leerUltimoUid, limpiarDispositivo } from "@/lib/limpiar-dispositivo";
 import { ContextoCuenta, registrarRefresco, type Cuenta, type ValorCuenta } from "./account-context";
 import {
   abrirPortal,
@@ -25,7 +26,18 @@ import TrialBanner, { PausaBanner } from "./trial-banner";
 type Sesion = "cargando" | "fuera" | "dentro";
 type Aviso = { texto: string; pro?: boolean };
 
-const CADA = 60_000; // se vuelve a leer la cuenta cada minuto
+// Se vuelve a leer la cuenta cada 5 minutos, solo con la pestaña a la vista (cuida las lecturas
+// gratis de Firestore, compartidas con NOVA). También al volver a la pestaña y después de cada acción.
+const CADA = 5 * 60_000;
+
+const PREGUNTA_SALIR =
+  "Vamos a cerrar tu sesión y a borrar de este dispositivo tus claves propias (Cloudflare, Anthropic, Replicate).\n\n" +
+  "¿Quieres borrar también la galería y «Mi marca» guardadas en este dispositivo? Hazlo si otras personas lo usan.\n\n" +
+  "Aceptar: borrar también · Cancelar: conservarlas";
+const PREGUNTA_OTRA_PERSONA =
+  "Entró otra cuenta en este dispositivo. Borramos las claves propias que había guardadas.\n\n" +
+  "¿Quieres borrar también la galería y «Mi marca» de la persona anterior?\n\n" +
+  "Aceptar: borrar · Cancelar: conservarlas";
 
 export default function AccountGate({ children }: { children: React.ReactNode }) {
   const [fb, setFb] = useState<FB | null>(null);
@@ -43,12 +55,14 @@ export default function AccountGate({ children }: { children: React.ReactNode })
   const generacion = useRef(0);
   const dentro = useRef(false);
   const tieneCuenta = useRef(false);
+  // «Mi cuenta» abierta por el dueño de un negocio Pro: se piden también las invitaciones
+  const conEquipo = useRef(false);
 
   const refrescar = useCallback(async () => {
     if (!dentro.current) return;
     const gen = generacion.current;
     try {
-      const r = await fetch("/api/cuenta", { cache: "no-store" });
+      const r = await fetch(conEquipo.current ? "/api/cuenta?equipo=1" : "/api/cuenta", { cache: "no-store" });
       if (gen !== generacion.current) return;
       if (!r.ok) throw new Error(String(r.status));
       const c = (await r.json()) as Cuenta;
@@ -67,10 +81,10 @@ export default function AccountGate({ children }: { children: React.ReactNode })
   useEffect(() => registrarRefresco(refrescar), [refrescar]);
 
   // Errores de las rutas de IA: algunos cambian lo que se debe mostrar
-  const alCodigo = useRef((codigo: string) => {});
-  alCodigo.current = (codigo: string) => {
+  const alCodigo = useRef((codigo: string, mensaje: string) => {});
+  alCodigo.current = (codigo: string, mensaje: string) => {
     if (codigo === "PAUSADO" || codigo === "SIN_PLAN" || codigo === "LIMITE") void refrescar();
-    if (codigo === "PLAN") setAviso({ texto: "Esta herramienta es del plan Pro.", pro: true });
+    if (codigo === "PLAN") setAviso({ texto: mensaje || "Esta herramienta es del plan Pro.", pro: true });
   };
 
   // 1) Carga Firebase (solo aquí, nunca con las cuentas apagadas) y pone el token en cada llamada a /api
@@ -82,7 +96,7 @@ export default function AccountGate({ children }: { children: React.ReactNode })
       .then((m) => {
         if (!vivo) return;
         deshacer = installAuthFetch((forzar) => m.tokenActual(forzar), {
-          onCodigo: (codigo) => alCodigo.current(codigo),
+          onCodigo: (codigo, mensaje) => alCodigo.current(codigo, mensaje),
         });
         setFb(m);
         // Al volver de Google con redirección (iPhone o ventana bloqueada)
@@ -95,7 +109,16 @@ export default function AccountGate({ children }: { children: React.ReactNode })
           setErrorCarga("");
           setModal(null);
           setSesion(u ? "dentro" : "fuera");
-          if (u) void refrescar();
+          if (!u) return;
+          // Otra persona entra en este dispositivo: se borran las claves propias de la anterior
+          const gen = generacion.current;
+          const anterior = leerUltimoUid();
+          guardarUltimoUid(u.uid);
+          if (anterior && anterior !== u.uid) {
+            void limpiarDispositivo(PREGUNTA_OTRA_PERSONA).then(() => {
+              if (gen === generacion.current) void refrescar();
+            });
+          } else void refrescar();
         });
       })
       .catch(() => {
@@ -108,19 +131,35 @@ export default function AccountGate({ children }: { children: React.ReactNode })
     };
   }, [refrescar]);
 
-  // 2) Se vuelve a leer la cuenta cada minuto y al regresar a la pestaña
+  // 2) Se vuelve a leer la cuenta cada 5 minutos mientras la pestaña está a la vista y al regresar a ella
   useEffect(() => {
     if (sesion !== "dentro") return;
-    const id = setInterval(() => void refrescar(), CADA);
-    const alVolver = () => {
-      if (document.visibilityState === "visible") void refrescar();
+    let id: ReturnType<typeof setInterval> | null = null;
+    const arrancar = () => {
+      if (!id) id = setInterval(() => void refrescar(), CADA);
     };
-    document.addEventListener("visibilitychange", alVolver);
+    const parar = () => {
+      if (id) clearInterval(id);
+      id = null;
+    };
+    const alCambiar = () => {
+      if (document.visibilityState === "visible") {
+        void refrescar();
+        arrancar();
+      } else parar(); // en segundo plano no se lee nada
+    };
+    if (document.visibilityState === "visible") arrancar();
+    document.addEventListener("visibilitychange", alCambiar);
     return () => {
-      clearInterval(id);
-      document.removeEventListener("visibilitychange", alVolver);
+      parar();
+      document.removeEventListener("visibilitychange", alCambiar);
     };
   }, [sesion, refrescar]);
+
+  // Al abrir «Mi cuenta» se lee la cuenta con las invitaciones del equipo
+  useEffect(() => {
+    if (modal === "cuenta" && conEquipo.current) void refrescar();
+  }, [modal, refrescar]);
 
   // 3) Regreso de Stripe: ?pago=ok o ?pago=cancelado
   useEffect(() => {
@@ -158,7 +197,20 @@ export default function AccountGate({ children }: { children: React.ReactNode })
     [sesion, cuenta, refrescar],
   );
 
-  const salir = () => void fb?.salir();
+  // «Cerrar sesión» (desde cualquier pantalla): antes se borran del dispositivo las claves propias
+  // y se pregunta si también la galería y «Mi marca»
+  const fbConLimpieza: FB | null = useMemo(
+    () =>
+      fb && {
+        ...fb,
+        salir: async () => {
+          await limpiarDispositivo(PREGUNTA_SALIR);
+          await fb.salir();
+        },
+      },
+    [fb],
+  );
+  const salir = () => void fbConLimpieza?.salir();
 
   async function pagarReactivar() {
     // Sin suscripción de tarjeta que se pueda pagar (cancelada o pago a mano): elegir plan de nuevo
@@ -180,11 +232,12 @@ export default function AccountGate({ children }: { children: React.ReactNode })
 
   let contenido: React.ReactNode;
   const conNegocio = cuenta && cuenta.usuario ? cuenta : null;
+  conEquipo.current = modal === "cuenta" && !!conNegocio?.esDueno && conNegocio.efectivo.plan === "pro";
 
-  if (!fb || sesion === "cargando") {
+  if (!fbConLimpieza || sesion === "cargando") {
     contenido = errorCarga ? <ErrorCarga mensaje={errorCarga} onReintentar={() => window.location.reload()} /> : <Cargando />;
   } else if (sesion === "fuera") {
-    contenido = <Bienvenida fb={fb} errorInicial={errorEntrada} />;
+    contenido = <Bienvenida fb={fbConLimpieza} errorInicial={errorEntrada} />;
   } else if (pathname?.startsWith("/admin")) {
     // El panel de administrador solo necesita la sesión; él mismo revisa los permisos
     contenido = children;
@@ -195,7 +248,7 @@ export default function AccountGate({ children }: { children: React.ReactNode })
       <Cargando texto="Cargando tu cuenta…" />
     );
   } else if (!conNegocio) {
-    contenido = <CrearNegocio fb={fb} onListo={refrescar} />;
+    contenido = <CrearNegocio fb={fbConLimpieza} onListo={refrescar} />;
   } else {
     const estado = conNegocio.efectivo.estado;
     contenido = (
@@ -218,7 +271,7 @@ export default function AccountGate({ children }: { children: React.ReactNode })
         {modal === "cuenta" && (
           <MiCuenta
             cuenta={conNegocio}
-            fb={fb}
+            fb={fbConLimpieza}
             onCerrar={() => setModal(null)}
             onRefrescar={refrescar}
             onPlanes={() => setModal("planes")}
@@ -235,7 +288,7 @@ export default function AccountGate({ children }: { children: React.ReactNode })
       {aviso && (
         <div className="acct-toast" role="status">
           <span>{aviso.texto}</span>
-          {aviso.pro && conNegocio && (
+          {aviso.pro && conNegocio?.esDueno && (
             <button className="btn small" onClick={() => (setAviso(null), setModal("planes"))}>
               Mejorar a Pro
             </button>

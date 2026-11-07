@@ -1,15 +1,9 @@
-import { demoEnabled, demoLimits, demoRemaining } from "@/lib/cf-auth";
+import { estadoDemo } from "@/lib/cf-auth";
 
 export const dynamic = "force-dynamic";
 
 // Informa si el modo demo está disponible y cuántos usos le quedan hoy a esta persona.
+// Con las cuentas activas siempre dice demo: false (sin límites de demo).
 export async function GET(req: Request) {
-  const demo = demoEnabled();
-  return Response.json({
-    demo,
-    limits: demo ? demoLimits() : null,
-    remaining: demo
-      ? { text: demoRemaining(req, "text"), image: demoRemaining(req, "image"), voice: demoRemaining(req, "voice") }
-      : null,
-  });
+  return Response.json(estadoDemo(req));
 }

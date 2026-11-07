@@ -4,10 +4,12 @@ import { cuerpoJson, errorJson, json, sesionDe, sinSesion } from "@/lib/cuenta-r
 export const dynamic = "force-dynamic";
 
 // Estado de la cuenta de quien tiene la sesión abierta.
+// Con ?equipo=1 (lo pide «Mi cuenta») también trae las invitaciones pendientes.
 export async function GET(req: Request) {
   const s = await sesionDe(req);
   if (!s) return sinSesion();
-  return json(await obtenerCuenta(s.uid, s.email, s.emailVerified));
+  const equipo = new URL(req.url).searchParams.get("equipo") === "1";
+  return json(await obtenerCuenta(s.uid, s.email, s.emailVerified, {}, { equipo }));
 }
 
 // Crea el negocio (o une a la persona a un equipo si la invitaron).

@@ -618,7 +618,7 @@ export function MiCuenta({
                 Invitar
               </button>
             </form>
-            {equipo.invitaciones.length > 0 && (
+            {equipo.invitaciones && equipo.invitaciones.length > 0 && (
               <ul className="acct-invitaciones">
                 {equipo.invitaciones.map((e) => (
                   <li key={e}>

@@ -106,6 +106,10 @@ export async function requireAccess(
     return falla(403, "SIN_PLAN", "Tu prueba terminó. Elige un plan para seguir creando.");
   }
   const plan = ef.plan;
+  // Bajó de Pro a Básico con equipo: solo el dueño sigue usando el plan (Básico es para 1 persona)
+  if (negocio.duenoUid !== uid && plan !== "pro") {
+    return falla(403, "PLAN", "Tu plan actual es para 1 persona. Pide al dueño que pase a Pro.");
+  }
 
   // 4) Herramienta
   if (o.herramienta === "video_ia" && !o.clavePropia) {

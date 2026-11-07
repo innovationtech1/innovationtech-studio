@@ -298,3 +298,30 @@ test("guardián: suscripción de prueba con claves reales → 403 SIN_PLAN; en s
   const prueba = await requireAccess(req(), { herramienta: "textos", clavePropia: false }, { store: tienda(n), verify, now: AHORA, stripeLive: false });
   assert.equal(prueba.ok, true);
 });
+
+/* ---------- Equipo después de bajar de Pro a Básico (I3) ---------- */
+
+const miembroU2: Usuario = { uid: "u2", email: "ana@ejemplo.com", negocioId: "n1", rol: "miembro", creado: AHORA - 60 * MIN };
+const verifyU2 = async () => ({ uid: "u2", email: "ana@ejemplo.com", emailVerified: true });
+
+test("guardián: un miembro (no dueño) en un negocio Básico → 403 PLAN", async () => {
+  const store = memoryStore({ usuarios: [usuario, miembroU2], negocios: [negocio({ plan: "basico", miembros: ["u1", "u2"] })] });
+  const a = await requireAccess(req(), { herramienta: "textos", clavePropia: false }, { store, verify: verifyU2, now: AHORA });
+  assert.equal(a.ok, false);
+  if (a.ok) return;
+  assert.equal(a.status, 403);
+  assert.equal(a.codigo, "PLAN");
+  assert.equal(a.mensaje, "Tu plan actual es para 1 persona. Pide al dueño que pase a Pro.");
+});
+
+test("guardián: el dueño de un negocio Básico con miembros sigue usando su plan", async () => {
+  const store = memoryStore({ usuarios: [usuario, miembroU2], negocios: [negocio({ plan: "basico", miembros: ["u1", "u2"] })] });
+  const a = await requireAccess(req(), { herramienta: "textos", clavePropia: false }, { store, verify, now: AHORA });
+  assert.equal(a.ok, true);
+});
+
+test("guardián: un miembro en un negocio Pro → ok", async () => {
+  const store = memoryStore({ usuarios: [usuario, miembroU2], negocios: [negocio({ plan: "pro", miembros: ["u1", "u2"] })] });
+  const a = await requireAccess(req(), { herramienta: "textos", clavePropia: false }, { store, verify: verifyU2, now: AHORA });
+  assert.equal(a.ok, true);
+});

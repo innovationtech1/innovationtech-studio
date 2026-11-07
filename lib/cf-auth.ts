@@ -41,6 +41,18 @@ export function demoRemaining(req: Request, kind: Kind) {
   return Math.max(0, LIMITS[kind] - (usage.get(`${who(req)}|${kind}`) || 0));
 }
 
+// Lo que responde /api/status. Con cuentas activas no hay modo demo (el plan de cada negocio lo reemplaza).
+export function estadoDemo(req: Request) {
+  const demo = !cuentasActivas() && demoEnabled();
+  return {
+    demo,
+    limits: demo ? demoLimits() : null,
+    remaining: demo
+      ? { text: demoRemaining(req, "text"), image: demoRemaining(req, "image"), voice: demoRemaining(req, "voice") }
+      : null,
+  };
+}
+
 export type Creds = { accountId: string; token: string; demo: boolean; remaining?: number };
 
 // ¿El pedido trae la clave propia de Cloudflare del usuario? (ambos encabezados con contenido)

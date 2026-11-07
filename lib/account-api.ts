@@ -45,15 +45,17 @@ export type EstadoCuenta =
       esAdmin: boolean;
       esDueno: boolean;
       precios: { basico: number; pro: number };
-      // Solo lo ve el dueño
-      equipo?: { miembros: number; invitaciones: string[] };
+      // Solo lo ve el dueño. Las invitaciones solo vienen si se piden (GET /api/cuenta?equipo=1).
+      equipo?: { miembros: number; invitaciones?: string[] };
     };
 
 export async function obtenerCuenta(
   uid: string,
   email: string,
   emailVerified: boolean,
-  deps: DepsCuenta = {}): Promise<EstadoCuenta> {
+  deps: DepsCuenta = {},
+  opciones: { equipo?: boolean } = {},
+): Promise<EstadoCuenta> {
   const store = deps.store ?? firestoreStore();
   const ahora = deps.now ?? Date.now();
   const esAdmin = esCorreoAdmin(email, emailVerified);
@@ -81,10 +83,10 @@ export async function obtenerCuenta(
     precios: { basico: cfg.precios.basico.monto, pro: cfg.precios.pro.monto },
   };
   if (esDueno) {
-    cuenta.equipo = {
-      miembros: negocio.miembros.length,
-      invitaciones: await store.listarInvitaciones(negocio.id),
-    };
+    // Las invitaciones pendientes cuestan una consulta más: solo cuando las pide «Mi cuenta»
+    cuenta.equipo = opciones.equipo
+      ? { miembros: negocio.miembros.length, invitaciones: await store.listarInvitaciones(negocio.id) }
+      : { miembros: negocio.miembros.length };
   }
   return cuenta;
 }
@@ -117,7 +119,10 @@ export async function crearCuenta(
         "VERIFICAR_CORREO",
       );
     }
-    const unido = await store.unirMiembro(inv.negocioId, uid, cfg.personas.pro);
+    // Solo se entra a un equipo de un negocio que hoy es Pro (si bajó a Básico, o está en prueba, no)
+    const delEquipo = await store.getNegocio(inv.negocioId);
+    const esPro = !!delEquipo && estadoEfectivo(delEquipo, ahora, modo(deps)).plan === "pro";
+    const unido = esPro && (await store.unirMiembro(inv.negocioId, uid, cfg.personas.pro));
     if (unido) {
       const u: Usuario = { uid, email: correo, negocioId: inv.negocioId, rol: "miembro", creado: ahora };
       const creado = await store.crearUsuario(u);
@@ -130,7 +135,7 @@ export async function crearCuenta(
       await store.borrarInvitacion(correo);
       return { ok: true, usuario: u };
     }
-    // Sin cupo o el negocio ya no existe: sigue como persona nueva con su propio negocio
+    // Sin cupo, el negocio ya no es Pro o ya no existe: sigue como persona nueva con su propio negocio
   }
 
   const nombre = (nombreNegocio ?? "").trim();

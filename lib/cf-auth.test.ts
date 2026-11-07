@@ -1,6 +1,6 @@
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { getCreds, refund, clavePropiaCF } from "./cf-auth";
+import { getCreds, refund, clavePropiaCF, estadoDemo } from "./cf-auth";
 
 const VARS = ["STUDIO_CUENTAS", "CF_ACCOUNT_ID", "CF_API_TOKEN", "DEMO_MODE"] as const;
 const guardado: Record<string, string | undefined> = {};
@@ -76,4 +76,23 @@ test("clavePropiaCF exige ambos encabezados no vacíos", () => {
   assert.equal(clavePropiaCF(pedido({ "x-cf-account": "a" })), false);
   assert.equal(clavePropiaCF(pedido({ "x-cf-account": "a", "x-cf-token": "   " })), false);
   assert.equal(clavePropiaCF(pedido()), false);
+});
+
+test("estadoDemo: con cuentas activas no hay modo demo (aunque haya credenciales)", () => {
+  process.env.STUDIO_CUENTAS = "on";
+  process.env.CF_ACCOUNT_ID = "acc-env";
+  process.env.CF_API_TOKEN = "tok-env";
+  delete process.env.DEMO_MODE;
+  assert.deepEqual(estadoDemo(pedido()), { demo: false, limits: null, remaining: null });
+});
+
+test("estadoDemo: con cuentas apagadas, el modo demo de siempre", () => {
+  delete process.env.STUDIO_CUENTAS;
+  process.env.CF_ACCOUNT_ID = "acc-env";
+  process.env.CF_API_TOKEN = "tok-env";
+  delete process.env.DEMO_MODE;
+  const e = estadoDemo(pedido({}, "7.7.7.7"));
+  assert.equal(e.demo, true);
+  assert.ok(e.limits && e.limits.text > 0);
+  assert.ok(e.remaining && e.remaining.text > 0);
 });
