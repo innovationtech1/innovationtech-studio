@@ -3,8 +3,8 @@ import Stripe from "stripe";
 import { firestoreStore, type AccountStore } from "./account-store";
 import { esCorreoAdmin, type Falla } from "./account-api";
 import type { Negocio } from "./plans";
-import { aplicarEvento, EVENTOS_STRIPE, idDe, referenciasDeEvento, SUSCRIPCION_VIVA } from "./stripe-events";
-import { SIN_CONFIGURAR, stripe, stripeConfigurado } from "./stripe-server";
+import { aplicarEvento, EVENTOS_STRIPE, idDe, LOOKUP_PLANES, referenciasDeEvento, SUSCRIPCION_VIVA } from "./stripe-events";
+import { SIN_CONFIGURAR, stripe, stripeConfigurado, stripeModoLive } from "./stripe-server";
 
 // Lo que hacen las rutas de Stripe (pago, portal, avisos y «Preparar Stripe»).
 // Son funciones sin Request/Response para poder probarlas con un Stripe falso.
@@ -30,7 +30,8 @@ export type ClienteStripe = {
   };
 };
 
-export type DepsStripe = { store?: AccountStore; stripe?: ClienteStripe; now?: number };
+// stripeLive: modo de las claves (true = reales). Si no se pasa, se mira STRIPE_SECRET_KEY.
+export type DepsStripe = { store?: AccountStore; stripe?: ClienteStripe; now?: number; stripeLive?: boolean };
 
 type PlanPagado = "basico" | "pro";
 
@@ -51,7 +52,7 @@ const mensaje = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /* ---------------- Preparar Stripe (administrador) ---------------- */
 
-const LOOKUP: Record<PlanPagado, string> = { basico: "studio_basico_mensual", pro: "studio_pro_mensual" };
+const LOOKUP = LOOKUP_PLANES;
 const PRODUCTO: Record<PlanPagado, string> = { basico: "Studio Básico", pro: "Studio Pro" };
 const CENTAVOS: Record<PlanPagado, number> = { basico: 1900, pro: 3900 };
 const PLANES: PlanPagado[] = ["basico", "pro"];
@@ -137,23 +138,47 @@ const noExiste = (e: unknown) => {
   return x?.code === "resource_missing" || x?.statusCode === 404;
 };
 
+const SIN_SUSCRIPCION = "Todavía no tienes una suscripción con tarjeta.";
+
+// ¿Lo guardado de Stripe es del otro modo (prueba ↔ real)? Entonces sus ids no existen aquí.
+const deOtroModo = (n: Negocio, live: boolean) => n.stripe?.livemode !== undefined && n.stripe.livemode !== live;
+
+// El negocio con solo lo de Stripe que sirve en este modo: si es del otro modo, se trata como
+// «sin cliente» (solo queda la sesión pendiente, que sí es de este modo).
+function vistaDelModo(n: Negocio, live: boolean): Negocio {
+  if (!deOtroModo(n, live)) return n;
+  const pendiente = n.stripe?.checkoutPendiente;
+  return { ...n, stripe: pendiente ? { checkoutPendiente: pendiente } : undefined };
+}
+
 // La suscripción del negocio que todavía puede cobrar, preguntándole a Stripe (no a nuestra base,
 // que puede ir unos segundos atrasada). Así nunca se abre una segunda suscripción encima.
-async function suscripcionViva(cliente: ClienteStripe, n: Negocio): Promise<Stripe.Subscription | null> {
+// `ajeno`: Stripe no conoce el cliente guardado (datos viejos del otro modo): hay que empezar de cero.
+async function suscripcionViva(
+  cliente: ClienteStripe,
+  n: Negocio,
+): Promise<{ viva: Stripe.Subscription | null; ajeno: boolean }> {
   const s = n.stripe;
+  let subFalta = false;
   if (s?.subscriptionId) {
     try {
       const sub = await cliente.subscriptions.retrieve(s.subscriptionId);
-      if (SUSCRIPCION_VIVA.has(sub.status)) return sub;
+      if (SUSCRIPCION_VIVA.has(sub.status)) return { viva: sub, ajeno: false };
     } catch (e) {
       if (!noExiste(e)) throw e;
+      subFalta = true;
     }
   }
   if (s?.customerId) {
-    const lista = await cliente.subscriptions.list({ customer: s.customerId, status: "all", limit: 20 });
-    return lista.data.find((x) => SUSCRIPCION_VIVA.has(x.status)) ?? null;
+    try {
+      const lista = await cliente.subscriptions.list({ customer: s.customerId, status: "all", limit: 20 });
+      return { viva: lista.data.find((x) => SUSCRIPCION_VIVA.has(x.status)) ?? null, ajeno: false };
+    } catch (e) {
+      if (!noExiste(e)) throw e;
+      return { viva: null, ajeno: true };
+    }
   }
-  return null;
+  return { viva: null, ajeno: subFalta };
 }
 
 // La sesión de pago que quedó pendiente (la última que abrimos para este negocio):
@@ -244,9 +269,12 @@ export async function pagarPlan(
 ): Promise<{ ok: true; url: string } | Falla> {
   const store = deps.store ?? firestoreStore();
   const ahora = deps.now ?? Date.now();
-  const negocio = await negocioDelDueno(store, uid);
-  if (esFalla(negocio)) return negocio;
+  const live = deps.stripeLive ?? stripeModoLive();
+  const guardado = await negocioDelDueno(store, uid);
+  if (esFalla(guardado)) return guardado;
   if (plan !== "basico" && plan !== "pro") return falla(400, "Elige Básico o Pro.");
+  // Lo de Stripe del otro modo no se usa (ni su cliente ni su suscripción)
+  let negocio = vistaDelModo(guardado, live);
   const cliente = clienteDe(deps);
   if (!cliente) return NO_CONFIGURADO();
   const cfg = await store.getConfig();
@@ -261,8 +289,15 @@ export async function pagarPlan(
   }
 
   try {
-    const viva = await suscripcionViva(cliente, negocio);
+    const { viva, ajeno } = await suscripcionViva(cliente, negocio);
     if (viva) return await usarSuscripcion(cliente, viva, negocio, priceId, origin);
+    // Stripe no conoce lo guardado (datos viejos de otro modo, sin marca): se sigue como cliente nuevo
+    // y se marca como del otro modo para que ya no cuente (ni dé plan) en este.
+    const marcarAjeno = ajeno && negocio.stripe?.livemode === undefined;
+    if (ajeno) {
+      const pendiente = negocio.stripe?.checkoutPendiente;
+      negocio = { ...negocio, stripe: pendiente ? { checkoutPendiente: pendiente } : undefined };
+    }
 
     // ¿Quedó una sesión de pago de antes? (pagada pero sin aviso todavía, o abierta en otra pestaña)
     const pendiente = negocio.stripe?.checkoutPendiente;
@@ -277,7 +312,13 @@ export async function pagarPlan(
     let otra: string | undefined;
     await store.modificarNegocio(negocio.id, (n) => {
       otra = n.stripe?.checkoutPendiente;
-      return { stripe: { ...n.stripe, checkoutPendiente: sesion.id } };
+      return {
+        stripe: {
+          ...n.stripe,
+          checkoutPendiente: sesion.id,
+          ...(marcarAjeno && n.stripe?.livemode === undefined ? { livemode: !live } : {}),
+        },
+      };
     });
     // Si otra pestaña abrió una sesión mientras tanto, se vence para que no se paguen las dos
     if (otra && otra !== pendiente && otra !== sesion.id) {
@@ -301,15 +342,18 @@ export async function abrirPortal(
   deps: DepsStripe = {},
 ): Promise<{ ok: true; url: string } | Falla> {
   const store = deps.store ?? firestoreStore();
+  const live = deps.stripeLive ?? stripeModoLive();
   const negocio = await negocioDelDueno(store, uid);
   if (esFalla(negocio)) return negocio;
   const cliente = clienteDe(deps);
   if (!cliente) return NO_CONFIGURADO();
-  const customer = negocio.stripe?.customerId;
-  if (!customer) return falla(400, "Todavía no tienes una suscripción con tarjeta.");
+  // Un cliente del otro modo (prueba ↔ real) no existe aquí: es como no tener suscripción
+  const customer = vistaDelModo(negocio, live).stripe?.customerId;
+  if (!customer) return falla(400, SIN_SUSCRIPCION);
   try {
     return { ok: true, url: (await portal(cliente, customer, origin)).url };
   } catch (e) {
+    if (noExiste(e)) return falla(400, SIN_SUSCRIPCION);
     console.error("Stripe: no se pudo abrir el portal:", mensaje(e));
     return ERROR_STRIPE();
   }
@@ -321,6 +365,7 @@ export type DepsWebhook = {
   store?: AccountStore;
   secreto?: string; // STRIPE_WEBHOOK_SECRET
   now?: number;
+  stripeLive?: boolean; // modo de las claves (si no se pasa, se mira STRIPE_SECRET_KEY)
   webhooks?: Pick<Stripe.Webhooks, "constructEvent">;
 };
 
@@ -344,6 +389,15 @@ export async function procesarWebhook(
     return { status: 400, body: { error: "Firma inválida." } };
   }
   if (!MANEJADOS.has(evento.type)) return { status: 200, body: { recibido: true } };
+
+  // Un aviso del otro modo (prueba ↔ real) no se aplica: una tarjeta de prueba nunca da un plan real
+  const live = deps.stripeLive ?? stripeModoLive();
+  if (evento.livemode !== live) {
+    console.warn(
+      `Stripe: aviso ${evento.id} (${evento.type}) es del modo ${evento.livemode ? "real" : "de prueba"} y las claves son del otro; se ignora.`,
+    );
+    return { status: 200, body: { recibido: true, ignorado: true } };
+  }
 
   const store = deps.store ?? firestoreStore();
   const ahora = deps.now ?? Date.now();

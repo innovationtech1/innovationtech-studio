@@ -305,3 +305,17 @@ test("si pierde la carrera al unirse, deshace el lugar tomado sin tocar su usuar
   assert.deepEqual((await base.getNegocio("n1"))?.miembros, ["u1"]);
   assert.equal((await base.getUsuario("u2"))?.negocioId, "n2");
 });
+
+/* ---------- Modo de Stripe (C1) ---------- */
+
+test("obtenerCuenta: suscripción del otro modo de Stripe queda sin plan", async () => {
+  const store = memoryStore({
+    usuarios: [dueno],
+    negocios: [negocio({ origen: "stripe", pagadoHasta: undefined, stripe: { status: "active", livemode: false } })],
+  });
+  const real = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA, stripeLive: true });
+  assert.deepEqual(real.efectivo, { estado: "sin_plan", plan: null });
+  assert.deepEqual(real.herramientas, []);
+  const prueba = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA, stripeLive: false });
+  assert.deepEqual(prueba.efectivo, { estado: "activo", plan: "pro" });
+});

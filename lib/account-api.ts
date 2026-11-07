@@ -1,5 +1,6 @@
 import "server-only";
 import { firestoreStore, type AccountStore, type Usuario } from "./account-store";
+import { stripeModoLive } from "./stripe-server";
 import {
   diaChicago,
   estadoEfectivo,
@@ -12,7 +13,9 @@ import {
 // Lo que hacen las rutas /api/cuenta. Son funciones sin Request/Response para poder probarlas;
 // las rutas solo verifican la sesión y las envuelven.
 
-export type DepsCuenta = { store?: AccountStore; now?: number };
+// stripeLive: modo de las claves de Stripe (si no se pasa, se mira STRIPE_SECRET_KEY).
+export type DepsCuenta = { store?: AccountStore; now?: number; stripeLive?: boolean };
+const modo = (deps: DepsCuenta) => ({ stripeLive: deps.stripeLive ?? stripeModoLive() });
 
 export type Falla = { ok: false; status: number; error: string; codigo?: string };
 const falla = (status: number, error: string, codigo?: string): Falla =>
@@ -61,7 +64,7 @@ export async function obtenerCuenta(
   if (!negocio) return { usuario: null, esAdmin };
 
   const cfg = await store.getConfig();
-  const efectivo = estadoEfectivo(negocio, ahora);
+  const efectivo = estadoEfectivo(negocio, ahora, modo(deps));
   const plan = efectivo.plan;
   const uso = await store.getUso(negocio.id, diaChicago(ahora));
   const esDueno = negocio.duenoUid === uid;
@@ -170,7 +173,7 @@ export async function invitar(
   const negocio = usuario ? await store.getNegocio(usuario.negocioId) : null;
   if (!usuario || !negocio) return falla(403, "Crea tu cuenta para empezar.");
   if (negocio.duenoUid !== uid) return falla(403, "Solo el dueño del negocio puede invitar.");
-  if (estadoEfectivo(negocio, ahora).plan !== "pro") return falla(403, "Invitar a tu equipo es del plan Pro.");
+  if (estadoEfectivo(negocio, ahora, modo(deps)).plan !== "pro") return falla(403, "Invitar a tu equipo es del plan Pro.");
 
   const correo = String(email ?? "").trim().toLowerCase();
   if (!CORREO.test(correo) || correo.length > 254) return falla(400, "Escribe un correo válido.");

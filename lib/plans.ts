@@ -74,6 +74,7 @@ export type Negocio = {
     ultimoEvento?: number; // reloj de los avisos de suscripción (ms)
     ultimaFactura?: number; // reloj de los avisos de factura (ms)
     checkoutPendiente?: string; // id de la última sesión de pago abierta (para no cobrar dos veces)
+    livemode?: boolean; // true = cobro real; false = modo de prueba de Stripe (tarjetas de prueba)
   };
   creado: number;
   actualizado: number;
@@ -84,8 +85,14 @@ export type Efectivo = {
   plan: Plan | null;
 };
 
+export type OpcionesEfectivo = {
+  // Modo de las claves de Stripe que usa el servidor ahora (true = reales). Si se pasa, una
+  // suscripción guardada del otro modo no cuenta: hay que pagar de nuevo en el modo actual.
+  stripeLive?: boolean;
+};
+
 // Estado real del negocio en este momento. El orden de las reglas importa.
-export function estadoEfectivo(n: Negocio, ahora: number): Efectivo {
+export function estadoEfectivo(n: Negocio, ahora: number, opts: OpcionesEfectivo = {}): Efectivo {
   // 1) Pausado a mano: manda sobre todo lo demás.
   if (n.estado === "pausado") return { estado: "pausado", plan: n.plan };
 
@@ -104,6 +111,11 @@ export function estadoEfectivo(n: Negocio, ahora: number): Efectivo {
 
   // 4) Suscripción de Stripe: solo "active" y "trialing" cuentan como al día.
   if (n.origen === "stripe") {
+    // Una suscripción del otro modo (p. ej. pagada con tarjeta de prueba) no da plan
+    const guardado = n.stripe?.livemode;
+    if (opts.stripeLive !== undefined && guardado !== undefined && guardado !== opts.stripeLive) {
+      return { estado: "sin_plan", plan: null };
+    }
     const ok = n.stripe?.status === "active" || n.stripe?.status === "trialing";
     return { estado: ok ? "activo" : "pausado", plan: n.plan };
   }
@@ -121,9 +133,16 @@ export function limite(cfg: PlanesConfig, plan: Plan, c: Contador): number {
 }
 
 // Día de los contadores (AAAA-MM-DD) en la hora de Chicago.
-const formatoDia = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago" });
+// Se arma con las partes (año, mes, día) para no depender de cómo se escribe la fecha.
+const formatoDia = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Chicago",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
 export function diaChicago(ahora: number): string {
-  return formatoDia.format(ahora);
+  const p = Object.fromEntries(formatoDia.formatToParts(ahora).map((x) => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}`;
 }
 
 // Pone lo guardado encima de DEFAULT_CONFIG; lo que falte se queda con el valor por defecto.

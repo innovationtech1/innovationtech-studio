@@ -1,5 +1,6 @@
 import "server-only";
 import { FieldValue } from "firebase-admin/firestore";
+import { colecciones } from "./colecciones";
 import { db } from "./firebase-server";
 import { mezclarConfig, type Contador, type Negocio, type PlanesConfig } from "./plans";
 
@@ -90,13 +91,7 @@ export type PagoManual = {
 
 export type Invitacion = { negocioId: string; invitadoPor: string; creado: number };
 
-export const COL_USUARIOS = "studio_usuarios";
-export const COL_NEGOCIOS = "studio_negocios";
-export const COL_USO = "studio_uso";
-export const COL_INVITACIONES = "studio_invitaciones";
-export const COL_CONFIG = "studio_config";
-export const COL_PAGOS_MANUALES = "studio_pagos_manuales";
-export const COL_STRIPE_EVENTOS = "studio_stripe_eventos";
+// Los nombres de las colecciones están en lib/colecciones.ts (con el prefijo configurable).
 
 export const idUso = (negocioId: string, dia: string) => `${negocioId}_${dia}`;
 
@@ -110,8 +105,39 @@ function sinIndefinidos(c: Partial<Negocio>): Record<string, unknown> {
 
 const numero = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
+// La configuración de planes casi no cambia y se lee en cada pedido: se guarda en memoria 60 s
+// (en cada servidor por separado) para cuidar las lecturas gratis de Firestore.
+export const CONFIG_DURA = 60_000;
+let configCache: { coleccion: string; hasta: number; valor: PlanesConfig } | null = null;
+
+// Devuelve la configuración guardada en memoria si tiene menos de 60 s; si no, la lee con `leer`.
+// Se separa de Firestore para poder probarla.
+export async function configConCache(
+  coleccion: string,
+  leer: () => Promise<PlanesConfig>,
+  ahora = Date.now(),
+): Promise<PlanesConfig> {
+  if (configCache && configCache.coleccion === coleccion && ahora < configCache.hasta) {
+    return structuredClone(configCache.valor);
+  }
+  const valor = await leer();
+  configCache = { coleccion, hasta: ahora + CONFIG_DURA, valor };
+  return structuredClone(valor);
+}
+export function olvidarConfig() {
+  configCache = null;
+}
+
 // Implementación real con Firestore. No toca Firestore hasta que se usa un método.
 export function firestoreStore(): AccountStore {
+  const C = colecciones();
+  const COL_USUARIOS = C.usuarios;
+  const COL_NEGOCIOS = C.negocios;
+  const COL_USO = C.uso;
+  const COL_INVITACIONES = C.invitaciones;
+  const COL_CONFIG = C.config;
+  const COL_PAGOS_MANUALES = C.pagosManuales;
+  const COL_STRIPE_EVENTOS = C.stripeEventos;
   return {
     async getUsuario(uid) {
       const s = await db().collection(COL_USUARIOS).doc(uid).get();
@@ -124,8 +150,10 @@ export function firestoreStore(): AccountStore {
     },
 
     async getConfig() {
-      const s = await db().collection(COL_CONFIG).doc("planes").get();
-      return mezclarConfig(s.exists ? (s.data() as Partial<PlanesConfig>) : null);
+      return configConCache(COL_CONFIG, async () => {
+        const s = await db().collection(COL_CONFIG).doc("planes").get();
+        return mezclarConfig(s.exists ? (s.data() as Partial<PlanesConfig>) : null);
+      });
     },
 
     async reservarUso(negocioId, dia, c, unidades, tope) {
@@ -276,6 +304,7 @@ export function firestoreStore(): AccountStore {
     async guardarConfig(parcial) {
       // merge: true mezcla también los mapas de adentro (precios.basico, etc.)
       await db().collection(COL_CONFIG).doc("planes").set(parcial, { merge: true });
+      olvidarConfig(); // la próxima lectura trae lo recién guardado
     },
 
     async negocioPorCustomer(customerId) {

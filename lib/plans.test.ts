@@ -112,3 +112,32 @@ test("diaChicago: cambio de día y de horario", () => {
   assert.equal(diaChicago(Date.parse("2026-11-01T04:59:00Z")), "2026-10-31");
   assert.equal(diaChicago(Date.parse("2026-11-02T05:30:00Z")), "2026-11-01");
 });
+
+/* ---------- Modo de Stripe (prueba / real) ---------- */
+
+const conTarjeta = (livemode?: boolean) =>
+  negocio({ estado: "activo", plan: "pro", origen: "stripe", stripe: { status: "active", ...(livemode === undefined ? {} : { livemode }) } });
+
+test("estadoEfectivo sin opciones: no mira el modo de Stripe (como antes)", () => {
+  assert.deepEqual(estadoEfectivo(conTarjeta(false), AHORA), { estado: "activo", plan: "pro" });
+  assert.deepEqual(estadoEfectivo(conTarjeta(true), AHORA), { estado: "activo", plan: "pro" });
+});
+
+test("estadoEfectivo: con claves reales, una suscripción de prueba no da plan", () => {
+  assert.deepEqual(estadoEfectivo(conTarjeta(false), AHORA, { stripeLive: true }), { estado: "sin_plan", plan: null });
+  assert.deepEqual(estadoEfectivo(conTarjeta(true), AHORA, { stripeLive: true }), { estado: "activo", plan: "pro" });
+});
+
+test("estadoEfectivo: con claves de prueba, una suscripción real no da plan", () => {
+  assert.deepEqual(estadoEfectivo(conTarjeta(true), AHORA, { stripeLive: false }), { estado: "sin_plan", plan: null });
+  assert.deepEqual(estadoEfectivo(conTarjeta(false), AHORA, { stripeLive: false }), { estado: "activo", plan: "pro" });
+});
+
+test("estadoEfectivo: sin modo guardado (datos viejos) se queda como antes", () => {
+  assert.deepEqual(estadoEfectivo(conTarjeta(), AHORA, { stripeLive: true }), { estado: "activo", plan: "pro" });
+});
+
+test("estadoEfectivo: el modo solo importa si el origen es Stripe", () => {
+  const n = negocio({ estado: "activo", plan: "basico", origen: "manual", pagadoHasta: AHORA + DIA, stripe: { status: "canceled", livemode: false } });
+  assert.deepEqual(estadoEfectivo(n, AHORA, { stripeLive: true }), { estado: "activo", plan: "basico" });
+});

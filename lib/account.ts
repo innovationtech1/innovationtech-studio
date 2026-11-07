@@ -1,5 +1,6 @@
 import "server-only";
 import { firestoreStore, type AccountStore } from "./account-store";
+import { stripeModoLive } from "./stripe-server";
 import { verifyIdToken } from "./verify-token";
 import {
   diaChicago,
@@ -44,6 +45,7 @@ export type DepsAcceso = {
   store?: AccountStore;
   verify?: (token: string) => Promise<{ uid: string; email: string; emailVerified: boolean }>;
   now?: number;
+  stripeLive?: boolean; // modo de las claves de Stripe (si no se pasa, se mira STRIPE_SECRET_KEY)
 };
 
 const NOMBRE_CONTADOR: Record<Contador, string> = {
@@ -96,7 +98,7 @@ export async function requireAccess(
   if (!negocio) return falla(403, "SIN_PLAN", "Crea tu cuenta para empezar.");
 
   // 3) Estado del negocio
-  const ef = estadoEfectivo(negocio, ahora);
+  const ef = estadoEfectivo(negocio, ahora, { stripeLive: deps.stripeLive ?? stripeModoLive() });
   if (ef.estado === "pausado") {
     return falla(403, "PAUSADO", "Tu cuenta está en pausa. Paga para reactivarla.");
   }

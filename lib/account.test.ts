@@ -287,3 +287,14 @@ test("jsonAcceso arma la respuesta de error con su status", async () => {
   assert.equal(r.headers.get("Cache-Control"), "no-store");
   assert.deepEqual(await r.json(), { error: "Hola", codigo: "LIMITE" });
 });
+
+/* ---------- Modo de Stripe (C1) ---------- */
+
+test("guardián: suscripción de prueba con claves reales → 403 SIN_PLAN; en su modo → ok", async () => {
+  const n = { plan: "pro" as const, origen: "stripe" as const, pagadoHasta: undefined, stripe: { status: "active", livemode: false } };
+  const real = await requireAccess(req(), { herramienta: "textos", clavePropia: false }, { store: tienda(n), verify, now: AHORA, stripeLive: true });
+  assert.equal(real.ok, false);
+  if (!real.ok) assert.equal(real.codigo, "SIN_PLAN");
+  const prueba = await requireAccess(req(), { herramienta: "textos", clavePropia: false }, { store: tienda(n), verify, now: AHORA, stripeLive: false });
+  assert.equal(prueba.ok, true);
+});

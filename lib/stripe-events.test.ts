@@ -394,7 +394,13 @@ function stripeFalso(op: {
   suscripciones?: Array<Record<string, unknown>>;
   sesiones?: Record<string, { status: string; subscription?: string; customer?: string }>;
   expirarFalla?: boolean; // simula que la pagaron justo antes de vencerla
+  sinCliente?: string[]; // customers que Stripe no conoce (p. ej. de otro modo)
 } = {}) {
+  const noHayCliente = (c: unknown) => {
+    if (typeof c === "string" && op.sinCliente?.includes(c)) {
+      throw Object.assign(new Error(`No such customer: '${c}'`), { type: "StripeInvalidRequestError", code: "resource_missing", statusCode: 404 });
+    }
+  };
   const sesiones = { ...(op.sesiones ?? {}) };
   const llamadas: Llamada[] = [];
   const precios = [...(op.precios ?? [])];
@@ -426,8 +432,9 @@ function stripeFalso(op: {
     },
     checkout: {
       sessions: {
-        async create(p: unknown) {
+        async create(p: { customer?: string }) {
           anotar("checkout.sessions.create", p);
+          noHayCliente(p.customer);
           return { id: "cs_nuevo", url: "https://checkout.stripe.com/c/pay/cs_nuevo" };
         },
         async retrieve(id: string) {
@@ -449,8 +456,9 @@ function stripeFalso(op: {
     },
     billingPortal: {
       sessions: {
-        async create(p: unknown) {
+        async create(p: { customer?: string }) {
           anotar("billingPortal.sessions.create", p);
+          noHayCliente(p.customer);
           return { id: "bps_1", url: "https://billing.stripe.com/p/session/bps_1" };
         },
       },
@@ -464,8 +472,9 @@ function stripeFalso(op: {
         }
         return s;
       },
-      async list(p: unknown) {
+      async list(p: { customer?: string }) {
         anotar("subscriptions.list", p);
+        noHayCliente(p.customer);
         return { data: subs };
       },
       async update(id: string, p: unknown) {
@@ -847,4 +856,125 @@ test("store: guardarConfig mezcla sin borrar lo demás", async () => {
   assert.equal(c.precios.basico.stripePriceId, "p_b");
   assert.equal(c.precios.pro.monto, 39);
   assert.equal(c.pruebaMinutos, 20);
+});
+
+/* ---------- Modo de prueba y modo real (C1) ---------- */
+
+const enModo = (ev: Stripe.Event, livemode: boolean) => ({ ...ev, livemode }) as Stripe.Event;
+
+test("cada aviso aplicado guarda su modo (livemode)", () => {
+  const c1 = aplicarEvento(evento("checkout.session.completed", sesion()), negocio(), cfg);
+  assert.equal(c1?.stripe?.livemode, false);
+  const c2 = aplicarEvento(enModo(evento("customer.subscription.created", suscripcion()), true), negocio(), cfg);
+  assert.equal(c2?.stripe?.livemode, true);
+  const n = conStripe({ subscriptionId: "sub_1", customerId: "cus_1", status: "active", livemode: true });
+  const c3 = aplicarEvento(enModo(evento("invoice.paid", factura()), true), n, cfg);
+  assert.equal(c3?.stripe?.livemode, true);
+});
+
+test("datos guardados del otro modo no bloquean la suscripción nueva (se empieza de cero)", () => {
+  // Suscripción de prueba «activa» guardada; llega la real
+  const n = conStripe({ subscriptionId: "sub_prueba", customerId: "cus_prueba", status: "active", livemode: false, ultimoEvento: (T + 999) * 1000 });
+  const c = aplicarEvento(enModo(evento("customer.subscription.created", suscripcion({ id: "sub_real", customer: "cus_real" })), true), n, cfg);
+  assert.ok(c);
+  assert.equal(c.stripe?.subscriptionId, "sub_real");
+  assert.equal(c.stripe?.customerId, "cus_real");
+  assert.equal(c.stripe?.livemode, true);
+  assert.equal(c.estado, "activo");
+});
+
+test("webhook: un aviso de otro modo se ignora (200) y no cambia nada", async () => {
+  const store = nuevoStore();
+  const { cuerpo, firma } = firmado(enModo(evento("customer.subscription.created", suscripcion()), true));
+  const { r, avisos } = await callado(() => procesarWebhook(cuerpo, firma, { ...depsW(store), stripeLive: false }));
+  assert.equal(r.status, 200);
+  assert.equal(r.body.ignorado, true);
+  assert.equal(avisos.length, 1);
+  assert.equal((await store.getNegocio("n1"))?.estado, "prueba");
+  // Con claves reales, el mismo aviso sí se aplica
+  const r2 = await procesarWebhook(cuerpo, firma, { ...depsW(store), stripeLive: true });
+  assert.equal(r2.status, 200);
+  assert.equal((await store.getNegocio("n1"))?.plan, "pro");
+  assert.equal((await store.getNegocio("n1"))?.stripe?.livemode, true);
+});
+
+test("pagar: suscripción y customer guardados del otro modo → checkout nuevo sin customer", async () => {
+  const f = stripeFalso();
+  const store = nuevoStore(conStripe({ customerId: "cus_prueba", subscriptionId: "sub_prueba", status: "active", livemode: false }));
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "pro", ORIGEN, { ...depsP(store, f.cliente), stripeLive: true });
+  assert.equal(r.ok, true);
+  assert.equal(f.metodos().includes("subscriptions.retrieve"), false);
+  assert.equal(f.metodos().includes("subscriptions.list"), false);
+  const p = f.llamadas.find((l) => l.metodo === "checkout.sessions.create")!.args[0] as Record<string, unknown>;
+  assert.equal(p.customer, undefined);
+  assert.equal(p.customer_email, "dueno@ejemplo.com");
+});
+
+test("pagar: datos viejos sin modo que Stripe no conoce → checkout nuevo (no 502) y quedan marcados del otro modo", async () => {
+  const f = stripeFalso({ sinCliente: ["cus_viejo"] });
+  const store = nuevoStore(conStripe({ customerId: "cus_viejo", subscriptionId: "sub_viejo", status: "active" }));
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "pro", ORIGEN, { ...depsP(store, f.cliente), stripeLive: true });
+  assert.equal(r.ok, true);
+  if (r.ok) assert.equal(r.url, "https://checkout.stripe.com/c/pay/cs_nuevo");
+  const p = f.llamadas.find((l) => l.metodo === "checkout.sessions.create")!.args[0] as Record<string, unknown>;
+  assert.equal(p.customer, undefined);
+  assert.equal(p.customer_email, "dueno@ejemplo.com");
+  const n = await store.getNegocio("n1");
+  assert.equal(n?.stripe?.livemode, false);
+  assert.equal(n?.stripe?.checkoutPendiente, "cs_nuevo");
+});
+
+test("portal: customer del otro modo → 400 «Todavía no tienes una suscripción con tarjeta.»", async () => {
+  const f = stripeFalso();
+  const store = nuevoStore(conStripe({ customerId: "cus_prueba", livemode: false }));
+  const r = await abrirPortal("u1", ORIGEN, { store, stripe: f.cliente, stripeLive: true });
+  assert.equal(r.ok, false);
+  if (!r.ok) {
+    assert.equal(r.status, 400);
+    assert.equal(r.error, "Todavía no tienes una suscripción con tarjeta.");
+  }
+  assert.equal(f.llamadas.length, 0);
+});
+
+test("portal: Stripe no conoce el customer → 400 (no 502)", async () => {
+  const f = stripeFalso({ sinCliente: ["cus_viejo"] });
+  const store = nuevoStore(conStripe({ customerId: "cus_viejo" }));
+  const r = await abrirPortal("u1", ORIGEN, { store, stripe: f.cliente, stripeLive: true });
+  assert.equal(r.ok, false);
+  if (!r.ok) {
+    assert.equal(r.status, 400);
+    assert.equal(r.error, "Todavía no tienes una suscripción con tarjeta.");
+  }
+});
+
+/* ---------- Precio → plan por lookup_key (M8) ---------- */
+
+const conLookup = (lookup: string | undefined, precio: string) => ({
+  ...suscripcion({}, precio),
+  items: {
+    object: "list",
+    data: [{ id: "si_1", object: "subscription_item", price: { id: precio, ...(lookup ? { lookup_key: lookup } : {}) } }],
+  },
+});
+
+test("plan por lookup_key primero (aunque el priceId guardado sea otro)", () => {
+  const pro = aplicarEvento(evento("customer.subscription.updated", conLookup("studio_pro_mensual", "price_nuevo_pro")), negocio(), cfg);
+  assert.equal(pro?.plan, "pro");
+  assert.equal(pro?.stripe?.priceId, "price_nuevo_pro");
+  // lookup_key de Básico manda sobre un priceId que en la configuración es de Pro
+  const basico = aplicarEvento(evento("customer.subscription.updated", conLookup("studio_basico_mensual", PRECIO_P)), negocio(), cfg);
+  assert.equal(basico?.plan, "basico");
+});
+
+test("sin lookup_key se usa el priceId de la configuración", () => {
+  const c = aplicarEvento(evento("customer.subscription.updated", conLookup(undefined, PRECIO_P)), negocio(), cfg);
+  assert.equal(c?.plan, "pro");
+});
+
+test("lookup_key desconocido y precio desconocido → Básico con aviso", async () => {
+  const { r: c, avisos } = await callado(() =>
+    aplicarEvento(evento("customer.subscription.updated", conLookup("otro_lookup", "price_otro")), negocio(), cfg),
+  );
+  assert.equal(c?.plan, "basico");
+  assert.equal(avisos.length, 1);
 });

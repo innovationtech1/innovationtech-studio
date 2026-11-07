@@ -30,8 +30,21 @@ export const EVENTOS_STRIPE = [
 type ConId = string | { id: string } | null | undefined;
 export const idDe = (v: ConId): string | undefined => (typeof v === "string" ? v : v?.id) || undefined;
 
+// Nombres fijos (lookup_key) que «Preparar Stripe» pone a nuestros precios.
+export const LOOKUP_PLANES: Record<"basico" | "pro", string> = {
+  basico: "studio_basico_mensual",
+  pro: "studio_pro_mensual",
+};
+
 // El plan que corresponde a un precio de Stripe (null si no es ninguno de los nuestros).
-export function planDePrecio(priceId: string | undefined, cfg: PlanesConfig): "basico" | "pro" | null {
+// Primero por su lookup_key (sobrevive a un cambio de precio), luego por el id guardado en la configuración.
+export function planDePrecio(
+  priceId: string | undefined,
+  cfg: PlanesConfig,
+  lookupKey?: string | null,
+): "basico" | "pro" | null {
+  if (lookupKey === LOOKUP_PLANES.basico) return "basico";
+  if (lookupKey === LOOKUP_PLANES.pro) return "pro";
   if (!priceId) return null;
   if (priceId === cfg.precios.basico.stripePriceId) return "basico";
   if (priceId === cfg.precios.pro.stripePriceId) return "pro";
@@ -67,11 +80,18 @@ function limpio<T extends object>(o: T): T {
 // Calcula los cambios del negocio para un aviso. Devuelve null si no hay que cambiar nada.
 export function aplicarEvento(evento: Stripe.Event, negocio: Negocio, cfg: PlanesConfig): Partial<Negocio> | null {
   const cuando = evento.created * 1000;
-  const reloj = negocio.stripe?.ultimoEvento ?? 0;
+  const livemode = evento.livemode;
+  // Lo guardado es del otro modo de Stripe (prueba ↔ real): no sirve aquí, se empieza de cero
+  // (solo se conserva la sesión de pago pendiente, que sí es del modo actual).
+  const guardado = negocio.stripe;
+  const otroModo = guardado?.livemode !== undefined && guardado.livemode !== livemode;
+  const reloj = otroModo ? 0 : (guardado?.ultimoEvento ?? 0);
   // Llegó desordenado: ya se aplicó un aviso más nuevo
   if (cuando < reloj) return null;
 
-  const previo = negocio.stripe ?? {};
+  const previo: NonNullable<Negocio["stripe"]> = otroModo
+    ? limpio({ checkoutPendiente: guardado?.checkoutPendiente })
+    : (guardado ?? {});
   const actual = previo.subscriptionId;
   const actualViva = !!actual && SUSCRIPCION_VIVA.has(previo.status ?? "");
   // Una suscripción distinta solo se adopta si la actual ya no cobra (si no, sería un doble cobro:
@@ -100,6 +120,7 @@ export function aplicarEvento(evento: Stripe.Event, negocio: Negocio, cfg: Plane
           // Esta sesión ya se pagó: ya no está pendiente
           checkoutPendiente: previo.checkoutPendiente === ses.id ? undefined : previo.checkoutPendiente,
           ultimoEvento: reloj,
+          livemode,
         }),
       };
     }
@@ -114,7 +135,8 @@ export function aplicarEvento(evento: Stripe.Event, negocio: Negocio, cfg: Plane
       // Una suscripción cancelada no revive (protege contra avisos del mismo segundo en otro orden)
       if (!borrada && sub.id === actual && previo.status === "canceled" && status !== "canceled") return null;
 
-      const priceId = sub.items?.data?.[0]?.price?.id;
+      const precio = sub.items?.data?.[0]?.price;
+      const priceId = precio?.id;
       const stripe = limpio({
         ...previo,
         customerId: idDe(sub.customer) ?? previo.customerId,
@@ -122,13 +144,14 @@ export function aplicarEvento(evento: Stripe.Event, negocio: Negocio, cfg: Plane
         status,
         priceId: priceId ?? previo.priceId,
         ultimoEvento: Math.max(reloj, cuando),
+        livemode,
       });
 
       // Sin el primer pago, o con un pago a mano vigente en el negocio: solo se anota lo de Stripe
       if (SIN_PRIMER_PAGO.has(status) || (conPagoManual && !AL_DIA.has(status))) return { stripe };
 
       // Un precio que no es de los nuestros nunca da Pro: queda en Básico (y se avisa en el registro)
-      let plan = planDePrecio(priceId, cfg);
+      let plan = planDePrecio(priceId, cfg, precio?.lookup_key);
       if (!plan) {
         console.warn(`Stripe: la suscripción ${sub.id} tiene un precio desconocido (${priceId ?? "sin precio"}); se toma como Básico.`);
         plan = "basico";
@@ -158,7 +181,7 @@ export function aplicarEvento(evento: Stripe.Event, negocio: Negocio, cfg: Plane
       // No adelantan el reloj de la suscripción: subscription.created puede ser más viejo y llegar después
       return {
         estado: pagada ? "activo" : "pausado",
-        stripe: limpio({ ...previo, ultimoEvento: reloj, ultimaFactura: cuando }),
+        stripe: limpio({ ...previo, ultimoEvento: reloj, ultimaFactura: cuando, livemode }),
       };
     }
 

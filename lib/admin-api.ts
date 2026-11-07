@@ -2,11 +2,14 @@ import "server-only";
 import { firestoreStore, type AccountStore, type PagoManual } from "./account-store";
 import { esCorreoAdmin, type Falla } from "./account-api";
 import { diaChicago, estadoEfectivo, type Contador, type Efectivo, type Negocio } from "./plans";
+import { stripeModoLive } from "./stripe-server";
 
 // Lo que hacen las rutas /api/admin. Son funciones sin Request/Response para poder probarlas.
 // Cada una revisa por su cuenta que el correo sea de administrador (además de la ruta).
 
-export type DepsAdmin = { store?: AccountStore; now?: number };
+// stripeLive: modo de las claves de Stripe (si no se pasa, se mira STRIPE_SECRET_KEY).
+export type DepsAdmin = { store?: AccountStore; now?: number; stripeLive?: boolean };
+const modo = (deps: DepsAdmin) => ({ stripeLive: deps.stripeLive ?? stripeModoLive() });
 
 const falla = (status: number, error: string, codigo?: string): Falla =>
   codigo ? { ok: false, status, error, codigo } : { ok: false, status, error };
@@ -72,7 +75,7 @@ export async function listar(
   const filas = await Promise.all(
     negocios.map(async (negocio): Promise<FilaNegocio> => {
       const [dueno, usoHoy] = await Promise.all([store.getUsuario(negocio.duenoUid), store.getUso(negocio.id, dia)]);
-      return { negocio, efectivo: estadoEfectivo(negocio, ahora), dueno: dueno?.email ?? "", usoHoy };
+      return { negocio, efectivo: estadoEfectivo(negocio, ahora, modo(deps)), dueno: dueno?.email ?? "", usoHoy };
     }),
   );
   return { ok: true, negocios: filas };
@@ -92,7 +95,7 @@ export async function obtenerNegocio(
   return {
     ok: true,
     negocio,
-    efectivo: estadoEfectivo(negocio, ahora),
+    efectivo: estadoEfectivo(negocio, ahora, modo(deps)),
     pagos: await store.listarPagosManuales(negocioId),
   };
 }

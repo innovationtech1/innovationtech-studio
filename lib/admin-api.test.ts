@@ -230,3 +230,15 @@ test("finDelDiaChicago: fecha inválida devuelve NaN", () => {
   assert.ok(Number.isNaN(finDelDiaChicago("07/12/2026")));
   assert.ok(Number.isNaN(finDelDiaChicago("2026-02-31")));
 });
+
+/* ---------- Modo de Stripe (C1) ---------- */
+
+test("admin: listar y obtenerNegocio usan el modo de Stripe actual", async () => {
+  const store = nuevo({ estado: "activo", plan: "pro", origen: "stripe", stripe: { status: "active", livemode: false } });
+  const l = await listar(ADMIN, true, { store, now: AHORA, stripeLive: true });
+  assert.ok(l.ok);
+  if (l.ok) assert.deepEqual(l.negocios[0].efectivo, { estado: "sin_plan", plan: null });
+  const o = await obtenerNegocio(ADMIN, true, "n1", { store, now: AHORA, stripeLive: false });
+  assert.ok(o.ok);
+  if (o.ok) assert.deepEqual(o.efectivo, { estado: "activo", plan: "pro" });
+});
