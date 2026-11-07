@@ -186,7 +186,7 @@ export default function Home() {
       template: "reporte.yml",
       seccion: tab,
       dispositivo: device,
-      version: (process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || "local").slice(0, 7),
+      version: (process.env.NEXT_PUBLIC_COMMIT_SHA || "local").slice(0, 7),
     });
     return `https://github.com/innovationtech1/innovationtech-studio/issues/new?${q}`;
   };

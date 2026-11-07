@@ -1,6 +1,6 @@
 // Reduce una imagen del dispositivo dentro del navegador antes de enviarla.
 // Así las fotos del celular (que pesan varios MB) viajan ligeras y caben
-// en los límites de Vercel y de los proveedores.
+// en los límites del servidor (Netlify/Vercel) y de los proveedores.
 
 export async function fileToResizedDataUrl(
   file: File,

@@ -3,7 +3,7 @@
 // 2) MODO DEMO: las del dueño de la plataforma (variables de entorno CF_ACCOUNT_ID y CF_API_TOKEN),
 //    con un límite diario por persona para que alcance para todos.
 //
-// Para activar el modo demo en Vercel: Settings → Environment Variables →
+// Para activar el modo demo en Netlify: Project configuration → Environment variables →
 //   CF_ACCOUNT_ID = tu Account ID   ·   CF_API_TOKEN = tu token de Workers AI
 // Opcional: DEMO_LIMIT_TEXT, DEMO_LIMIT_IMAGE, DEMO_LIMIT_VOICE (usos por persona al día), DEMO_MODE=off para apagarlo.
 

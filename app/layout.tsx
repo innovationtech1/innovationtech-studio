@@ -5,10 +5,11 @@ import "./globals.css";
 import PwaSetup from "./pwa-setup";
 
 // Dirección pública de la app, para que la vista previa al compartir el enlace (WhatsApp, Facebook…)
-// muestre la imagen. En Vercel se detecta sola, también en las copias (forks) de otras personas.
+// muestre la imagen. En Netlify (URL) y en Vercel se detecta sola, también en las copias (forks) de otras personas.
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL
+  || process.env.URL
   || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "")
-  || "https://innovationtech-studio.vercel.app";
+  || "https://innovationtech-studio.netlify.app";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),

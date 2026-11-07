@@ -1,0 +1,32 @@
+# Publicación en Netlify. Netlify reconoce Next.js solo (adaptador OpenNext):
+# las rutas /api/* quedan como funciones del servidor con un tope de 60 segundos.
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# El service worker siempre debe revisarse para recibir actualizaciones.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+    Content-Type = "application/javascript; charset=utf-8"
+    Service-Worker-Allowed = "/"
+
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json; charset=utf-8"
+
+# Grabaciones de instrumentos y canciones: casi nunca cambian, así que el navegador las guarda una semana.
+[[headers]]
+  for = "/samples/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+
+[[headers]]
+  for = "/library/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
