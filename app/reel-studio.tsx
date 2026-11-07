@@ -18,6 +18,8 @@ const blobToDataUrl = (b: Blob) =>
   });
 import { describeVersion, MusicStyleId, renderMusic } from "@/lib/music";
 import MusicPicker from "./music-picker";
+import LibraryPicker from "./library-picker";
+import { loadSong } from "@/lib/library";
 import { DEFAULT_VOICE, findVoice } from "@/lib/voices";
 import { getLang } from "@/lib/i18n";
 import VoicePicker from "./voice-picker";
@@ -119,6 +121,8 @@ export default function ReelStudio({
   const [musicStyle, setMusicStyle] = usePersistentState<MusicStyleId>("reel:musica-estilo", "pop");
   const [musicSeed, setMusicSeed] = usePersistentState("reel:musica-version", 1);
   const [musicVolume, setMusicVolume] = usePersistentState("reel:musica-volumen", 0.6);
+  const [musicSource, setMusicSource] = usePersistentState<"generated" | "library">("reel:musica-fuente", "generated");
+  const [songId, setSongId] = usePersistentState("reel:cancion", "advertime");
   const listenNode = useRef<AudioBufferSourceNode | null>(null);
   const listenCtx = useRef<AudioContext | null>(null);
   const stopListen = () => {
@@ -129,10 +133,10 @@ export default function ReelStudio({
     }
     listenNode.current = null;
   };
-  const listenMusic = (seed: number, style: MusicStyleId = musicStyle) =>
-    run("Componiendo una muestra…", async () => {
+  const listenMusic = (seed: number, style: MusicStyleId = musicStyle, song?: string) =>
+    run(song ? "Cargando canción…" : "Componiendo una muestra…", async () => {
       stopListen();
-      const buf = await renderMusic({ style, seed, duration: 15 });
+      const buf = song ? await loadSong(song) : await renderMusic({ style, seed, duration: 15 });
       if (!listenCtx.current) listenCtx.current = new AudioContext();
       await listenCtx.current.resume();
       const s = listenCtx.current.createBufferSource();
@@ -311,7 +315,7 @@ export default function ReelStudio({
         font: brand.font || undefined,
         voice: voice || undefined,
         subtitles: voice && subtitlesOn ? { script, highlight: accent } : null,
-        music: musicOn ? { style: musicStyle, seed: musicSeed, volume: musicVolume } : null,
+        music: musicOn ? { style: musicStyle, seed: musicSeed, volume: musicVolume, song: musicSource === "library" ? songId : undefined } : null,
         onStatus: (m) => setBusy(m || "Grabando tu reel…"),
         onProgress: setProgress,
         previewCanvas: preview.current || undefined,
@@ -559,32 +563,55 @@ export default function ReelStudio({
 
       {/* 5. Música */}
       <h3 className="step">5. Música de fondo (gratis, sin derechos de autor)</h3>
-      <p className="hint" style={{ marginTop: 0 }}>Toca un estilo para escucharlo. «Otra versión» cambia tempo, tono, instrumentos y melodía.</p>
-      <MusicPicker
-        value={musicStyle}
-        on={musicOn}
-        onNone={() => (stopListen(), setMusicOn(false))}
-        onPick={(id) => {
-          setMusicOn(true);
-          setMusicStyle(id);
-          setMusicSeed(1);
-          if (!busy) listenMusic(1, id);
-        }}
-      />
+      <div className="seg">
+        <button className={!musicOn ? "active" : ""} onClick={() => (stopListen(), setMusicOn(false))}>
+          Sin música
+        </button>
+        <button className={musicOn && musicSource === "generated" ? "active" : ""} onClick={() => (setMusicOn(true), setMusicSource("generated"))}>
+          Compuesta por la app
+        </button>
+        <button className={musicOn && musicSource === "library" ? "active" : ""} onClick={() => (setMusicOn(true), setMusicSource("library"))}>
+          Biblioteca de canciones
+        </button>
+      </div>
+      {musicOn && musicSource === "generated" && (
+        <>
+          <p className="hint">Toca un estilo para escucharlo. «Otra versión» cambia tempo, tono, instrumentos y melodía.</p>
+          <MusicPicker
+            value={musicStyle}
+            onPick={(id) => {
+              setMusicStyle(id);
+              setMusicSeed(1);
+              if (!busy) listenMusic(1, id);
+            }}
+          />
+        </>
+      )}
+      {musicOn && musicSource === "library" && (
+        <LibraryPicker
+          value={songId}
+          onPick={(id) => {
+            setSongId(id);
+            if (!busy) listenMusic(1, musicStyle, id);
+          }}
+        />
+      )}
       {musicOn && (
         <>
           <div className="actions">
-            <button className="btn ghost small" disabled={!!busy} onClick={() => listenMusic(musicSeed)}>
+            <button className="btn ghost small" disabled={!!busy} onClick={() => listenMusic(musicSeed, musicStyle, musicSource === "library" ? songId : undefined)}>
               <Play size={15} aria-hidden /> Escuchar
             </button>
-            <button className="btn ghost small" disabled={!!busy} onClick={() => (setMusicSeed(musicSeed + 1), listenMusic(musicSeed + 1))}>
-              <Dices size={16} aria-hidden /> Otra versión
-            </button>
+            {musicSource === "generated" && (
+              <button className="btn ghost small" disabled={!!busy} onClick={() => (setMusicSeed(musicSeed + 1), listenMusic(musicSeed + 1))}>
+                <Dices size={16} aria-hidden /> Otra versión
+              </button>
+            )}
             <button className="btn ghost small" onClick={stopListen}>
               ⏹ Detener
             </button>
           </div>
-          <p className="muted" style={{ margin: "6px 0 0" }}>{describeVersion(musicStyle, musicSeed)}</p>
+          {musicSource === "generated" && <p className="muted" style={{ margin: "6px 0 0" }}>{describeVersion(musicStyle, musicSeed)}</p>}
           <div className="slider">
             <div className="slider-head">
               <span>Volumen de la música{voice ? " (baja sola mientras habla la voz)" : ""}</span>

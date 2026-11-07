@@ -1,5 +1,6 @@
 import { cuesFromWords, drawCue, wordsFromScript } from "./captions";
 import { renderMusic, MusicStyleId } from "./music";
+import { loadSong } from "./library";
 import fixWebmDuration from "fix-webm-duration";
 // Motor de reels: arma un video animado dentro del navegador, gratis y sin límite.
 // Dibuja cada escena en un <canvas> (zoom/movimiento suave + transiciones + textos)
@@ -19,7 +20,7 @@ export type ReelOptions = {
   font?: string; // letra de la marca para los textos
   voice?: string; // data URL de audio opcional
   subtitles?: { script: string; highlight: string } | null; // subtítulos palabra por palabra de la voz en off
-  music?: { style: MusicStyleId; seed: number; volume: number } | null; // música gratis de fondo
+  music?: { style: MusicStyleId; seed: number; volume: number; song?: string } | null; // música gratis de fondo (song: canción de la biblioteca)
   onStatus?: (msg: string) => void;
   onProgress?: (fraction: number) => void;
   previewCanvas?: HTMLCanvasElement; // para ver el reel mientras se graba
@@ -249,8 +250,13 @@ export async function renderReel(o: ReelOptions): Promise<ReelResult> {
   // Música de fondo (se compone a la medida exacta del reel)
   let musicBuffer: AudioBuffer | null = null;
   if (o.music) {
-    o.onStatus?.("🎵 Componiendo música…");
-    musicBuffer = await renderMusic({ style: o.music.style, seed: o.music.seed, duration: total + 0.3 });
+    if (o.music.song) {
+      o.onStatus?.("🎵 Cargando canción…");
+      musicBuffer = await loadSong(o.music.song);
+    } else {
+      o.onStatus?.("🎵 Componiendo música…");
+      musicBuffer = await renderMusic({ style: o.music.style, seed: o.music.seed, duration: total + 0.3 });
+    }
     if (!audioCtx) audioCtx = new AudioContext();
   }
 
@@ -324,6 +330,7 @@ export async function renderReel(o: ReelOptions): Promise<ReelResult> {
     if (musicBuffer && o.music) {
       musicSource = audioCtx.createBufferSource();
       musicSource.buffer = musicBuffer;
+      musicSource.loop = !!o.music.song && musicBuffer.duration < total;
       musicGain = audioCtx.createGain();
       musicGain.gain.value = o.music.volume;
       musicSource.connect(musicGain).connect(dest);
@@ -351,6 +358,12 @@ export async function renderReel(o: ReelOptions): Promise<ReelResult> {
       musicGain.gain.linearRampToValueAtTime(v * 0.35, now + 0.3);
       musicGain.gain.setValueAtTime(v * 0.35, now + 0.3 + voiceBuffer.duration);
       musicGain.gain.linearRampToValueAtTime(v, now + 0.8 + voiceBuffer.duration);
+    }
+    if (o.music.song) {
+      // La canción de la biblioteca se desvanece al terminar el reel
+      const fadeAt = Math.max(now + 0.9 + (voiceBuffer?.duration || 0), now + total - 1.5);
+      musicGain.gain.setValueAtTime(o.music.volume, fadeAt);
+      musicGain.gain.linearRampToValueAtTime(0, now + total);
     }
   }
   if (audioCtx && source) source.start(audioCtx.currentTime + 0.3);

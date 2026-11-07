@@ -53,8 +53,8 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Grabaciones para la música y los efectos: primero la caché (así funcionan sin internet).
-  if (url.pathname.startsWith("/samples/")) {
+  // Grabaciones para la música, los efectos y las canciones de la biblioteca: primero la caché (así funcionan sin internet).
+  if (url.pathname.startsWith("/samples/") || url.pathname.startsWith("/library/")) {
     event.respondWith(
       caches.open(SAMPLES).then((c) =>
         c.match(req).then(
