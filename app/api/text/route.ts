@@ -1,15 +1,19 @@
 import { jsonError } from "@/lib/replicate";
-import { getCreds, refund } from "@/lib/cf-auth";
+import { clavePropiaCF, getCreds, refund } from "@/lib/cf-auth";
+import { jsonAcceso, requireAccess, type Acceso } from "@/lib/account";
 
 export const maxDuration = 60;
 
 type Gen = { system: string; user: string; maxTokens: number };
 
 // Llama al proveedor elegido (Cloudflare gratis o Claude de pago) y devuelve el texto.
-async function generate(req: Request, provider: string, model: string | undefined, g: Gen): Promise<string> {
+async function generate(req: Request, acceso: Extract<Acceso, { ok: true }>, provider: string, model: string | undefined, g: Gen): Promise<string> {
   if (provider === "cloudflare") {
     const c = getCreds(req, "text");
-    if ("error" in c) throw Object.assign(new Error(c.error), { status: c.status });
+    if ("error" in c) {
+      await acceso.devolver();
+      throw Object.assign(new Error(c.error), { status: c.status });
+    }
     const { accountId, token } = c;
     // En modo demo siempre se usa el modelo predeterminado
     const m = (!c.demo && model) || "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
@@ -28,6 +32,7 @@ async function generate(req: Request, provider: string, model: string | undefine
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data?.success === false) {
       if (c.demo) refund(req, "text");
+      await acceso.devolver(); // con cuentas activas devuelve el uso reservado (no hace nada si está apagado)
       throw new Error(data?.errors?.[0]?.message || `Cloudflare respondió ${res.status}`);
     }
     // Según el modelo, el texto llega en "response" o con formato tipo OpenAI.
@@ -36,12 +41,18 @@ async function generate(req: Request, provider: string, model: string | undefine
       (typeof r.response === "string" && r.response) ||
       r.choices?.[0]?.message?.content ||
       (r.response && typeof r.response === "object" ? JSON.stringify(r.response) : "");
-    if (!text) throw new Error("Cloudflare no devolvió ningún texto. Prueba otra vez.");
+    if (!text) {
+      await acceso.devolver();
+      throw new Error("Cloudflare no devolvió ningún texto. Prueba otra vez.");
+    }
     return text;
   }
 
   const key = req.headers.get("x-anthropic-key");
-  if (!key) throw Object.assign(new Error("Falta tu clave de Anthropic. Agrégala en Configuración."), { status: 401 });
+  if (!key) {
+    await acceso.devolver();
+    throw Object.assign(new Error("Falta tu clave de Anthropic. Agrégala en Configuración."), { status: 401 });
+  }
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
@@ -53,7 +64,10 @@ async function generate(req: Request, provider: string, model: string | undefine
     }),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error?.message || `Anthropic respondió ${res.status}`);
+  if (!res.ok) {
+    await acceso.devolver();
+    throw new Error(data?.error?.message || `Anthropic respondió ${res.status}`);
+  }
   return (data.content || [])
     .filter((c: { type: string }) => c.type === "text")
     .map((c: { text: string }) => c.text)
@@ -79,6 +93,15 @@ export async function POST(req: Request) {
   const brandBlock =
     (brand ? `\nContexto de la marca:\n${brand}` : "") +
     (english ? "\nIMPORTANT: Write all the content in English (keep any required labels and JSON keys exactly as specified)." : "");
+
+  // Guardián: sesión, plan y límite diario, antes de llamar a cualquier proveedor.
+  // Con Anthropic la clave propia es la de Anthropic; con Cloudflare, la de Cloudflare.
+  const acceso = await requireAccess(req, {
+    herramienta: "textos",
+    contador: "textos",
+    clavePropia: provider !== "cloudflare" ? !!req.headers.get("x-anthropic-key") : clavePropiaCF(req),
+  });
+  if (!acceso.ok) return jsonAcceso(acceso);
 
   try {
     // Modo calendario: un plan de publicaciones, una por fecha.
@@ -108,7 +131,7 @@ export async function POST(req: Request) {
       ]
         .filter(Boolean)
         .join("\n");
-      const text = await generate(req, provider, model, { system, user, maxTokens: 2600 });
+      const text = await generate(req, acceso, provider, model, { system, user, maxTokens: 2600 });
       const json = parseJson(text);
       const raw = Array.isArray(json?.items) ? (json!.items as Record<string, unknown>[]) : [];
       if (!raw.length) return jsonError("La IA no devolvió el calendario en el formato esperado. Intenta de nuevo.", 502);
@@ -143,7 +166,7 @@ export async function POST(req: Request) {
         brandBlock,
       ].join("\n");
       const user = [`Tema del carrusel: ${prompt}`, platform ? `Red social: ${platform}` : ""].filter(Boolean).join("\n");
-      const text = await generate(req, provider, model, { system, user, maxTokens: 500 + n * 160 });
+      const text = await generate(req, acceso, provider, model, { system, user, maxTokens: 500 + n * 160 });
       const json = parseJson(text);
       const raw = Array.isArray(json?.slides) ? (json!.slides as Record<string, unknown>[]) : [];
       if (raw.length < 2) return jsonError("La IA no devolvió el carrusel en el formato esperado. Intenta de nuevo.", 502);
@@ -170,7 +193,7 @@ export async function POST(req: Request) {
         "Escribe en el idioma del pedido (por defecto, español). Sin hashtags ni emojis.",
         brandBlock,
       ].join("\n");
-      const text = await generate(req, provider, model, { system, user: `Tema del reel: ${prompt}`, maxTokens: 400 + n * 170 });
+      const text = await generate(req, acceso, provider, model, { system, user: `Tema del reel: ${prompt}`, maxTokens: 400 + n * 170 });
       const json = parseJson(text);
       const captions = Array.isArray(json?.captions) ? (json!.captions as unknown[]).map(String).slice(0, n) : [];
       if (!captions.length) return jsonError("La IA no devolvió los textos en el formato esperado. Intenta de nuevo.", 502);
@@ -195,7 +218,7 @@ export async function POST(req: Request) {
       "y una línea que empiece con 'PROMPT DE VIDEO:' con una descripción en inglés (una sola línea) de un clip corto para reel.",
       brandBlock,
     ].join("\n");
-    const text = await generate(req, provider, model, {
+    const text = await generate(req, acceso, provider, model, {
       system,
       user: `Plataforma: ${platform || "Instagram"}\n\nPedido: ${prompt}`,
       maxTokens: 1500,

@@ -1,5 +1,6 @@
 import { jsonError } from "@/lib/replicate";
-import { getCreds, refund } from "@/lib/cf-auth";
+import { clavePropiaCF, getCreds, refund } from "@/lib/cf-auth";
+import { jsonAcceso, requireAccess } from "@/lib/account";
 
 export const maxDuration = 60;
 
@@ -28,12 +29,23 @@ export async function POST(req: Request) {
     brand ? `\nContexto de la marca del usuario (úsalo siempre):\n${brand}` : "",
   ].join("\n");
 
+  // Guardián: sesión, plan y límite diario, antes de llamar a cualquier proveedor.
+  const acceso = await requireAccess(req, {
+    herramienta: "asistente",
+    contador: "textos",
+    clavePropia: provider === "anthropic" ? !!req.headers.get("x-anthropic-key") : clavePropiaCF(req),
+  });
+  if (!acceso.ok) return jsonAcceso(acceso);
+
   const enc = new TextEncoder();
 
   // ---------- Cloudflare Workers AI (gratis) ----------
   if (provider !== "anthropic") {
     const c = getCreds(req, "text");
-    if ("error" in c) return jsonError(c.error, c.status);
+    if ("error" in c) {
+      await acceso.devolver();
+      return jsonError(c.error, c.status);
+    }
     const m = (!c.demo && model) || "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
     const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(c.accountId)}/ai/run/${m}`, {
       method: "POST",
@@ -42,6 +54,7 @@ export async function POST(req: Request) {
     });
     if (!res.ok || !res.body) {
       if (c.demo) refund(req, "text");
+      await acceso.devolver();
       const data = await res.json().catch(() => ({}));
       return jsonError(data?.errors?.[0]?.message || `Cloudflare respondió ${res.status}`, 502);
     }
@@ -52,13 +65,17 @@ export async function POST(req: Request) {
 
   // ---------- Claude de Anthropic (de pago) ----------
   const key = req.headers.get("x-anthropic-key");
-  if (!key) return jsonError("Falta tu clave de Anthropic. Agrégala en Configuración.", 401);
+  if (!key) {
+    await acceso.devolver();
+    return jsonError("Falta tu clave de Anthropic. Agrégala en Configuración.", 401);
+  }
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
     body: JSON.stringify({ model: model || "claude-sonnet-5-5", max_tokens: 2000, system, messages: history, stream: true }),
   });
   if (!res.ok || !res.body) {
+    await acceso.devolver();
     const data = await res.json().catch(() => ({}));
     return jsonError(data?.error?.message || `Anthropic respondió ${res.status}`, res.status === 401 ? 401 : 502);
   }

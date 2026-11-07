@@ -1,5 +1,6 @@
 import { jsonError } from "@/lib/replicate";
-import { getCreds, refund } from "@/lib/cf-auth";
+import { clavePropiaCF, getCreds, refund } from "@/lib/cf-auth";
+import { jsonAcceso, requireAccess } from "@/lib/account";
 
 export const maxDuration = 60;
 
@@ -11,8 +12,15 @@ export async function POST(req: Request) {
   const { audio, language } = await req.json().catch(() => ({}));
   if (!audio || typeof audio !== "string") return jsonError("Falta el audio.");
   if (audio.length > 4_000_000) return jsonError("El audio es muy largo. Usa fragmentos de menos de 90 segundos.", 413);
+  // Guardián: los subtítulos tienen su propio contador. En el modo demo (cuentas apagadas)
+  // sigue contando como "voz", igual que antes.
+  const acceso = await requireAccess(req, { herramienta: "subtitulos", contador: "subtitulos", clavePropia: clavePropiaCF(req) });
+  if (!acceso.ok) return jsonAcceso(acceso);
   const c = getCreds(req, "voice");
-  if ("error" in c) return jsonError(c.error, c.status);
+  if ("error" in c) {
+    await acceso.devolver();
+    return jsonError(c.error, c.status);
+  }
 
   const res = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(c.accountId)}/ai/run/@cf/openai/whisper-large-v3-turbo`,
@@ -25,6 +33,7 @@ export async function POST(req: Request) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data?.success === false) {
     if (c.demo) refund(req, "voice");
+    await acceso.devolver();
     return jsonError(data?.errors?.[0]?.message || `Cloudflare respondió ${res.status}`, 502);
   }
   const r = data?.result ?? data ?? {};
