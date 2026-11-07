@@ -20,6 +20,7 @@ import {
 } from "@/lib/video-engine";
 import { describeVersion, renderMusic } from "@/lib/music";
 import MusicPicker from "./music-picker";
+import { previewSfx, SFX, SfxId, SfxItem } from "@/lib/sfx";
 import { deleteFile, getFile, putFile, toBlob } from "@/lib/media-store";
 import { usePersistentState } from "@/lib/persist";
 import type { Item, Settings } from "@/lib/types";
@@ -27,7 +28,7 @@ import { blobToBase64, cuesFromWords, toWav16k, type Word } from "@/lib/captions
 import { friendlyError } from "@/lib/errors";
 import { tr } from "@/lib/i18n";
 
-import { Captions, ChevronLeft, Smile, ChevronRight, Clapperboard, Copy, Dices, Download, Film, FolderOpen, ImageIcon, Music, Pause, Play, Scissors, Trash2, Type, Upload, Video } from "lucide-react";
+import { Captions, ChevronLeft, Plus, Smile, Zap, ChevronRight, Clapperboard, Copy, Dices, Download, Film, FolderOpen, ImageIcon, Music, Pause, Play, Scissors, Trash2, Type, Upload, Video } from "lucide-react";
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 const SW = ["#ffffff", "#000000", "#ffd23f", "#e5243b", "#0d1630", "#32c48d", "#2f80ed"];
 
@@ -45,7 +46,8 @@ export default function VideoEditor({
   const [project, setProject] = usePersistentState<Project>("video:proyecto", newProject());
   const [selected, setSelected] = useState<string | null>(null);
   const [selText, setSelText] = useState<string | null>(null);
-  const [panel, setPanel] = useState<"clip" | "textos" | "stickers" | "musica">("clip");
+  const [panel, setPanel] = useState<"clip" | "textos" | "stickers" | "efectos" | "musica">("clip");
+  const [selSfx, setSelSfx] = useState<string | null>(null);
   const [selSticker, setSelSticker] = useState<string | null>(null);
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -137,6 +139,23 @@ export default function VideoEditor({
     };
     update((p) => ({ ...p, stickers: [...(p.stickers || []), st] }));
     setSelSticker(st.id);
+  };
+
+  // ---------- Efectos de sonido ----------
+  const sfxList = project.sfx || [];
+  const sfxSel = sfxList.find((x) => x.id === selSfx) || null;
+  const sfxDef = (k: SfxId) => SFX.find((d) => d.id === k)!;
+  const updateSfx = (id: string, patch: Partial<SfxItem>) =>
+    update((p) => ({ ...p, sfx: (p.sfx || []).map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
+  const addSfx = (kind: SfxId) => {
+    const it: SfxItem = { id: uid(), kind, at: Math.round(Math.min(time, Math.max(0, total - 0.2)) * 10) / 10, volume: 0.8 };
+    update((p) => ({ ...p, sfx: [...(p.sfx || []), it].sort((a, b) => a.at - b.at) }));
+    setSelSfx(it.id);
+  };
+  const playSfx = async (kind: SfxId) => {
+    stopPreview();
+    if (!previewCtx.current) previewCtx.current = new AudioContext();
+    preview.current = await previewSfx(kind, previewCtx.current);
   };
 
   // ---------- Subtítulos automáticos ----------
@@ -316,7 +335,7 @@ export default function VideoEditor({
     stopPreview();
     setBusy("Componiendo una muestra…");
     try {
-      const buf = await renderMusic({ style, seed, duration: 15 });
+      const buf = await renderMusic({ style, seed, duration: 15, effects: project.music.effects !== false });
       if (!previewCtx.current) previewCtx.current = new AudioContext();
       await previewCtx.current.resume();
       const s = previewCtx.current.createBufferSource();
@@ -552,6 +571,9 @@ export default function VideoEditor({
         </button>
         <button className={panel === "stickers" ? "active" : ""} onClick={() => setPanel("stickers")}>
           <Smile size={16} aria-hidden /> Stickers ({stickers.length})
+        </button>
+        <button className={panel === "efectos" ? "active" : ""} onClick={() => setPanel("efectos")}>
+          <Zap size={16} aria-hidden /> Efectos de sonido ({sfxList.length})
         </button>
         <button className={panel === "musica" ? "active" : ""} onClick={() => setPanel("musica")}>
           <Music size={16} aria-hidden /> Música y audio
@@ -811,6 +833,53 @@ export default function VideoEditor({
           </>
         )}
 
+        {panel === "efectos" && (
+          <>
+            <p className="muted" style={{ marginTop: 0 }}>
+              Toca un efecto para escucharlo. Con <strong>+</strong> lo agregas en el momento actual del video ({time.toFixed(1)} s). Los efectos
+              son gratis y libres de derechos.
+            </p>
+            <div className="sfx-grid">
+              {SFX.map((d) => (
+                <div key={d.id} className="sfx-tile">
+                  <button className="sfx-play" onClick={() => playSfx(d.id)} title={`Escuchar ${d.label}`}>
+                    <span className="emoji">{d.emoji}</span> {d.label}
+                  </button>
+                  <button className="sfx-add" onClick={() => addSfx(d.id)} title={`Agregar ${d.label} en ${time.toFixed(1)} s`} aria-label={`Agregar ${d.label}`}>
+                    <Plus size={16} aria-hidden />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="layers" style={{ marginTop: 10 }}>
+              {sfxList.map((it) => (
+                <div key={it.id} className={`layer-row ${selSfx === it.id ? "active" : ""}`}>
+                  <button className="layer-name" onClick={() => (setSelSfx(it.id), engine.current?.seek(Math.max(0, it.at - 0.5)))}>
+                    {sfxDef(it.kind).emoji} {sfxDef(it.kind).label} · {it.at.toFixed(1)} s
+                  </button>
+                  <button title="Eliminar" aria-label="Eliminar" onClick={() => update((p) => ({ ...p, sfx: (p.sfx || []).filter((x) => x.id !== it.id) }))}>
+                    <Trash2 size={16} aria-hidden />
+                  </button>
+                </div>
+              ))}
+            </div>
+            {sfxSel && (
+              <div className="props">
+                <Range label={`Momento: ${sfxSel.at.toFixed(1)} s`} min={0} max={Math.max(0.1, total)} step={0.1} value={sfxSel.at} onChange={(v) => updateSfx(sfxSel.id, { at: v })} />
+                <Range label={`Volumen: ${Math.round(sfxSel.volume * 100)}%`} min={0.1} max={1.5} step={0.05} value={sfxSel.volume} onChange={(v) => updateSfx(sfxSel.id, { volume: v })} />
+                <div className="actions">
+                  <button className="btn ghost small" onClick={() => updateSfx(sfxSel.id, { at: Math.round(time * 10) / 10 })}>
+                    Mover al momento actual ({time.toFixed(1)} s)
+                  </button>
+                  <button className="btn ghost small" onClick={() => playSfx(sfxSel.kind)}>
+                    <Play size={15} aria-hidden /> Escuchar
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
         {panel === "musica" && (
           <>
             <div className="seg">
@@ -858,6 +927,14 @@ export default function VideoEditor({
                   </button>
                 </div>
                 <p className="muted">{describeVersion(project.music.style, project.music.seed)}</p>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={project.music.effects !== false}
+                    onChange={(e) => update((p) => ({ ...p, music: { ...p.music, effects: e.target.checked } }))}
+                  />{" "}
+                  Efectos en la música (subida antes del coro, golpe al entrar y final con impacto)
+                </label>
               </>
             )}
 

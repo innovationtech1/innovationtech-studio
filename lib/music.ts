@@ -1,12 +1,18 @@
-// Música gratis y sin derechos de autor: se compone y se sintetiza dentro del navegador.
+// Música gratis y sin derechos de autor: se compone dentro del navegador y se toca con
+// grabaciones reales de instrumentos (piano, guitarras, bajos, cuerdas, metales, batería y
+// percusión; ver public/samples/CREDITOS.md). Si alguna grabación no se puede descargar, ese
+// instrumento usa un sonido sintetizado de respaldo.
 // Cada estilo define rangos de tempo, tonalidades, progresiones, ritmos de batería, bajo,
 // instrumentos y melodía. Cada «versión» (semilla) elige una combinación distinta y arma
 // la canción por secciones (intro, verso, coro, puente y final), así que no hay dos iguales.
 // Con la misma semilla siempre sale la misma pieza.
 
 import { getLang, tr } from "./i18n";
+import { loadBank, nearest, SampleBank } from "./samples";
 
 export type MusicStyleId =
+  | "comercial"
+  | "elegante"
   | "pop"
   | "lofi"
   | "corporativo"
@@ -38,6 +44,7 @@ export const MUSIC_GROUPS: { id: MusicGroup; label: string }[] = [
 ];
 
 export const MUSIC_STYLES: { id: MusicStyleId; label: string; emoji: string; desc: string; group: MusicGroup }[] = [
+  { id: "comercial", label: "Comercial", emoji: "📣", desc: "Piano, guitarra y palmas: optimista, para anuncios y promociones", group: "animada" },
   { id: "pop", label: "Alegre pop", emoji: "😄", desc: "Optimista y pegajosa, ideal para promociones", group: "animada" },
   { id: "house", label: "House", emoji: "🪩", desc: "Bailable y elegante, para moda, bares y eventos", group: "animada" },
   { id: "funk", label: "Funk disco", emoji: "🕺", desc: "Groove con metales, divertida y con estilo", group: "animada" },
@@ -51,6 +58,7 @@ export const MUSIC_STYLES: { id: MusicStyleId; label: string; emoji: string; des
   { id: "bossa", label: "Bossa nova", emoji: "🍹", desc: "Guitarra suave y jazz ligero, para restaurantes", group: "tranquila" },
   { id: "lofi", label: "Lo-fi relajado", emoji: "☕", desc: "Tranquila, para cafeterías y momentos cálidos", group: "tranquila" },
   { id: "acustico", label: "Acústico cálido", emoji: "🎸", desc: "Guitarra suave, natural y cercana", group: "tranquila" },
+  { id: "elegante", label: "Elegante", emoji: "💎", desc: "Piano y cuerdas con clase, para lujo, joyería y bienes raíces", group: "tranquila" },
   { id: "inspirador", label: "Inspiradora", emoji: "🌅", desc: "Piano y cuerdas que crecen, para historias de marca", group: "tranquila" },
   { id: "romantico", label: "Romántica", emoji: "💕", desc: "Balada de piano, para bodas, flores y regalos", group: "tranquila" },
   { id: "electronica", label: "Electrónica", emoji: "⚡", desc: "Energía de club, para lanzamientos y moda", group: "intensa" },
@@ -65,7 +73,7 @@ export const MUSIC_STYLES: { id: MusicStyleId; label: string; emoji: string; des
 type Kit = "electro" | "acoustic" | "808" | "brush" | "none";
 type DrumPat = Partial<
   Record<
-    "kick" | "snare" | "clap" | "rim" | "hat" | "openHat" | "ride" | "shaker" | "conga" | "bongo" | "cowbell" | "clave" | "guiro" | "sleigh" | "tom" | "hatRoll",
+    "kick" | "snare" | "clap" | "rim" | "hat" | "openHat" | "ride" | "shaker" | "conga" | "bongo" | "cowbell" | "clave" | "guiro" | "sleigh" | "tom" | "hatRoll" | "tamb",
     number[]
   >
 >;
@@ -85,7 +93,9 @@ type Inst =
   | "brass"
   | "power"
   | "vibes"
-  | "bell";
+  | "bell"
+  | "eguitar"
+  | "strings";
 type Comp = "arp16" | "arp8" | "block" | "offbeat" | "push" | "strum" | "oompah" | "sustain" | "pulse" | "bossa" | "stab4";
 type Pad = "strings" | "choir" | "warm";
 type Lead = "bell" | "flute" | "horn" | "synth" | "whistle" | "accordion" | "trumpet" | "xylo" | "vibes" | "piano" | "glock" | "nylon";
@@ -114,6 +124,30 @@ const OFF8 = [2, 6, 10, 14];
 const FOUR = [0, 4, 8, 12];
 
 const STYLES: Record<MusicStyleId, Def> = {
+  comercial: {
+    bpm: [104, 120], keys: [60, 62, 64, 65, 67], minor: false,
+    progs: [[0, 4, 5, 3], [0, 5, 3, 4], [3, 0, 4, 5], [0, 3, 0, 4]],
+    kit: "acoustic",
+    drums: [
+      { kick: [0, 8, 10], clap: [4, 12], hat: E8, tamb: [4, 12] },
+      { kick: [0, 6, 8], snare: [4, 12], clap: [12], shaker: E16 },
+      { kick: [0, 8], clap: [4, 12], hat: OFF8, shaker: E8 },
+    ],
+    bass: { kind: "synth", pats: [[0, 6, 8, 14], E8, [0, 3, 8, 11]] },
+    harm: { inst: ["piano", "guitar", "eguitar"], comp: ["push", "strum", "arp8"] },
+    pad: ["strings", null, "warm"], lead: ["glock", "bell", "whistle", "piano"],
+    fx: { reverb: 0.2, riser: true },
+  },
+  elegante: {
+    bpm: [76, 92], keys: [60, 62, 63, 65, 67], minor: false, sevenths: true,
+    progs: [[0, 5, 1, 4], [0, 3, 1, 4], [3, 4, 2, 5], [0, 2, 3, 4]],
+    kit: "brush",
+    drums: [{ kick: [0, 10], rim: [12], ride: E8 }, { kick: [0, 8], ride: E8, shaker: E16 }],
+    bass: { kind: "upright", pats: [[0, 8], [0, 6, 8]], alt: true },
+    harm: { inst: ["piano", "rhodes", "nylon"], comp: ["arp8", "block", "bossa"] },
+    pad: ["strings", "warm", "strings"], lead: [null, "vibes", "flute", "piano"],
+    fx: { reverb: 0.35 },
+  },
   pop: {
     bpm: [112, 124], keys: [60, 62, 64, 65, 67], minor: false,
     progs: [[0, 4, 5, 3], [5, 3, 0, 4], [0, 5, 3, 4], [3, 0, 4, 5]],
@@ -124,8 +158,8 @@ const STYLES: Record<MusicStyleId, Def> = {
       { kick: FOUR, clap: [4, 12], hat: OFF8, openHat: [14] },
     ],
     bass: { kind: "synth", pats: [E8, [0, 3, 6, 8, 11, 14], [0, 6, 8, 14]], cutoff: 750 },
-    harm: { inst: ["pluck", "piano", "supersaw"], comp: ["arp16", "push", "arp8"] },
-    pad: ["warm", "strings", null], lead: ["bell", "synth", "whistle", "glock"],
+    harm: { inst: ["piano", "guitar", "pluck", "supersaw"], comp: ["push", "strum", "arp16", "arp8"] },
+    pad: ["strings", "warm", null], lead: ["bell", "glock", "whistle", "synth"],
     fx: { reverb: 0.22, riser: true },
   },
   house: {
@@ -150,7 +184,7 @@ const STYLES: Record<MusicStyleId, Def> = {
       { kick: FOUR, snare: [4, 12], hat: E8, openHat: OFF8, cowbell: [0, 6, 12] },
     ],
     bass: { kind: "synth", pats: [E8, [0, 3, 6, 7, 10, 12, 14]], octaves: true, cutoff: 1100 },
-    harm: { inst: ["stabs", "rhodes", "guitar"], comp: ["offbeat", "push", "strum"] },
+    harm: { inst: ["eguitar", "stabs", "rhodes", "guitar"], comp: ["offbeat", "push", "strum"] },
     pad: ["strings", null], lead: ["trumpet", "horn", "synth"],
     fx: { reverb: 0.18 },
   },
@@ -176,8 +210,8 @@ const STYLES: Record<MusicStyleId, Def> = {
       { kick: [0, 8], snare: [4, 12], sleigh: E16, hat: [] },
     ],
     bass: { kind: "upright", pats: [[0, 8], [0, 4, 8, 12]], alt: true },
-    harm: { inst: ["piano", "pluck"], comp: ["arp8", "push"] },
-    pad: ["strings", "warm"], lead: ["glock", "bell", "flute"],
+    harm: { inst: ["piano", "pluck", "marimba"], comp: ["arp8", "push"] },
+    pad: ["strings", "choir", "warm"], lead: ["glock", "bell", "flute"],
     fx: { reverb: 0.3 },
   },
   corporativo: {
@@ -189,8 +223,8 @@ const STYLES: Record<MusicStyleId, Def> = {
       { kick: [0, 7, 8], clap: [4, 12], hat: E16 },
     ],
     bass: { kind: "sine", pats: [E8, [0, 8], [0, 6, 8, 14]] },
-    harm: { inst: ["piano", "pluck", "nylon"], comp: ["arp8", "arp16", "pulse"] },
-    pad: ["warm", "strings"], lead: ["bell", null, "piano"],
+    harm: { inst: ["piano", "guitar", "pluck", "nylon"], comp: ["arp8", "strum", "arp16", "pulse"] },
+    pad: ["strings", "warm"], lead: ["bell", null, "piano"],
     fx: { reverb: 0.25, riser: true },
   },
   latino: {
@@ -215,8 +249,8 @@ const STYLES: Record<MusicStyleId, Def> = {
       { kick: FOUR, rim: [3, 6, 11, 14], clap: [6, 14], hat: E16, openHat: [10] },
     ],
     bass: { kind: "808", pats: [[0, 3, 8, 11], [0, 6, 8, 14], [0, 8]] },
-    harm: { inst: ["pluck", "piano", "nylon"], comp: ["push", "offbeat", "arp8"] },
-    pad: ["warm", null], lead: ["synth", "flute", "nylon", null],
+    harm: { inst: ["nylon", "piano", "pluck"], comp: ["push", "offbeat", "arp8"] },
+    pad: ["warm", null], lead: ["flute", "nylon", "synth", null],
     fx: { reverb: 0.22 },
   },
   cumbia: {
@@ -348,7 +382,7 @@ const STYLES: Record<MusicStyleId, Def> = {
       { kick: [0, 3, 8], snare: [4, 12], tom: [14, 15] },
     ],
     bass: { kind: "sub", pats: [[0], [0, 8]] },
-    harm: { inst: ["piano", "brass"], comp: ["pulse", "arp8"] },
+    harm: { inst: ["piano", "brass", "strings"], comp: ["pulse", "arp8"] },
     pad: ["strings", "choir"], lead: ["horn", "trumpet"],
     fx: { reverb: 0.45, riser: true },
   },
@@ -358,7 +392,7 @@ const STYLES: Record<MusicStyleId, Def> = {
     kit: "electro", intro: "soft",
     drums: [{ kick: [0, 8], hat: E16 }, { kick: [0, 10], rim: [4, 12], hat: E8 }],
     bass: { kind: "sub", pats: [E8, E16] },
-    harm: { inst: ["pluck", "piano"], comp: ["arp16", "pulse"], octave: 12 },
+    harm: { inst: ["piano", "pluck"], comp: ["arp16", "pulse"], octave: 12 },
     pad: ["choir", "strings"], lead: [null, "piano", "bell"],
     fx: { reverb: 0.45, riser: true },
   },
@@ -460,7 +494,7 @@ const INST_NAME: Record<Inst | Lead, string> = {
   pluck: "sintetizador", rhodes: "piano eléctrico", piano: "piano", marimba: "marimba", stabs: "sintetizador", guitar: "guitarra",
   nylon: "guitarra clásica", ukulele: "ukulele", organ: "órgano", accordion: "acordeón", supersaw: "sintetizador", brass: "metales",
   power: "guitarra eléctrica", vibes: "vibráfono", bell: "campanas", flute: "flauta", horn: "cornos", synth: "sintetizador",
-  whistle: "silbido", trumpet: "trompeta", xylo: "xilófono", glock: "glockenspiel",
+  whistle: "silbido", trumpet: "trompeta", xylo: "xilófono", glock: "glockenspiel", eguitar: "guitarra eléctrica", strings: "cuerdas",
 };
 
 // Descripción corta de la versión para mostrarla («Versión 3 · 104 BPM · piano y flauta»).
@@ -496,15 +530,86 @@ function arrange(bars: number, form: string, intro: boolean): BarRole[] {
 
 // ---------------- Síntesis ----------------
 
-export async function renderMusic(opts: { style: MusicStyleId; seed: number; duration: number; sampleRate?: number }): Promise<AudioBuffer> {
+// ---------------- Grabaciones reales ----------------
+
+type Tone = Inst | Lead | Pad;
+// Instrumentos que se sostienen (se pueden alargar); los demás suenan y se apagan solos.
+const SUSTAINED = new Set(["strings", "choir", "warm", "organ", "accordion", "brass", "trumpet", "horn", "flute", "whistle"]);
+// Ajuste de volumen de cada grabación para que la mezcla quede pareja
+const LEVEL: Record<string, number> = {
+  piano: 1.6, rhodes: 0.55, marimba: 0.5, xylo: 1.1, vibes: 1.2, glock: 1.3, bell: 1.2, guitar: 0.8, nylon: 0.6, eguitar: 0.45,
+  power: 0.6, organ: 0.55, accordion: 1.2, brass: 0.6, trumpet: 1.1, horn: 0.85, flute: 1.3, whistle: 0.9, strings: 1.6,
+  choir: 1.6, warm: 1, bass_finger: 1.5, bass_pick: 0.9, bass_upright: 0.4,
+};
+// Volumen de la batería grabada según el tipo de batería
+const KIT_LEVEL: Record<Kit, number> = { acoustic: 0.5, brush: 1, electro: 0.35, "808": 1, none: 1 };
+type KitSamples = { kick: string; snare: string; hat: string; open: string; crash: string; ride: string };
+const KIT_SAMPLES: Record<Exclude<Kit, "none">, KitSamples> = {
+  acoustic: { kick: "kick", snare: "snare", hat: "hat", open: "hat_open", crash: "crash", ride: "ride" },
+  brush: { kick: "kick_soft", snare: "snare_soft", hat: "hat_pedal", open: "hat_open", crash: "splash", ride: "ride" },
+  electro: { kick: "kick_club", snare: "snare_elec", hat: "hat", open: "hat_open", crash: "crash", ride: "ride" },
+  "808": { kick: "kick_808", snare: "snare_elec", hat: "hat", open: "hat_open", crash: "crash", ride: "ride" },
+};
+// Fuerza de los efectos dentro de la canción (subidas, golpes, cortes antes del coro)
+const FX_STRONG = new Set<MusicStyleId>(["comercial", "pop", "corporativo", "electronica", "house", "rock", "epico", "suspenso", "inspirador", "hiphop", "reggaeton"]);
+const FX_NONE = new Set<MusicStyleId>(["lofi", "romantico", "bossa"]);
+const CINEMATIC = new Set<MusicStyleId>(["epico", "suspenso", "inspirador"]);
+
+function plan(style: MusicStyleId, c: Choice) {
+  const def = c.def;
+  const electronic = !!def.fx?.sidechain; // house y electrónica conservan su sonido de sintetizador
+  const organic = def.kit === "acoustic" || def.kit === "brush";
+  const realOf = (k: Tone | "power"): string | null => {
+    if (k === "stabs") return organic ? "brass" : null;
+    if (k === "pluck") return organic ? "marimba" : null;
+    if (k === "ukulele") return "nylon";
+    if (k === "synth" || k === "supersaw") return null;
+    return k;
+  };
+  const b = def.bass.kind;
+  const bass = b === "upright" ? "bass_upright" : b === "pick" ? "bass_pick" : (b === "synth" || b === "sine") && !electronic ? "bass_finger" : null;
+  const kit = def.kit === "none" ? null : { ...KIT_SAMPLES[def.kit], ...(electronic ? { kick: "kick_house" } : {}) };
+  const insts = [realOf(c.inst), c.lead && realOf(c.lead), c.pad && realOf(c.pad), bass, "warm"].filter((x): x is string => !!x);
+  const d = c.drums;
+  const shots: string[] = kit ? [kit.kick, kit.snare, kit.hat, kit.open, kit.crash, kit.ride, "clap", "clap2", "tom_lo", "tom_mid", "tom_hi"] : [];
+  if (d.shaker) shots.push("shaker", "shaker2");
+  if (d.conga) shots.push("conga_lo", "conga_hi");
+  if (d.bongo) shots.push("bongo");
+  if (d.cowbell) shots.push("cowbell");
+  if (d.clave) shots.push("clave");
+  if (d.guiro) shots.push("guiro", "guiro_long");
+  if (d.sleigh) shots.push("sleigh");
+  if (d.tamb) shots.push("tamb");
+  if (def.kit === "brush") shots.push("snare_soft");
+  if (!FX_NONE.has(style)) shots.push("swell");
+  if (FX_STRONG.has(style)) shots.push("fx_impact", "kick_heavy", CINEMATIC.has(style) ? "fx_boom" : "fx_whoosh");
+  return { realOf, bass, kit, insts, shots };
+}
+
+export async function renderMusic(opts: {
+  style: MusicStyleId;
+  seed: number;
+  duration: number;
+  sampleRate?: number;
+  effects?: boolean; // subidas, golpes y cortes antes del coro (por defecto, sí)
+}): Promise<AudioBuffer> {
   const c = choose(opts.style, opts.seed);
   const def = c.def;
   const sr = opts.sampleRate || 44100;
   const dur = Math.max(2, opts.duration);
   const rand = rng(opts.seed * 104729 + 7);
+  const hr = rng(opts.seed * 31 + 5); // pequeñas imperfecciones humanas (no cambian la composición)
   const minor = def.minor;
-  const human = def.kit === "acoustic" || def.kit === "brush";
+  const electronic = !!def.fx?.sidechain;
+  const human = !electronic;
+  const looseness = def.kit === "acoustic" || def.kit === "brush" ? 0.012 : 0.005;
   const swing = def.swing || 0;
+  const pl = plan(opts.style, c);
+  const bank: SampleBank = (globalThis as { __musicNoSamples?: boolean }).__musicNoSamples
+    ? { notes: new Map(), shots: new Map(), peaks: new Map() }
+    : await loadBank(pl.insts, pl.shots);
+  const effects = opts.effects !== false && !FX_NONE.has(opts.style);
+  const fxStrong = effects && FX_STRONG.has(opts.style);
 
   const step = 60 / c.bpm / 4; // semicorchea
   const bar = step * 16;
@@ -521,7 +626,7 @@ export async function renderMusic(opts: { style: MusicStyleId; seed: number; dur
   const center = c.root + 12 + (def.harm.octave || 0);
 
   const SEG = 4;
-  const TAIL = 3;
+  const TAIL = 4;
   const total = Math.ceil(sr * dur);
   const L = new Float32Array(total);
   const R = new Float32Array(total);
@@ -578,6 +683,7 @@ export async function renderMusic(opts: { style: MusicStyleId; seed: number; dur
     const harmBus = bus(0.32, -0.15, 0.8);
     const padBus = bus(0.15, 0.15, 1);
     const leadBus = bus(0.21, 0.1, 0.9);
+    const fxBus = bus(0.9, 0, 0.45);
     if (def.fx?.sidechain) {
       // La armonía «respira» con el bombo
       for (const [g, base, depth] of [[padBus, 0.1, 0.06], [harmBus, 0.24, 0.1]] as [GainNode, number, number][]) {
@@ -640,8 +746,95 @@ export async function renderMusic(opts: { style: MusicStyleId; seed: number; dur
       return fl;
     };
 
+    // ---------- Grabaciones ----------
+    type PlayOpts = { rate?: number; offset?: number; dur?: number; attack?: number; release?: number; lp?: number; hp?: number };
+    const playBuf = (buf: AudioBuffer, t: number, gain: number, dest: AudioNode, o: PlayOpts = {}) => {
+      const rate = o.rate ?? 1;
+      const off = Math.min(o.offset ?? 0, buf.duration * 0.9);
+      const natural = (buf.duration - off) / rate;
+      const dur = Math.min(o.dur ?? natural, natural);
+      const a = Math.min(o.attack ?? 0.002, dur);
+      const rel = o.release ?? 0.06;
+      const s = ctx.createBufferSource();
+      s.buffer = buf;
+      s.playbackRate.value = rate;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(gain, t + a);
+      if (dur < natural - 0.01) {
+        g.gain.setValueAtTime(gain, t + Math.max(a, dur));
+        g.gain.linearRampToValueAtTime(0, t + dur + rel);
+      }
+      let node: AudioNode = s;
+      for (const [type, f] of [["lowpass", o.lp], ["highpass", o.hp]] as [BiquadFilterType, number | undefined][]) {
+        if (!f) continue;
+        const fl = ctx.createBiquadFilter();
+        fl.type = type;
+        fl.frequency.value = f;
+        node.connect(fl);
+        node = fl;
+      }
+      node.connect(g).connect(dest);
+      s.start(t, off);
+      s.stop(t + Math.min(natural, dur + rel) + 0.02);
+    };
+    // Golpe grabado (batería, percusión o efecto). Devuelve false si esa grabación no está.
+    const shot = (name: string | undefined, t: number, v: number, dest: AudioNode, o: PlayOpts = {}) => {
+      const buf = name ? bank.shots.get(name) : undefined;
+      if (!buf) return false;
+      // Cada golpe varía un poquito de tono, como dos golpes reales que nunca son idénticos
+      playBuf(buf, t, v, dest, { ...o, rate: (o.rate ?? 1) * (1 + (hr() - 0.5) * 0.03) });
+      return true;
+    };
+    // Nota tocada con un instrumento grabado. Devuelve false si ese instrumento no está.
+    const real = (t: number, m: number, len: number, inst: string, v: number, dest: AudioNode) => {
+      const x = nearest(bank, inst, m);
+      if (!x) return false;
+      const cents = human ? (hr() - 0.5) * 8 : 0;
+      const rate = Math.pow(2, (m - x.m + cents / 100) / 12);
+      const gain = v * (LEVEL[inst] ?? 1);
+      const natural = x.buf.duration / rate;
+      if (SUSTAINED.has(inst)) {
+        const pad = inst === "strings" || inst === "choir" || inst === "warm";
+        const attack = pad ? Math.min(0.35, len * 0.3) : inst === "flute" || inst === "horn" ? 0.05 : 0.015;
+        const rel = pad ? 0.6 : 0.15;
+        if (len + rel <= natural - 0.05) {
+          playBuf(x.buf, t, gain, dest, { rate, dur: len, attack, release: rel });
+        } else {
+          // Nota larga: se encadenan trozos de la grabación con cruce suave para que no se corte
+          const off = Math.min(0.6, natural * 0.25);
+          const piece = natural - off / rate - 0.1;
+          const cross = 0.35;
+          let at = t;
+          let first = true;
+          while (at < t + len) {
+            const left = t + len - at;
+            const isLast = left <= piece - cross;
+            playBuf(x.buf, at, gain, dest, {
+              rate,
+              offset: first ? 0 : off,
+              dur: isLast ? left : piece - cross,
+              attack: first ? attack : cross,
+              release: isLast ? rel : cross,
+            });
+            first = false;
+            at += piece - cross;
+          }
+        }
+        return true;
+      }
+      // Instrumentos que se apagan solos: piano, guitarras, mallets, bajos
+      const mallet = inst === "marimba" || inst === "xylo" || inst === "vibes" || inst === "glock" || inst === "bell";
+      const ring = inst === "piano" || inst === "rhodes" ? 0.5 : inst.startsWith("bass") ? 0.06 : 0.35;
+      playBuf(x.buf, t, gain, dest, { rate, dur: mallet ? undefined : len + ring, release: inst.startsWith("bass") ? 0.05 : 0.25 });
+      return true;
+    };
+    const ks = pl.kit;
+    const kl = KIT_LEVEL[def.kit];
+
     // ---------- Batería ----------
     const kick = (t: number, v: number) => {
+      if (ks && shot(ks.kick, t, v * kl * (def.kit === "brush" ? 0.55 : 1), drumBus, def.kit === "brush" ? { lp: 2500 } : {})) return;
       const o = ctx.createOscillator();
       const g = ctx.createGain();
       if (def.kit === "808") {
@@ -667,7 +860,12 @@ export async function renderMusic(opts: { style: MusicStyleId; seed: number; dur
       o.stop(t + 0.7);
     };
     const snare = (t: number, v: number) => {
-      if (def.kit === "brush") return void filtered(t, 0.35, "lowpass", 4500, 0.5, v * 0.45, 0.02, 0.25, roomBus);
+      if (def.kit === "brush") {
+        // Escobilla: golpe suave grabado más el barrido
+        shot("snare_soft", t, v * 0.5, roomBus, { lp: 3500 });
+        return void filtered(t, 0.35, "lowpass", 4500, 0.5, v * (bank.shots.has("snare_soft") ? 0.25 : 0.45), 0.02, 0.25, roomBus);
+      }
+      if (ks && shot(ks.snare, t, v * kl * 1.15, roomBus)) return;
       filtered(t, 0.25, "bandpass", def.kit === "acoustic" ? 2400 : 1900, 0.7, v, 0.002, def.kit === "acoustic" ? 0.2 : 0.17, roomBus);
       const o = ctx.createOscillator();
       o.type = "triangle";
@@ -679,7 +877,10 @@ export async function renderMusic(opts: { style: MusicStyleId; seed: number; dur
       o.start(t);
       o.stop(t + 0.15);
     };
+    let clapAlt = false;
     const clap = (t: number, v: number) => {
+      clapAlt = !clapAlt;
+      if (shot(clapAlt ? "clap" : "clap2", t, v * kl * 1.3, roomBus)) return;
       for (let k = 0; k < 3; k++) filtered(t + k * 0.011, 0.14, "bandpass", 1500, 1, v, 0.001, k === 2 ? 0.15 : 0.02, roomBus);
     };
     const rim = (t: number, v: number) => {
@@ -693,8 +894,11 @@ export async function renderMusic(opts: { style: MusicStyleId; seed: number; dur
       o.stop(t + 0.06);
       filtered(t, 0.04, "highpass", 2500, 0.7, v * 0.3, 0.001, 0.025, drumBus);
     };
-    const hat = (t: number, open: boolean, v: number) => filtered(t, open ? 0.3 : 0.06, "highpass", 7500, 0.7, v, 0.001, open ? 0.25 : 0.04, drumBus);
+    const hat = (t: number, open: boolean, v: number) =>
+      (ks && shot(open ? ks.open : ks.hat, t, v * kl * (open ? 1.3 : 1.1), drumBus, open ? { dur: 0.45, release: 0.12 } : {})) ||
+      filtered(t, open ? 0.3 : 0.06, "highpass", 7500, 0.7, v, 0.001, open ? 0.25 : 0.04, drumBus);
     const ride = (t: number, v: number) => {
+      if (ks && shot(ks.ride, t, v * kl * 1.6, roomBus, { dur: 1.2, release: 0.3 })) return;
       filtered(t, 0.5, "bandpass", 6500, 1.2, v, 0.001, 0.4, roomBus);
       const g = ctx.createGain();
       env(g, t, v * 0.12, 0.001, 0.5);
@@ -704,9 +908,13 @@ export async function renderMusic(opts: { style: MusicStyleId; seed: number; dur
       o.start(t);
       o.stop(t + 0.6);
     };
-    const crash = (t: number, v = 0.32) => filtered(t, 1.8, "highpass", 5000, 0.5, v, 0.002, 1.6, roomBus);
-    const shaker = (t: number, v: number) => filtered(t, 0.08, "bandpass", 6000, 1.5, v, 0.01, 0.05, percBus);
+    const crash = (t: number, v = 0.32) =>
+      (ks && shot(ks.crash, t, v * kl * 1.15, roomBus, { dur: 3, release: 0.8 })) ||
+      filtered(t, 1.8, "highpass", 5000, 0.5, v, 0.002, 1.6, roomBus);
+    let shakeAlt = false;
+    const shaker = (t: number, v: number) => (shakeAlt = !shakeAlt, shot(shakeAlt ? "shaker" : "shaker2", t, v * 1.2, percBus)) || filtered(t, 0.08, "bandpass", 6000, 1.5, v, 0.01, 0.05, percBus);
     const conga = (t: number, f0: number, v: number) => {
+      if (f0 >= 300 ? shot("bongo", t, v * 1.1, percBus, { rate: f0 / 420 }) : shot(f0 >= 230 ? "conga_hi" : "conga_lo", t, v * 0.9, percBus)) return;
       const o = ctx.createOscillator();
       const g = ctx.createGain();
       o.frequency.setValueAtTime(f0 * 1.15, t);
@@ -717,6 +925,7 @@ export async function renderMusic(opts: { style: MusicStyleId; seed: number; dur
       o.stop(t + 0.3);
     };
     const cowbell = (t: number, v: number) => {
+      if (shot("cowbell", t, v * 1.6, percBus)) return;
       const bp = ctx.createBiquadFilter();
       bp.type = "bandpass";
       bp.frequency.value = 800;
@@ -727,6 +936,7 @@ export async function renderMusic(opts: { style: MusicStyleId; seed: number; dur
       osc(t, "square", 800, t + 0.25, bp, 0.6);
     };
     const clave = (t: number, v: number) => {
+      if (shot("clave", t, v * 1.1, percBus)) return;
       const g = ctx.createGain();
       env(g, t, v, 0.001, 0.06);
       const o = ctx.createOscillator();
@@ -736,6 +946,7 @@ export async function renderMusic(opts: { style: MusicStyleId; seed: number; dur
       o.stop(t + 0.1);
     };
     const guiro = (t: number, v: number, long: boolean) => {
+      if (shot(long ? "guiro_long" : "guiro", t, v * 2.5, percBus, long ? { dur: 0.3, release: 0.05 } : {})) return;
       // Raspado: ráfagas rápidas de ruido
       const len = long ? 0.16 : 0.06;
       const n = noiseSrc(t, len);
@@ -753,10 +964,13 @@ export async function renderMusic(opts: { style: MusicStyleId; seed: number; dur
       }
       n.connect(bp).connect(g).connect(percBus);
     };
+    const tamb = (t: number, v: number) => void shot("tamb", t, v, percBus);
     const sleigh = (t: number, v: number) => {
+      if (shot("sleigh", t, v * 1.6, percBus)) return;
       for (let k = 0; k < 4; k++) filtered(t + k * 0.012, 0.06, "highpass", 8500, 0.7, v * (1 - k * 0.2), 0.001, 0.05, percBus);
     };
     const tom = (t: number, f0: number, v = 0.7) => {
+      if (ks && shot(f0 > 125 ? "tom_hi" : f0 > 95 ? "tom_mid" : "tom_lo", t, v * kl * 1.05, roomBus)) return;
       const o = ctx.createOscillator();
       const g = ctx.createGain();
       o.frequency.setValueAtTime(f0, t);
@@ -786,7 +1000,10 @@ export async function renderMusic(opts: { style: MusicStyleId; seed: number; dur
 
     // ---------- Instrumentos con cuerdas (Karplus-Strong) ----------
     const ksCache = new Map<string, AudioBuffer>();
-    const pluckString = (t: number, m: number, v: number, kind: "guitar" | "nylon" | "ukulele" | "pick", dest: AudioNode) => {
+    const pluckString = (t: number, m: number, v: number, kind: "guitar" | "nylon" | "ukulele" | "pick" | "eguitar", dest: AudioNode, len = 1.4) => {
+      const inst = kind === "pick" ? "bass_pick" : kind === "ukulele" ? "nylon" : kind;
+      if (real(t, m, kind === "ukulele" ? Math.min(len, 0.8) : len, inst, v * (kind === "pick" ? 0.6 : 0.85), dest)) return;
+      if (kind === "eguitar") kind = "guitar";
       const f = hz(m);
       const key = `${kind}:${Math.round(f * 10)}`;
       let buf = ksCache.get(key);
@@ -820,8 +1037,14 @@ export async function renderMusic(opts: { style: MusicStyleId; seed: number; dur
     };
 
     // ---------- Instrumentos sintetizados ----------
-    type Tone = Inst | Lead | Pad;
     const tone = (t: number, m: number, len: number, kind: Tone, v: number, dest: AudioNode) => {
+      if (kind === "power" && bank.notes.has("power")) {
+        // Acorde de quinta con guitarra eléctrica distorsionada grabada
+        for (const i of [0, 7, 12]) real(t, m + i, len, "power", v * 0.45, harmBus);
+        return;
+      }
+      const rk = pl.realOf(kind);
+      if (rk && rk !== "power" && real(t, m, len, rk, v, dest)) return;
       const f0 = hz(m);
       const g = ctx.createGain();
       const lp = ctx.createBiquadFilter();
@@ -1001,11 +1224,13 @@ export async function renderMusic(opts: { style: MusicStyleId; seed: number; dur
     // Toca un acorde con el instrumento de armonía (las cuerdas se rasguean)
     let strumDown = true;
     const playChord = (t: number, notes: number[], len: number, v: number, inst: Inst) => {
-      if (inst === "guitar" || inst === "nylon" || inst === "ukulele") {
+      if (inst === "guitar" || inst === "nylon" || inst === "ukulele" || inst === "eguitar") {
         const ns = inst === "ukulele" ? notes.map((m) => m + 12) : [notes[0] - 12, ...notes, notes[0] + 12];
         const order = strumDown ? ns : [...ns].reverse();
         strumDown = !strumDown;
-        order.forEach((m, i) => pluckString(t + i * (inst === "nylon" ? 0.02 : 0.012), m, v * (strumDown ? 0.8 : 1), inst, harmBus));
+        // Rasgueo: cada cuerda entra un poquito después, con fuerza desigual como una mano real
+        const gap = (inst === "nylon" ? 0.02 : 0.012) * (human ? 0.8 + hr() * 0.5 : 1);
+        order.forEach((m, i) => pluckString(t + i * gap, m, v * (strumDown ? 0.75 : 1) * (1 - i * 0.04) * (human ? 0.9 + hr() * 0.2 : 1), inst, harmBus, len + 0.2));
         return;
       }
       if (inst === "power") return void tone(t, notes[0] - 12, len, "power", v * 1.6, harmBus);
@@ -1014,6 +1239,7 @@ export async function renderMusic(opts: { style: MusicStyleId; seed: number; dur
 
     const bassNote = (t: number, m: number, len: number, v = 0.9) => {
       const k = def.bass.kind;
+      if (pl.bass && real(t, m, len, pl.bass, v, bassBus)) return;
       if (k === "pick") return void pluckString(t, m, v * 1.4, "pick", bassBus);
       const g = ctx.createGain();
       const lp = ctx.createBiquadFilter();
@@ -1061,11 +1287,41 @@ export async function renderMusic(opts: { style: MusicStyleId; seed: number; dur
       const fill = b % 4 === 3 && !role.build;
       const at = (s: number) => {
         const sw = s % 2 === 1 ? swing * step : 0;
-        const h = human ? (rand() - 0.5) * 0.012 : 0;
+        const h = human ? (hr() - 0.5) * looseness * 2 : 0;
         return Math.max(0, t0 + s * step + sw + h);
       };
-      const vel = (v: number) => (human ? v * (0.86 + rand() * 0.24) : v);
-      const inTime = (s: number) => T0 + s * step < dur;
+      const vel = (v: number) => v * (human ? 0.84 + hr() * 0.28 : 0.94 + hr() * 0.12);
+      // Corte antes del coro: el último medio tiempo queda en silencio para que la entrada pegue más
+      const gap = fxStrong && role.build && bars > 4;
+      const inTime = (s: number) => T0 + s * step < dur && !(gap && s >= 14);
+
+      // ---------- Efectos dentro de la canción ----------
+      if (effects) {
+        // Golpe que cae justo en un momento: el punto más fuerte del efecto coincide con «when»
+        const landOn = (name: string, when: number, v: number, after = 0.15) => {
+          const buf = bank.shots.get(name);
+          if (!buf) return;
+          const pk = bank.peaks.get(name) || 0;
+          const st = when - pk;
+          const skip = Math.max(0, -st);
+          playBuf(buf, Math.max(0, st), v, fxBus, { offset: skip, dur: pk - skip + after, attack: 0.05, release: 0.3 });
+        };
+        // Platillo que crece y desemboca en el coro
+        if (role.build) landOn("swell", t0 + bar, fxStrong ? 0.55 : 0.35);
+        // Entrada del primer verso después de la intro
+        if (fxStrong && sec === "V" && role.start && roles[b - 1]?.sec === "I") landOn(CINEMATIC.has(opts.style) ? "swell" : "fx_whoosh", t0, 0.35);
+        // Golpe al empezar el coro
+        if (fxStrong && full && role.start && b > 0 && roles[b - 1]?.sec !== "C") {
+          shot("fx_impact", t0, 0.3, fxBus);
+          if (CINEMATIC.has(opts.style)) shot("fx_boom", t0, 0.45, fxBus, { dur: 3.5, release: 1 });
+          else if (def.kit !== "brush") shot("kick_heavy", t0, 0.45 * kl, drumBus);
+        }
+        // Final con impacto
+        if (sec === "O" && fxStrong) {
+          if (CINEMATIC.has(opts.style)) shot("fx_boom", t0, 0.5, fxBus, { dur: 3.5, release: 1 });
+          else shot("fx_impact", t0, 0.3, fxBus);
+        }
+      }
 
       // Final: un acorde largo y un platillo
       if (sec === "O") {
@@ -1116,6 +1372,7 @@ export async function renderMusic(opts: { style: MusicStyleId; seed: number; dur
           if (has("clave", s)) clave(t, vel(0.3));
           if (has("guiro", s)) guiro(t, vel(0.12), s % 4 === 0);
           if (has("sleigh", s)) sleigh(t, vel(s % 4 === 0 ? 0.16 : 0.1));
+          if (has("tamb", s)) tamb(t, vel(0.28));
           if (has("tom", s) && (fill || role.build)) tom(t, 150 - (s - 12) * 18);
           if (fill && !d.tom && s >= 13 && (d.snare || d.clap) && def.kit !== "808") snare(t, vel(0.28));
           if (role.build && def.kit !== "brush" && s >= 8) snare(t, 0.18 + (s - 8) * 0.05); // redoble
@@ -1152,7 +1409,7 @@ export async function renderMusic(opts: { style: MusicStyleId; seed: number; dur
           for (let s = 0; s < 16; s += every) {
             if (!inTime(s)) break;
             const m = ch[c.arp[s] % ch.length] + (c.inst === "piano" && s % 8 === 0 ? 0 : 12);
-            if (c.inst === "guitar" || c.inst === "nylon" || c.inst === "ukulele") pluckString(at(s), m, vel(sec === "B" ? 0.8 : 0.4), c.inst, harmBus);
+            if (c.inst === "guitar" || c.inst === "nylon" || c.inst === "ukulele" || c.inst === "eguitar") pluckString(at(s), m, vel(sec === "B" ? 0.8 : 0.4), c.inst, harmBus, step * every * 2);
             else tone(at(s), m, step * every * 1.6, c.inst, vel((c.inst === "piano" ? 0.42 : 0.33) * (sec === "B" ? 2.2 : sec === "I" ? 1.5 : 1)), harmBus);
           }
           break;
@@ -1211,7 +1468,7 @@ export async function renderMusic(opts: { style: MusicStyleId; seed: number; dur
           const short = lead === "bell" || lead === "glock" || lead === "xylo" || lead === "piano" || lead === "vibes";
           const len = (next - s) * step * (short ? 0.7 : 0.92);
           const lv = vel(lead === "horn" ? 0.3 : lead === "whistle" ? 0.22 : 0.3) * (full ? 1 : 0.85);
-          if (lead === "nylon") pluckString(at(s), m, lv * 1.6, "nylon", leadBus);
+          if (lead === "nylon") pluckString(at(s), m, lv * 1.6, "nylon", leadBus, len);
           else tone(at(s), m, len, lead, lv, leadBus);
         });
       }
