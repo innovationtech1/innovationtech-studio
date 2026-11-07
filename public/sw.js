@@ -2,7 +2,10 @@
 // Permite instalar la app y que abra rápido; si no hay internet muestra una pantalla de aviso.
 // Nunca guarda en caché las llamadas a /api (claves y contenido generado).
 
-const VERSION = "its-v2";
+const VERSION = "its-v3";
+// Grabaciones de instrumentos y efectos: se guardan aparte y no se borran al actualizar la app
+// (cambia este nombre solo si cambian los archivos de /samples).
+const SAMPLES = "its-samples-v1";
 const MAX_ENTRIES = 120; // evita que la caché crezca sin fin con archivos de versiones anteriores
 
 // Borra los archivos más viejos cuando la caché pasa del límite (se guardan en orden de llegada).
@@ -24,7 +27,7 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION && k !== SAMPLES).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -46,6 +49,23 @@ self.addEventListener("fetch", (event) => {
           return res;
         })
         .catch(async () => (await caches.match("/")) || caches.match("/offline.html"))
+    );
+    return;
+  }
+
+  // Grabaciones para la música y los efectos: primero la caché (así funcionan sin internet).
+  if (url.pathname.startsWith("/samples/")) {
+    event.respondWith(
+      caches.open(SAMPLES).then((c) =>
+        c.match(req).then(
+          (hit) =>
+            hit ||
+            fetch(req).then((res) => {
+              if (res.ok) c.put(req, res.clone());
+              return res;
+            })
+        )
+      )
     );
     return;
   }

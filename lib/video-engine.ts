@@ -3,6 +3,7 @@ import { cuesFromWords, drawCue, wordsFromScript, type Word } from "./captions";
 // reproduce con sonido y exporta grabando el lienzo + la mezcla de audio. Todo en el navegador.
 
 import { renderMusic, MusicStyleId } from "./music";
+import { renderSfx, SfxItem } from "./sfx";
 import { supportedRecording } from "./reel";
 import fixWebmDuration from "fix-webm-duration";
 
@@ -89,6 +90,7 @@ export type MusicSettings = {
   seed: number;
   volume: number; // 0..1
   uploadName?: string;
+  effects?: boolean; // subidas, golpes y cortes antes del coro (por defecto, sí)
 };
 
 export type Project = {
@@ -98,6 +100,7 @@ export type Project = {
   texts: TextOverlay[];
   stickers?: Sticker[];
   music: MusicSettings;
+  sfx?: SfxItem[]; // efectos de sonido colocados en la línea de tiempo
   clipVolume: number; // volumen general del audio de los videos
 };
 
@@ -157,6 +160,9 @@ export class VideoEngine {
   musicKey = "";
   musicNode: AudioBufferSourceNode | null = null;
   musicGain: GainNode | null = null;
+  sfxBuffer: AudioBuffer | null = null;
+  sfxKey = "";
+  sfxNode: AudioBufferSourceNode | null = null;
   playing = false;
   time = 0;
   private startWall = 0;
@@ -254,6 +260,21 @@ export class VideoEngine {
 
   // ---------- Música ----------
   async prepareMusic(uploaded: AudioBuffer | null, onStatus?: (s: string) => void) {
+    await this.prepareSong(uploaded, onStatus);
+    await this.prepareSfx();
+  }
+
+  // Pista con los efectos de sonido; se vuelve a armar solo si cambian
+  private async prepareSfx() {
+    const { total } = layout(this.project.clips);
+    const items = this.project.sfx || [];
+    const key = JSON.stringify([items, total.toFixed(2)]);
+    if (key === this.sfxKey) return;
+    this.sfxBuffer = items.length ? await renderSfx(items, total, 44100).catch(() => null) : null;
+    this.sfxKey = key;
+  }
+
+  private async prepareSong(uploaded: AudioBuffer | null, onStatus?: (s: string) => void) {
     const { total } = layout(this.project.clips);
     const mu = this.project.music;
     if (mu.source === "none" || total <= 0) {
@@ -266,15 +287,22 @@ export class VideoEngine {
       this.musicKey = "upload";
       return;
     }
-    const key = `${mu.style}|${mu.seed}|${total.toFixed(1)}`;
+    const key = `${mu.style}|${mu.seed}|${total.toFixed(1)}|${mu.effects !== false}`;
     if (key === this.musicKey && this.musicBuffer) return;
     onStatus?.("🎵 Componiendo música…");
-    this.musicBuffer = await renderMusic({ style: mu.style, seed: mu.seed, duration: total + 0.2, sampleRate: 44100 });
+    this.musicBuffer = await renderMusic({ style: mu.style, seed: mu.seed, duration: total + 0.2, sampleRate: 44100, effects: mu.effects !== false });
     this.musicKey = key;
     onStatus?.("");
   }
 
   private startMusic(at: number) {
+    if (this.audio && this.master && this.sfxBuffer && at < this.sfxBuffer.duration) {
+      const fx = this.audio.createBufferSource();
+      fx.buffer = this.sfxBuffer;
+      fx.connect(this.master);
+      fx.start(this.audio.currentTime, at);
+      this.sfxNode = fx;
+    }
     if (!this.audio || !this.musicBuffer || !this.musicGain) return;
     const { total } = layout(this.project.clips);
     const s = this.audio.createBufferSource();
@@ -295,12 +323,15 @@ export class VideoEngine {
     this.musicNode = s;
   }
   private stopMusic() {
-    try {
-      this.musicNode?.stop();
-    } catch {
-      /* nada */
+    for (const n of [this.musicNode, this.sfxNode]) {
+      try {
+        n?.stop();
+      } catch {
+        /* nada */
+      }
     }
     this.musicNode = null;
+    this.sfxNode = null;
   }
 
   // ---------- Reproducción ----------
