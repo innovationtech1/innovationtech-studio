@@ -24,11 +24,29 @@ export interface AccountStore {
   reservarUso(negocioId: string, dia: string, c: Contador, unidades: number, tope: number): Promise<boolean>;
   // Resta `unidades` (por ejemplo, si la IA falló). Nunca baja de 0.
   devolverUso(negocioId: string, dia: string, c: Contador, unidades: number): Promise<void>;
+
+  // Cuentas y equipo. Los correos siempre se guardan y se buscan en minúsculas.
+  crearNegocio(n: Omit<Negocio, "id">): Promise<Negocio>;
+  // Crea el usuario solo si no existe. Devuelve false si ya existía (no lo pisa).
+  crearUsuario(u: Usuario): Promise<boolean>;
+  getInvitacion(email: string): Promise<Invitacion | null>;
+  crearInvitacion(email: string, inv: Invitacion): Promise<void>;
+  borrarInvitacion(email: string): Promise<void>;
+  listarInvitaciones(negocioId: string): Promise<string[]>;
+  // Agrega a `uid` a los miembros (sin repetirlo). Si pasas `max` y el negocio ya está lleno, devuelve false.
+  unirMiembro(negocioId: string, uid: string, max?: number): Promise<boolean>;
+  // Saca a `uid` de los miembros y borra su usuario, para que pueda crear su propio negocio.
+  quitarMiembro(negocioId: string, uid: string): Promise<void>;
+  // Contadores del día (ceros si todavía no hay).
+  getUso(negocioId: string, dia: string): Promise<Uso>;
 }
+
+export type Invitacion = { negocioId: string; invitadoPor: string; creado: number };
 
 export const COL_USUARIOS = "studio_usuarios";
 export const COL_NEGOCIOS = "studio_negocios";
 export const COL_USO = "studio_uso";
+export const COL_INVITACIONES = "studio_invitaciones";
 export const COL_CONFIG = "studio_config";
 
 export const idUso = (negocioId: string, dia: string) => `${negocioId}_${dia}`;
@@ -77,6 +95,76 @@ export function firestoreStore(): AccountStore {
           t.update(ref, { [c]: 0 }); // nunca debajo de 0
         }
       });
+    },
+
+    async crearNegocio(n) {
+      const ref = db().collection(COL_NEGOCIOS).doc();
+      await ref.set(n);
+      return { ...n, id: ref.id };
+    },
+
+    async crearUsuario(u) {
+      const { uid, ...datos } = u;
+      try {
+        // create() falla si el documento ya existe: dos peticiones a la vez no duplican
+        await db().collection(COL_USUARIOS).doc(uid).create({ ...datos, email: datos.email.toLowerCase() });
+        return true;
+      } catch (e) {
+        if ((e as { code?: unknown }).code === 6) return false; // ALREADY_EXISTS
+        throw e;
+      }
+    },
+
+    async getInvitacion(email) {
+      const s = await db().collection(COL_INVITACIONES).doc(email.toLowerCase()).get();
+      return s.exists ? (s.data() as Invitacion) : null;
+    },
+
+    async crearInvitacion(email, inv) {
+      await db().collection(COL_INVITACIONES).doc(email.toLowerCase()).set(inv);
+    },
+
+    async borrarInvitacion(email) {
+      await db().collection(COL_INVITACIONES).doc(email.toLowerCase()).delete();
+    },
+
+    async listarInvitaciones(negocioId) {
+      const q = await db().collection(COL_INVITACIONES).where("negocioId", "==", negocioId).get();
+      return q.docs.map((d) => d.id).sort();
+    },
+
+    async unirMiembro(negocioId, uid, max) {
+      const ref = db().collection(COL_NEGOCIOS).doc(negocioId);
+      return db().runTransaction(async (t) => {
+        const s = await t.get(ref);
+        if (!s.exists) return false;
+        const miembros = ((s.data() as Negocio).miembros ?? []) as string[];
+        if (miembros.includes(uid)) return true;
+        if (max !== undefined && miembros.length >= max) return false;
+        t.update(ref, { miembros: [...miembros, uid], actualizado: Date.now() });
+        return true;
+      });
+    },
+
+    async quitarMiembro(negocioId, uid) {
+      const batch = db().batch();
+      batch.update(db().collection(COL_NEGOCIOS).doc(negocioId), {
+        miembros: FieldValue.arrayRemove(uid),
+        actualizado: Date.now(),
+      });
+      batch.delete(db().collection(COL_USUARIOS).doc(uid));
+      await batch.commit();
+    },
+
+    async getUso(negocioId, dia) {
+      const s = await db().collection(COL_USO).doc(idUso(negocioId, dia)).get();
+      const d = s.data() ?? {};
+      return {
+        textos: numero(d.textos),
+        imagenes: numero(d.imagenes),
+        voces: numero(d.voces),
+        subtitulos: numero(d.subtitulos),
+      };
     },
   };
 }

@@ -1,5 +1,5 @@
 // Versión falsa del AccountStore, guardada en memoria. Solo para pruebas.
-import type { AccountStore, Usuario, Uso } from "./account-store";
+import type { AccountStore, Invitacion, Usuario, Uso } from "./account-store";
 import type { Contador, Negocio, PlanesConfig } from "./plans";
 import { mezclarConfig } from "./plans";
 
@@ -8,6 +8,7 @@ export type SemillaMemoria = {
   negocios?: Negocio[];
   uso?: Record<string, Partial<Uso>>; // clave: "{negocioId}_{AAAA-MM-DD}"
   config?: Partial<PlanesConfig>;
+  invitaciones?: Record<string, Invitacion>; // clave: correo en minúsculas
 };
 
 export type MemoryStore = AccountStore & {
@@ -25,6 +26,10 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
     Object.entries(seed.uso ?? {}).map(([k, v]) => [k, { ...vacio(), ...v }]),
   );
   const config = mezclarConfig(seed.config);
+  const invitaciones = new Map<string, Invitacion>(
+    Object.entries(seed.invitaciones ?? {}).map(([k, v]) => [k.toLowerCase(), { ...v }]),
+  );
+  let contador = 0;
 
   const fila = (negocioId: string, dia: string) => {
     const k = `${negocioId}_${dia}`;
@@ -67,6 +72,45 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
         const f = fila(negocioId, dia);
         f[c] = Math.max(0, f[c] - unidades);
       });
+    },
+    async crearNegocio(n) {
+      const nuevo: Negocio = { ...copia(n), id: `neg${++contador}` };
+      negocios.set(nuevo.id, nuevo);
+      return copia(nuevo);
+    },
+    async crearUsuario(u) {
+      if (usuarios.has(u.uid)) return false;
+      usuarios.set(u.uid, { ...copia(u), email: u.email.toLowerCase() });
+      return true;
+    },
+    async getInvitacion(email) {
+      const i = invitaciones.get(email.toLowerCase());
+      return i ? { ...i } : null;
+    },
+    async crearInvitacion(email, inv) {
+      invitaciones.set(email.toLowerCase(), { ...inv });
+    },
+    async borrarInvitacion(email) {
+      invitaciones.delete(email.toLowerCase());
+    },
+    async listarInvitaciones(negocioId) {
+      return [...invitaciones].filter(([, i]) => i.negocioId === negocioId).map(([e]) => e).sort();
+    },
+    async unirMiembro(negocioId, uid, max) {
+      const n = negocios.get(negocioId);
+      if (!n) return false;
+      if (n.miembros.includes(uid)) return true;
+      if (max !== undefined && n.miembros.length >= max) return false;
+      n.miembros.push(uid);
+      return true;
+    },
+    async quitarMiembro(negocioId, uid) {
+      const n = negocios.get(negocioId);
+      if (n) n.miembros = n.miembros.filter((m) => m !== uid);
+      usuarios.delete(uid);
+    },
+    async getUso(negocioId, dia) {
+      return { ...(uso.get(`${negocioId}_${dia}`) ?? vacio()) };
     },
     uso(negocioId, dia) {
       return { ...fila(negocioId, dia) };
