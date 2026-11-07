@@ -79,7 +79,7 @@ Convertir Studio en un **servicio por suscripción** de InnovationTECH: cada neg
 
 - **Guardián único en el servidor:** `lib/account.ts` expone `requireAccess(req, { herramienta, contador, unidades })`. Lo llaman todas las rutas de `/api/*` antes de trabajar. La pantalla también oculta o bloquea lo que no corresponde, pero la regla de verdad es la del servidor.
 - **Reemplaza al modo demo:** `getCreds` de `lib/cf-auth.ts` deja de contar por IP en memoria. Con clave propia (encabezados `x-cf-account`/`x-cf-token`) usa la del cliente; si no, usa `CF_ACCOUNT_ID`/`CF_API_TOKEN` de InnovationTECH **solo después** de que `requireAccess` aprobó y sumó el contador. `refund` devuelve el uso si el proveedor falla.
-- **Verificación del token:** con las llaves públicas de Google (`securetoken@system.gserviceaccount.com`) y la biblioteca `jose`, igual que `lib/verificarToken.js` de NOVA (en Netlify no se usa `firebase-admin/auth`). Firestore sí se usa con `firebase-admin`.
+- **Verificación del token:** con las llaves públicas de Google (`securetoken@system.gserviceaccount.com`) y `node:crypto` de Node.js (`lib/verify-token.ts`), sin librerías externas: la biblioteca `jose` dio el error `ERR_REQUIRE_ESM` en Netlify. Se siguen los pasos de la guía de Firebase para verificar ID tokens con una biblioteca JWT de terceros (en Netlify no se usa `firebase-admin/auth`). Firestore sí se usa con `firebase-admin`.
 - **Firestore cerrado:** las reglas siguen negando todo acceso directo desde el navegador; solo el servidor (cuenta de servicio) lee y escribe.
 
 ## 4. Datos (Firestore, proyecto `innovationtech-nova`, base `(default)`)
@@ -163,7 +163,7 @@ Ruta `/admin` dentro de Studio, solo para correos en `STUDIO_ADMIN_EMAILS`:
    - No secretas (en `SECRETS_SCAN_OMIT_KEYS`): `FIREBASE_PROJECT_ID`, `NEXT_PUBLIC_FIREBASE_API_KEY`, `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`, `NEXT_PUBLIC_FIREBASE_PROJECT_ID`, `STUDIO_ADMIN_EMAILS`, `CF_ACCOUNT_ID`, `STUDIO_CUENTAS`.
 4. **Antes del primer cliente:** Netlify plan Personal ($9); revisar si hace falta el plan pagado de Cloudflare Workers; consultar a un contador sobre el impuesto de ventas de Texas (Stripe Tax se puede activar después).
 
-**Paquetes nuevos (oficiales y gratuitos):** `firebase` (inicio de sesión en el navegador), `firebase-admin` (Firestore en el servidor), `stripe` (servidor) y `jose` (verificar tokens).
+**Paquetes nuevos (oficiales y gratuitos):** `firebase` (inicio de sesión en el navegador), `firebase-admin` (Firestore en el servidor) y `stripe` (servidor). Los tokens se verifican con `node:crypto`, que ya viene con Node.js (sin paquete nuevo).
 
 ## 8. Lanzamiento sin cortar el servicio
 
