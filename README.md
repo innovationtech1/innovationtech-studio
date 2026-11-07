@@ -41,7 +41,7 @@ El flujo ideal: escribes la idea en **Textos**, la IA te da el copy y las descri
 
 - Las claves se guardan **solo en el navegador** de cada persona (localStorage).
 - En cada pedido viajan al servidor de la app, que las reenvía al proveedor y **no las almacena ni las registra**.
-- Si hospedas la plataforma para otros, usa siempre HTTPS (Vercel lo incluye).
+- Si hospedas la plataforma para otros, usa siempre HTTPS (Netlify lo incluye).
 
 ## Cómo conseguir las claves
 
@@ -56,11 +56,13 @@ Luego, dentro de la app, ve a **⚙️ Configuración**, elige los proveedores d
 ## Opción 1: publicarla en internet (sin instalar nada)
 
 1. Sube esta carpeta a un repositorio de **GitHub** (botón *Add file → Upload files*).
-2. Entra a <https://vercel.com>, inicia sesión con GitHub y elige **Add New → Project**.
-3. Selecciona el repositorio y presiona **Deploy**. No hace falta configurar nada.
-4. En un par de minutos tendrás tu enlace (por ejemplo `innovationtech-studio.vercel.app`) para compartir.
+2. Entra a <https://app.netlify.com>, inicia sesión con GitHub y elige **Add new project → Import an existing project → GitHub**.
+3. Selecciona el repositorio y presiona **Deploy**. No hace falta configurar nada: el archivo `netlify.toml` ya trae todo.
+4. En un par de minutos tendrás tu enlace (por ejemplo `innovationtech-studio.netlify.app`) para compartir. Cada cambio que subas a GitHub se publica solo.
 
-> En el plan gratuito de Vercel las funciones tienen un límite de tiempo. Las imágenes y los videos funcionan porque el video se consulta por partes, pero si una imagen tarda demasiado, vuelve a intentarlo.
+> Las funciones del servidor tienen un tope de 60 segundos. Las imágenes y los videos funcionan porque el video se consulta por partes, pero si una imagen tarda demasiado, vuelve a intentarlo.
+>
+> Si vas a ofrecer la app como servicio de pago, usa un plan de pago de Netlify: el plan Free se pausa al acabarse sus créditos del mes. También funciona en Vercel, pero su plan gratuito (Hobby) no permite uso comercial.
 
 ## Instalar la app en tu dispositivo
 
@@ -145,7 +147,7 @@ MIT © InnovationTECH. Puedes usar, copiar, modificar y distribuir este software
 
 ## Modo demo (opcional)
 
-Para que las personas prueben la app sin configurar nada, el dueño del despliegue puede activar el modo demo con su propia cuenta gratis de Cloudflare. En Vercel → Settings → Environment Variables:
+Para que las personas prueben la app sin configurar nada, el dueño del despliegue puede activar el modo demo con su propia cuenta gratis de Cloudflare. En Netlify → Project configuration → Environment variables (o en Vercel → Settings → Environment Variables):
 
 | Variable | Valor |
 | --- | --- |
