@@ -123,3 +123,28 @@ const formatoDia = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago
 export function diaChicago(ahora: number): string {
   return formatoDia.format(ahora);
 }
+
+// Pone lo guardado encima de DEFAULT_CONFIG; lo que falte se queda con el valor por defecto.
+// Siempre arma un objeto nuevo, para que nadie modifique DEFAULT_CONFIG por accidente.
+export function mezclarConfig(g: Partial<PlanesConfig> | null | undefined): PlanesConfig {
+  const guardada = g ?? {};
+  const d = DEFAULT_CONFIG;
+  return {
+    precios: {
+      basico: { ...d.precios.basico, ...guardada.precios?.basico },
+      pro: { ...d.precios.pro, ...guardada.precios?.pro },
+    },
+    herramientas: {
+      prueba: [...(guardada.herramientas?.prueba ?? d.herramientas.prueba)],
+      basico: [...(guardada.herramientas?.basico ?? d.herramientas.basico)],
+      pro: [...(guardada.herramientas?.pro ?? d.herramientas.pro)],
+    },
+    limites: {
+      prueba: { ...d.limites.prueba, ...guardada.limites?.prueba },
+      basico: { ...d.limites.basico, ...guardada.limites?.basico },
+      pro: { ...d.limites.pro, ...guardada.limites?.pro },
+    },
+    personas: { ...d.personas, ...guardada.personas },
+    pruebaMinutos: guardada.pruebaMinutos ?? d.pruebaMinutos,
+  };
+}
