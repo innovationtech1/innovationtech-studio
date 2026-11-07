@@ -15,7 +15,13 @@ export type ClienteStripe = {
     list(p: Stripe.PriceListParams): Promise<{ data: Stripe.Price[] }>;
     create(p: Stripe.PriceCreateParams): Promise<Stripe.Price>;
   };
-  checkout: { sessions: { create(p: Stripe.Checkout.SessionCreateParams): Promise<{ url: string | null }> } };
+  checkout: {
+    sessions: {
+      create(p: Stripe.Checkout.SessionCreateParams): Promise<{ id: string; url: string | null }>;
+      retrieve(id: string): Promise<Stripe.Checkout.Session>;
+      expire(id: string): Promise<Stripe.Checkout.Session>;
+    };
+  };
   billingPortal: { sessions: { create(p: Stripe.BillingPortal.SessionCreateParams): Promise<{ url: string }> } };
   subscriptions: {
     retrieve(id: string): Promise<Stripe.Subscription>;
@@ -150,6 +156,59 @@ async function suscripcionViva(cliente: ClienteStripe, n: Negocio): Promise<Stri
   return null;
 }
 
+// La sesión de pago que quedó pendiente (la última que abrimos para este negocio):
+//  - pagada (complete): devuelve su suscripción si sigue viva, para no abrir otra encima;
+//  - abierta (open): la vence (expire) para que no se pueda pagar junto con la nueva;
+//  - vencida o inexistente: nada.
+async function revisarPendiente(cliente: ClienteStripe, id: string): Promise<Stripe.Subscription | null> {
+  let ses: Stripe.Checkout.Session;
+  try {
+    ses = await cliente.checkout.sessions.retrieve(id);
+  } catch (e) {
+    if (noExiste(e)) return null;
+    throw e;
+  }
+  if (ses.status === "open") {
+    try {
+      await cliente.checkout.sessions.expire(id);
+      return null;
+    } catch (e) {
+      // Puede que la hayan pagado justo ahora: se vuelve a mirar
+      ses = await cliente.checkout.sessions.retrieve(id);
+      if (ses.status === "expired") return null;
+      if (ses.status !== "complete") throw e;
+    }
+  }
+  if (ses.status !== "complete") return null;
+  const subId = idDe(ses.subscription);
+  if (!subId) return null;
+  const sub = await cliente.subscriptions.retrieve(subId);
+  return SUSCRIPCION_VIVA.has(sub.status) ? sub : null;
+}
+
+// Ya hay una suscripción que cobra: cambiar de plan en ella o mandar al portal (nunca otra nueva).
+async function usarSuscripcion(
+  cliente: ClienteStripe,
+  viva: Stripe.Subscription,
+  negocio: Negocio,
+  priceId: string,
+  origin: string,
+): Promise<{ ok: true; url: string } | Falla> {
+  const customer = idDe(viva.customer) ?? negocio.stripe?.customerId;
+  const item = viva.items?.data?.[0];
+  const alDia = viva.status === "active" || viva.status === "trialing";
+  if (alDia && item && item.price?.id !== priceId) {
+    await cliente.subscriptions.update(viva.id, {
+      items: [{ id: item.id, price: priceId }],
+      proration_behavior: "create_prorations",
+    });
+    // El plan nuevo llega por el aviso customer.subscription.updated
+    return { ok: true, url: `${origin}/?pago=ok` };
+  }
+  if (!customer) return ERROR_STRIPE();
+  return { ok: true, url: (await portal(cliente, customer, origin)).url };
+}
+
 function portal(cliente: ClienteStripe, customer: string, origin: string) {
   return cliente.billingPortal.sessions.create({ customer, return_url: `${origin}/` });
 }
@@ -203,24 +262,31 @@ export async function pagarPlan(
 
   try {
     const viva = await suscripcionViva(cliente, negocio);
-    if (viva) {
-      const customer = idDe(viva.customer) ?? negocio.stripe?.customerId;
-      const item = viva.items?.data?.[0];
-      const alDia = viva.status === "active" || viva.status === "trialing";
-      if (alDia && item && item.price?.id !== priceId) {
-        await cliente.subscriptions.update(viva.id, {
-          items: [{ id: item.id, price: priceId }],
-          proration_behavior: "create_prorations",
-        });
-        // El plan nuevo llega por el aviso customer.subscription.updated
-        return { ok: true, url: `${origin}/?pago=ok` };
-      }
-      if (!customer) return ERROR_STRIPE();
-      return { ok: true, url: (await portal(cliente, customer, origin)).url };
+    if (viva) return await usarSuscripcion(cliente, viva, negocio, priceId, origin);
+
+    // ¿Quedó una sesión de pago de antes? (pagada pero sin aviso todavía, o abierta en otra pestaña)
+    const pendiente = negocio.stripe?.checkoutPendiente;
+    if (pendiente) {
+      const deSesion = await revisarPendiente(cliente, pendiente);
+      if (deSesion) return await usarSuscripcion(cliente, deSesion, negocio, priceId, origin);
     }
 
     const sesion = await crearCheckout(cliente, negocio, email, priceId, origin);
     if (!sesion.url) return ERROR_STRIPE();
+    // Se guarda como pendiente para revisarla si vuelven a pulsar «Elegir»
+    let otra: string | undefined;
+    await store.modificarNegocio(negocio.id, (n) => {
+      otra = n.stripe?.checkoutPendiente;
+      return { stripe: { ...n.stripe, checkoutPendiente: sesion.id } };
+    });
+    // Si otra pestaña abrió una sesión mientras tanto, se vence para que no se paguen las dos
+    if (otra && otra !== pendiente && otra !== sesion.id) {
+      try {
+        await cliente.checkout.sessions.expire(otra);
+      } catch (e) {
+        console.warn(`Stripe: no se pudo vencer la sesión de pago ${otra}:`, mensaje(e));
+      }
+    }
     return { ok: true, url: sesion.url };
   } catch (e) {
     console.error("Stripe: no se pudo iniciar el pago:", mensaje(e));
@@ -295,30 +361,28 @@ export async function procesarWebhook(
     return { status: 200, body: { recibido: true } };
   }
 
-  // 3) Cada aviso se aplica una sola vez (Stripe a veces lo manda repetido)
-  if (await store.eventoProcesado(evento.id)) return { status: 200, body: { recibido: true, duplicado: true } };
-
-  // 4) Aplicar. Si falla, se quita la marca y se responde 500 para que Stripe lo reintente
+  // 3) Aplicar. La marca de «ya procesado» se guarda en la misma transacción que el cambio:
+  //    un aviso repetido se salta, y si algo falla no queda marca y el reintento de Stripe sí se aplica.
   try {
     const cfg = await store.getConfig();
     let ignorado = null as Negocio | null;
-    await store.modificarNegocio(negocio.id, (n) => {
-      const cambios = aplicarEvento(evento, n, cfg);
-      if (!cambios) {
-        ignorado = n;
-        return null;
-      }
-      return { ...cambios, actualizado: ahora };
-    });
+    const r = await store.modificarNegocio(
+      negocio.id,
+      (n) => {
+        const cambios = aplicarEvento(evento, n, cfg);
+        if (!cambios) {
+          ignorado = n;
+          return null;
+        }
+        return { ...cambios, actualizado: ahora };
+      },
+      { eventoId: evento.id },
+    );
+    if (r === "duplicado") return { status: 200, body: { recibido: true, duplicado: true } };
     if (ignorado) avisarSiDobleSuscripcion(evento, ignorado);
     return { status: 200, body: { recibido: true } };
   } catch (e) {
     console.error(`Stripe: no se pudo aplicar el aviso ${evento.id} (${evento.type}):`, mensaje(e));
-    try {
-      await store.olvidarEvento(evento.id);
-    } catch (e2) {
-      console.error(`Stripe: tampoco se pudo quitar la marca del aviso ${evento.id}:`, mensaje(e2));
-    }
     return { status: 500, body: { error: "No se pudo procesar el aviso." } };
   }
 }

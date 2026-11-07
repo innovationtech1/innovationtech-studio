@@ -15,6 +15,8 @@ export type MemoryStore = AccountStore & {
   // Para revisar los contadores en las pruebas
   uso(negocioId: string, dia: string): Uso;
   cantidadNegocios(): number;
+  // Para revisar en las pruebas si un aviso de Stripe quedó marcado
+  eventoMarcado(id: string): boolean;
 };
 
 const vacio = (): Uso => ({ textos: 0, imagenes: 0, voces: 0, subtitulos: 0 });
@@ -152,26 +154,25 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
       for (const n of negocios.values()) if (n.stripe?.customerId === customerId) return copia(n);
       return null;
     },
-    async eventoProcesado(id) {
-      if (eventos.has(id)) return true;
-      eventos.add(id);
-      return false;
-    },
-    async olvidarEvento(id) {
-      eventos.delete(id);
-    },
-    modificarNegocio(id, fn) {
+    modificarNegocio(id, fn, opciones) {
       return enCola(async () => {
+        const eventoId = opciones?.eventoId;
+        if (eventoId && eventos.has(eventoId)) return "duplicado" as const;
         const n = negocios.get(id);
-        if (!n) return false;
+        if (!n) return "no_existe" as const;
+        // Si fn falla no se marca ni se cambia nada (como una transacción que no se confirmó)
         const cambios = fn(copia(n));
+        if (eventoId) eventos.add(eventoId);
         if (cambios) {
           const { id: _id, ...datos } = copia(cambios);
           void _id;
           Object.assign(n, datos);
         }
-        return true;
+        return "ok" as const;
       });
+    },
+    eventoMarcado(id: string) {
+      return eventos.has(id);
     },
     cantidadNegocios() {
       return negocios.size;

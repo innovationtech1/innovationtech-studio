@@ -97,6 +97,8 @@ export function aplicarEvento(evento: Stripe.Event, negocio: Negocio, cfg: Plane
           // El status guardado era de la suscripción anterior
           status: nueva ? undefined : previo.status,
           priceId: nueva ? undefined : previo.priceId,
+          // Esta sesión ya se pagó: ya no está pendiente
+          checkoutPendiente: previo.checkoutPendiente === ses.id ? undefined : previo.checkoutPendiente,
           ultimoEvento: reloj,
         }),
       };
@@ -125,10 +127,16 @@ export function aplicarEvento(evento: Stripe.Event, negocio: Negocio, cfg: Plane
       // Sin el primer pago, o con un pago a mano vigente en el negocio: solo se anota lo de Stripe
       if (SIN_PRIMER_PAGO.has(status) || (conPagoManual && !AL_DIA.has(status))) return { stripe };
 
+      // Un precio que no es de los nuestros nunca da Pro: queda en Básico (y se avisa en el registro)
+      let plan = planDePrecio(priceId, cfg);
+      if (!plan) {
+        console.warn(`Stripe: la suscripción ${sub.id} tiene un precio desconocido (${priceId ?? "sin precio"}); se toma como Básico.`);
+        plan = "basico";
+      }
       return {
         stripe,
         origen: "stripe",
-        plan: planDePrecio(priceId, cfg) ?? negocio.plan,
+        plan,
         estado: AL_DIA.has(status) ? "activo" : "pausado",
       };
     }
@@ -139,10 +147,18 @@ export function aplicarEvento(evento: Stripe.Event, negocio: Negocio, cfg: Plane
       const sub = suscripcionDeFactura(evento.data.object);
       if (!actual || sub !== actual) return null;
       if (negocio.origen !== "stripe") return null;
-      // Tampoco adelanta el reloj: el estado final lo deciden los avisos de la suscripción
+      // Las facturas llevan su propio reloj: un pago fallido viejo que llega tarde no pausa
+      const relojFactura = previo.ultimaFactura ?? 0;
+      if (cuando < relojFactura) return null;
+      const pagada = evento.type === "invoice.paid";
+      // Solo cambian el estado si cuadra con la suscripción guardada; si no, deciden los avisos
+      // de la suscripción (p. ej. una factura pagada de una suscripción ya cancelada no reactiva)
+      if (pagada && !AL_DIA.has(previo.status ?? "")) return null;
+      if (!pagada && !SUSCRIPCION_VIVA.has(previo.status ?? "")) return null;
+      // No adelantan el reloj de la suscripción: subscription.created puede ser más viejo y llegar después
       return {
-        estado: evento.type === "invoice.paid" ? "activo" : "pausado",
-        stripe: limpio({ ...previo, ultimoEvento: reloj }),
+        estado: pagada ? "activo" : "pausado",
+        stripe: limpio({ ...previo, ultimoEvento: reloj, ultimaFactura: cuando }),
       };
     }
 

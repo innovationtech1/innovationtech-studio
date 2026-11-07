@@ -101,6 +101,13 @@ test("checkout completado guarda los ids de Stripe y el origen", () => {
   assert.equal(c.stripe?.subscriptionId, "sub_1");
 });
 
+test("checkout completado quita la sesión pendiente", () => {
+  const n = negocio({ stripe: { checkoutPendiente: "cs_1" } });
+  const c = aplicarEvento(evento("checkout.session.completed", sesion()), n, cfg);
+  assert.equal(c?.stripe?.checkoutPendiente, undefined);
+  assert.equal("checkoutPendiente" in (c?.stripe ?? {}), false);
+});
+
 test("checkout de un pago único (no suscripción) se ignora", () => {
   assert.equal(aplicarEvento(evento("checkout.session.completed", sesion({ mode: "payment" })), negocio(), cfg), null);
 });
@@ -124,10 +131,26 @@ test("suscripción creada con el precio de Básico → plan basico", () => {
   assert.equal(c?.estado, "activo");
 });
 
-test("un precio desconocido no cambia el plan", () => {
+// Para pruebas que esperan un console.warn
+async function callado<T>(fn: () => T | Promise<T>): Promise<{ r: T; avisos: string[] }> {
+  const avisos: string[] = [];
+  const original = console.warn;
+  console.warn = (...a: unknown[]) => void avisos.push(a.map(String).join(" "));
+  try {
+    return { r: await fn(), avisos };
+  } finally {
+    console.warn = original;
+  }
+}
+
+test("un precio desconocido nunca da Pro: queda en Básico y avisa", async () => {
   const n = conStripe({ subscriptionId: "sub_1", status: "active" }, { plan: "pro" });
-  const c = aplicarEvento(evento("customer.subscription.updated", suscripcion({}, "price_otro")), n, cfg);
-  assert.equal(c?.plan, "pro");
+  const { r: c, avisos } = await callado(() =>
+    aplicarEvento(evento("customer.subscription.updated", suscripcion({}, "price_otro")), n, cfg),
+  );
+  assert.equal(c?.plan, "basico");
+  assert.equal(avisos.length, 1);
+  assert.match(avisos[0], /price_otro/);
 });
 
 test("past_due → pausado", () => {
@@ -182,6 +205,23 @@ test("invoice.paid de otra suscripción no reactiva", () => {
   const n = conStripe({ subscriptionId: "sub_1", status: "past_due" }, { estado: "pausado" });
   assert.equal(aplicarEvento(evento("invoice.paid", factura("sub_vieja")), n, cfg), null);
   assert.equal(aplicarEvento(evento("invoice.payment_failed", factura("sub_vieja")), n, cfg), null);
+});
+
+test("invoice.paid de una suscripción ya cancelada no reactiva", () => {
+  const n = conStripe({ subscriptionId: "sub_1", customerId: "cus_1", status: "canceled" }, { estado: "pausado" });
+  assert.equal(aplicarEvento(evento("invoice.paid", factura()), n, cfg), null);
+});
+
+test("invoice.payment_failed de una suscripción que ya no cobra se ignora", () => {
+  const n = conStripe({ subscriptionId: "sub_1", customerId: "cus_1", status: "canceled" }, { estado: "pausado" });
+  assert.equal(aplicarEvento(evento("invoice.payment_failed", factura()), n, cfg), null);
+});
+
+test("un pago fallido viejo que llega después de uno pagado no pausa", () => {
+  let n = conStripe({ subscriptionId: "sub_1", customerId: "cus_1", status: "active" });
+  n = aplicar(n, aplicarEvento(evento("invoice.paid", factura(), T + 110), n, cfg));
+  assert.equal(n.estado, "activo");
+  assert.equal(aplicarEvento(evento("invoice.payment_failed", factura(), T + 100), n, cfg), null);
 });
 
 test("invoice sin suscripción guardada todavía se ignora", () => {
@@ -307,17 +347,20 @@ test("webhook: tipo no manejado → 200", async () => {
   assert.equal((await procesarWebhook(cuerpo, firma, depsW(store))).status, 200);
 });
 
-test("webhook: si falla al guardar → 500 y el reintento de Stripe sí se aplica", async () => {
+test("webhook: si falla a medias → 500 sin marca; el reintento se aplica y el repetido se salta", async () => {
   const base = nuevoStore();
   let fallar = true;
   const store: MemoryStore = {
     ...base,
-    async modificarNegocio(id, fn) {
+    async modificarNegocio(id, fn, op) {
       if (fallar) {
         fallar = false;
-        throw new Error("Firestore no responde");
+        // Falla dentro de la transacción: no debe quedar ni el cambio ni la marca
+        return base.modificarNegocio(id, () => {
+          throw new Error("Firestore no responde");
+        }, op);
       }
-      return base.modificarNegocio(id, fn);
+      return base.modificarNegocio(id, fn, op);
     },
   };
   const { cuerpo, firma } = firmado(evento("customer.subscription.created", suscripcion(), T, "evt_reintento"));
@@ -328,11 +371,19 @@ test("webhook: si falla al guardar → 500 y el reintento de Stripe sí se aplic
   } finally {
     console.error = original;
   }
+  assert.equal(base.eventoMarcado("evt_reintento"), false);
   assert.equal((await base.getNegocio("n1"))?.estado, "prueba");
+
   const r = await procesarWebhook(cuerpo, firma, depsW(store));
   assert.equal(r.status, 200);
   assert.notEqual(r.body.duplicado, true);
   assert.equal((await base.getNegocio("n1"))?.estado, "activo");
+  assert.equal(base.eventoMarcado("evt_reintento"), true);
+
+  await base.actualizarNegocio("n1", { estado: "pausado" });
+  const r3 = await procesarWebhook(cuerpo, firma, depsW(store));
+  assert.equal(r3.body.duplicado, true);
+  assert.equal((await base.getNegocio("n1"))?.estado, "pausado");
 });
 
 /* ---------- Cliente de Stripe falso (solo lo que se usa) ---------- */
@@ -341,7 +392,10 @@ type Llamada = { metodo: string; args: unknown[] };
 function stripeFalso(op: {
   precios?: Array<{ id: string; lookup_key: string; unit_amount: number; currency?: string; interval?: string }>;
   suscripciones?: Array<Record<string, unknown>>;
+  sesiones?: Record<string, { status: string; subscription?: string; customer?: string }>;
+  expirarFalla?: boolean; // simula que la pagaron justo antes de vencerla
 } = {}) {
+  const sesiones = { ...(op.sesiones ?? {}) };
   const llamadas: Llamada[] = [];
   const precios = [...(op.precios ?? [])];
   const subs = [...(op.suscripciones ?? [])];
@@ -375,6 +429,21 @@ function stripeFalso(op: {
         async create(p: unknown) {
           anotar("checkout.sessions.create", p);
           return { id: "cs_nuevo", url: "https://checkout.stripe.com/c/pay/cs_nuevo" };
+        },
+        async retrieve(id: string) {
+          anotar("checkout.sessions.retrieve", id);
+          const x = sesiones[id];
+          if (!x) throw Object.assign(new Error("No such session"), { code: "resource_missing", statusCode: 404 });
+          return { id, ...x };
+        },
+        async expire(id: string) {
+          anotar("checkout.sessions.expire", id);
+          if (op.expirarFalla) {
+            sesiones[id] = { ...sesiones[id], status: "complete" };
+            throw Object.assign(new Error("Session is not open"), { statusCode: 400 });
+          }
+          sesiones[id] = { ...sesiones[id], status: "expired" };
+          return { id, ...sesiones[id] };
         },
       },
     },
@@ -666,6 +735,59 @@ test("si Stripe falla, responde 502 con un mensaje amable", async () => {
   }
 });
 
+test("checkout nuevo: guarda la sesión como pendiente", async () => {
+  const f = stripeFalso();
+  const store = nuevoStore();
+  await pagarPlan("u1", "dueno@ejemplo.com", "pro", ORIGEN, depsP(store, f.cliente));
+  assert.equal((await store.getNegocio("n1"))?.stripe?.checkoutPendiente, "cs_nuevo");
+});
+
+test("segundo checkout con el primero ya pagado (sin aviso todavía) → no se crea otro", async () => {
+  const f = stripeFalso({
+    sesiones: { cs_viejo: { status: "complete", subscription: "sub_1", customer: "cus_1" } },
+    suscripciones: [subViva("active", PRECIO_P)],
+  });
+  const store = nuevoStore(negocio({ stripe: { checkoutPendiente: "cs_viejo" } }));
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "pro", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r.ok, true);
+  assert.equal(f.metodos().includes("checkout.sessions.create"), false);
+  // Mismo plan: al portal del customer de esa suscripción
+  if (r.ok) assert.equal(r.url, "https://billing.stripe.com/p/session/bps_1");
+});
+
+test("segundo checkout con el primero abierto → se vence el viejo y se crea uno nuevo", async () => {
+  const f = stripeFalso({ sesiones: { cs_viejo: { status: "open" } } });
+  const store = nuevoStore(negocio({ stripe: { checkoutPendiente: "cs_viejo" } }));
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "pro", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r.ok, true);
+  const m = f.metodos();
+  assert.ok(m.indexOf("checkout.sessions.expire") >= 0);
+  assert.ok(m.indexOf("checkout.sessions.expire") < m.indexOf("checkout.sessions.create"));
+  assert.equal(f.llamadas.find((l) => l.metodo === "checkout.sessions.expire")!.args[0], "cs_viejo");
+  assert.equal((await store.getNegocio("n1"))?.stripe?.checkoutPendiente, "cs_nuevo");
+});
+
+test("la sesión abierta se pagó justo antes de vencerla → no se crea otra", async () => {
+  const f = stripeFalso({
+    sesiones: { cs_viejo: { status: "open", subscription: "sub_1", customer: "cus_1" } },
+    suscripciones: [subViva("active", PRECIO_P)],
+    expirarFalla: true,
+  });
+  const store = nuevoStore(negocio({ stripe: { checkoutPendiente: "cs_viejo" } }));
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "pro", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r.ok, true);
+  assert.equal(f.metodos().includes("checkout.sessions.create"), false);
+});
+
+test("segundo checkout con el primero vencido → se crea normal", async () => {
+  const f = stripeFalso({ sesiones: { cs_viejo: { status: "expired" } } });
+  const store = nuevoStore(negocio({ stripe: { checkoutPendiente: "cs_viejo" } }));
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "pro", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r.ok, true);
+  assert.equal(f.metodos().includes("checkout.sessions.expire"), false);
+  assert.ok(f.metodos().includes("checkout.sessions.create"));
+});
+
 /* ---------- Portal ---------- */
 
 test("portal: solo el dueño (403)", async () => {
@@ -697,12 +819,19 @@ test("portal: devuelve la URL del portal", async () => {
 
 /* ---------- Métodos nuevos del store ---------- */
 
-test("store: eventoProcesado marca y avisa; olvidarEvento lo quita", async () => {
-  const s = memoryStore();
-  assert.equal(await s.eventoProcesado("evt_a"), false);
-  assert.equal(await s.eventoProcesado("evt_a"), true);
-  await s.olvidarEvento("evt_a");
-  assert.equal(await s.eventoProcesado("evt_a"), false);
+test("store: modificarNegocio con eventoId marca junto con el cambio y salta repetidos", async () => {
+  const s = nuevoStore();
+  assert.equal(await s.modificarNegocio("n1", () => ({ nombre: "Uno" }), { eventoId: "evt_a" }), "ok");
+  assert.equal(await s.modificarNegocio("n1", () => ({ nombre: "Dos" }), { eventoId: "evt_a" }), "duplicado");
+  assert.equal((await s.getNegocio("n1"))?.nombre, "Uno");
+  assert.equal(await s.modificarNegocio("nadie", () => ({ nombre: "X" }), { eventoId: "evt_b" }), "no_existe");
+  assert.equal(s.eventoMarcado("evt_b"), false);
+  await assert.rejects(
+    s.modificarNegocio("n1", () => {
+      throw new Error("falla");
+    }, { eventoId: "evt_c" }),
+  );
+  assert.equal(s.eventoMarcado("evt_c"), false);
 });
 
 test("store: negocioPorCustomer", async () => {

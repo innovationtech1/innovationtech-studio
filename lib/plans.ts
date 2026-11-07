@@ -71,7 +71,9 @@ export type Negocio = {
     subscriptionId?: string;
     status?: string;
     priceId?: string;
-    ultimoEvento?: number;
+    ultimoEvento?: number; // reloj de los avisos de suscripción (ms)
+    ultimaFactura?: number; // reloj de los avisos de factura (ms)
+    checkoutPendiente?: string; // id de la última sesión de pago abierta (para no cobrar dos veces)
   };
   creado: number;
   actualizado: number;

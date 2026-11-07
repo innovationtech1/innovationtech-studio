@@ -57,15 +57,19 @@ export interface AccountStore {
   guardarConfig(parcial: ConfigParcial): Promise<void>;
   // El negocio que tiene ese cliente de Stripe (stripe.customerId), o null.
   negocioPorCustomer(customerId: string): Promise<Negocio | null>;
-  // Marca el aviso de Stripe como procesado, de forma atómica. Devuelve true si YA estaba marcado
-  // (es una entrega repetida y no hay que aplicarla otra vez).
-  eventoProcesado(id: string): Promise<boolean>;
-  // Quita la marca (si falló al aplicar el aviso, para que el reintento de Stripe sí se aplique).
-  olvidarEvento(id: string): Promise<void>;
   // Lee el negocio y guarda lo que devuelva `fn` sin que otra petición se meta en medio.
-  // Si `fn` devuelve null no guarda nada. Devuelve false si el negocio no existe.
-  modificarNegocio(id: string, fn: (n: Negocio) => Partial<Negocio> | null): Promise<boolean>;
+  // Si `fn` devuelve null no guarda nada. Con `eventoId` (aviso de Stripe) la marca de «ya procesado»
+  // se guarda en la MISMA transacción que el cambio: o se guardan los dos o ninguno. Así un aviso
+  // repetido no se aplica dos veces y uno que falló a medias sí se aplica en el reintento.
+  // Devuelve "duplicado" si ese aviso ya estaba marcado y "no_existe" si no hay negocio.
+  modificarNegocio(
+    id: string,
+    fn: (n: Negocio) => Partial<Negocio> | null,
+    opciones?: { eventoId?: string },
+  ): Promise<ResultadoModificar>;
 }
+
+export type ResultadoModificar = "ok" | "duplicado" | "no_existe";
 
 // Configuración parcial para guardarConfig: cada precio puede venir incompleto.
 export type ConfigParcial = Omit<Partial<PlanesConfig>, "precios"> & {
@@ -280,33 +284,24 @@ export function firestoreStore(): AccountStore {
       return d ? ({ ...(d.data() as Omit<Negocio, "id">), id: d.id } as Negocio) : null;
     },
 
-    async eventoProcesado(id) {
-      try {
-        // create() falla si ya existe: dos entregas a la vez no se aplican dos veces
-        await db().collection(COL_STRIPE_EVENTOS).doc(id).create({ fecha: Date.now() });
-        return false;
-      } catch (e) {
-        if ((e as { code?: unknown }).code === 6) return true; // ALREADY_EXISTS
-        throw e;
-      }
-    },
-
-    async olvidarEvento(id) {
-      await db().collection(COL_STRIPE_EVENTOS).doc(id).delete();
-    },
-
-    async modificarNegocio(id, fn) {
+    async modificarNegocio(id, fn, opciones) {
       const ref = db().collection(COL_NEGOCIOS).doc(id);
-      return db().runTransaction(async (t) => {
-        const s = await t.get(ref);
-        if (!s.exists) return false;
+      const eventoId = opciones?.eventoId;
+      const refEvento = eventoId ? db().collection(COL_STRIPE_EVENTOS).doc(eventoId) : null;
+      return db().runTransaction(async (t): Promise<ResultadoModificar> => {
+        // En una transacción se lee todo antes de escribir
+        const [s, e] = await Promise.all([t.get(ref), refEvento ? t.get(refEvento) : Promise.resolve(null)]);
+        if (e?.exists) return "duplicado";
+        if (!s.exists) return "no_existe";
         const cambios = fn({ ...(s.data() as Omit<Negocio, "id">), id: s.id } as Negocio);
+        // La marca y el cambio se confirman juntos (create() falla si otra entrega ya la puso)
+        if (refEvento) t.create(refEvento, { fecha: Date.now(), negocioId: id });
         if (cambios) {
           const { id: _id, ...datos } = cambios; // el id nunca se guarda dentro del documento
           void _id;
           t.update(ref, sinIndefinidos(datos));
         }
-        return true;
+        return "ok";
       });
     },
   };
