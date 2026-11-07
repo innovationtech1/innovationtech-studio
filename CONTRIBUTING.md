@@ -17,6 +17,7 @@ Necesitas Node.js 20 o más reciente.
 ```bash
 npm install
 npm run dev        # http://localhost:3000
+npm test           # corre las pruebas automáticas
 npm run build      # revisa que compile antes de enviar tu cambio
 ```
 
@@ -39,7 +40,7 @@ Para usar la IA gratis, conecta tu propia cuenta de Cloudflare desde **Ajustes**
 
 1. Haz un *fork* y crea una rama con un nombre descriptivo.
 2. Haz commits pequeños con mensajes claros.
-3. Revisa que `npm run build` pase y prueba en celular y en computadora.
+3. Revisa que `npm test` y `npm run build` pasen y prueba en celular y en computadora.
 4. Abre el *pull request* y llena la plantilla.
 
 ### Reglas de uso
@@ -63,6 +64,7 @@ You need Node.js 20 or newer.
 ```bash
 npm install
 npm run dev        # http://localhost:3000
+npm test           # run the automated tests
 npm run build      # make sure it builds before sending your change
 ```
 
@@ -83,7 +85,7 @@ To use the free AI, connect your own Cloudflare account from **Settings** inside
 
 1. Fork the repo and create a branch with a descriptive name.
 2. Make small commits with clear messages.
-3. Check that `npm run build` passes and test on a phone and a computer.
+3. Check that `npm test` and `npm run build` pass and test on a phone and a computer.
 4. Open the pull request and fill in the template.
 
 ### Ground rules
