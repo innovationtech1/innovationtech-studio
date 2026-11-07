@@ -21,6 +21,8 @@ import {
 import { describeVersion, renderMusic } from "@/lib/music";
 import MusicPicker from "./music-picker";
 import { previewSfx, SFX, SfxId, SfxItem } from "@/lib/sfx";
+import { loadSong } from "@/lib/library";
+import LibraryPicker from "./library-picker";
 import { deleteFile, getFile, putFile, toBlob } from "@/lib/media-store";
 import { usePersistentState } from "@/lib/persist";
 import type { Item, Settings } from "@/lib/types";
@@ -28,7 +30,7 @@ import { blobToBase64, cuesFromWords, toWav16k, type Word } from "@/lib/captions
 import { friendlyError } from "@/lib/errors";
 import { tr } from "@/lib/i18n";
 
-import { Captions, ChevronLeft, Plus, Smile, Zap, ChevronRight, Clapperboard, Copy, Dices, Download, Film, FolderOpen, ImageIcon, Music, Pause, Play, Scissors, Trash2, Type, Upload, Video } from "lucide-react";
+import { Captions, ChevronLeft, Library, Plus, Smile, Zap, ChevronRight, Clapperboard, Copy, Dices, Download, Film, FolderOpen, ImageIcon, Music, Pause, Play, Scissors, Trash2, Type, Upload, Video } from "lucide-react";
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 const SW = ["#ffffff", "#000000", "#ffd23f", "#e5243b", "#0d1630", "#32c48d", "#2f80ed"];
 
@@ -343,6 +345,24 @@ export default function VideoEditor({
       s.connect(previewCtx.current.destination);
       s.start();
       preview.current = s;
+    } finally {
+      setBusy("");
+    }
+  };
+  const listenSong = async (id: string) => {
+    stopPreview();
+    setBusy("Cargando canción…");
+    try {
+      const buf = await loadSong(id);
+      if (!previewCtx.current) previewCtx.current = new AudioContext();
+      await previewCtx.current.resume();
+      const s = previewCtx.current.createBufferSource();
+      s.buffer = buf;
+      s.connect(previewCtx.current.destination);
+      s.start();
+      preview.current = s;
+    } catch (err) {
+      setError((err as Error).message);
     } finally {
       setBusy("");
     }
@@ -889,6 +909,9 @@ export default function VideoEditor({
               <button className={project.music.source === "generated" ? "active" : ""} onClick={() => update((p) => ({ ...p, music: { ...p.music, source: "generated" } }))}>
                 <Music size={16} aria-hidden /> Música gratis
               </button>
+              <button className={project.music.source === "library" ? "active" : ""} onClick={() => update((p) => ({ ...p, music: { ...p.music, source: "library" } }))}>
+                <Library size={16} aria-hidden /> Biblioteca
+              </button>
               <button className={project.music.source === "upload" ? "active" : ""} onClick={() => update((p) => ({ ...p, music: { ...p.music, source: "upload" } }))}>
                 <Upload size={16} aria-hidden /> Mi canción
               </button>
@@ -935,6 +958,26 @@ export default function VideoEditor({
                   />{" "}
                   Efectos en la música (subida antes del coro, golpe al entrar y final con impacto)
                 </label>
+              </>
+            )}
+
+            {project.music.source === "library" && (
+              <>
+                <LibraryPicker
+                  value={project.music.libraryId || "advertime"}
+                  onPick={(id) => {
+                    update((p) => ({ ...p, music: { ...p.music, source: "library", libraryId: id } }));
+                    listenSong(id);
+                  }}
+                />
+                <div className="actions">
+                  <button className="btn small" onClick={() => listenSong(project.music.libraryId || "advertime")} disabled={!!busy}>
+                    <Play size={15} aria-hidden /> Escuchar
+                  </button>
+                  <button className="btn ghost small" onClick={stopPreview}>
+                    ⏹ Detener
+                  </button>
+                </div>
               </>
             )}
 

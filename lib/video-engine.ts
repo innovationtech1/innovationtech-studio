@@ -4,6 +4,7 @@ import { cuesFromWords, drawCue, wordsFromScript, type Word } from "./captions";
 
 import { renderMusic, MusicStyleId } from "./music";
 import { renderSfx, SfxItem } from "./sfx";
+import { loadSong } from "./library";
 import { supportedRecording } from "./reel";
 import fixWebmDuration from "fix-webm-duration";
 
@@ -85,7 +86,8 @@ export type Sticker = {
 };
 
 export type MusicSettings = {
-  source: "none" | "generated" | "upload";
+  source: "none" | "generated" | "upload" | "library";
+  libraryId?: string; // canción elegida de la biblioteca
   style: MusicStyleId;
   seed: number;
   volume: number; // 0..1
@@ -287,6 +289,18 @@ export class VideoEngine {
       this.musicKey = "upload";
       return;
     }
+    if (mu.source === "library") {
+      const id = mu.libraryId || "advertime";
+      if (this.musicKey === `lib|${id}` && this.musicBuffer) return;
+      onStatus?.("🎵 Cargando canción…");
+      try {
+        this.musicBuffer = await loadSong(id);
+        this.musicKey = `lib|${id}`;
+      } finally {
+        onStatus?.("");
+      }
+      return;
+    }
     const key = `${mu.style}|${mu.seed}|${total.toFixed(1)}|${mu.effects !== false}`;
     if (key === this.musicKey && this.musicBuffer) return;
     onStatus?.("🎵 Componiendo música…");
@@ -307,12 +321,13 @@ export class VideoEngine {
     const { total } = layout(this.project.clips);
     const s = this.audio.createBufferSource();
     s.buffer = this.musicBuffer;
-    s.loop = this.project.music.source === "upload" && this.musicBuffer.duration < total;
-    // Canción propia: se desvanece al final del video
+    const song = this.project.music.source === "upload" || this.project.music.source === "library";
+    s.loop = song && this.musicBuffer.duration < total;
+    // Canción propia o de la biblioteca: se desvanece al final del video
     const g = this.audio.createGain();
     const now = this.audio.currentTime;
     g.gain.setValueAtTime(1, now);
-    if (this.project.music.source === "upload") {
+    if (song) {
       const endIn = total - at;
       const fade = Math.min(1.5, Math.max(0.1, endIn));
       g.gain.setValueAtTime(1, now + Math.max(0, endIn - fade));
