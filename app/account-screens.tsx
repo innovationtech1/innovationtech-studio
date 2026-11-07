@@ -34,15 +34,17 @@ async function api(url: string, method: string, body?: unknown): Promise<Respues
 const errorDe = (r: Respuesta, otro = "Algo salió mal. Intenta de nuevo.") =>
   typeof r.data.error === "string" && r.data.error ? r.data.error : otro;
 
-// Va a Stripe (pago o portal). Si todavía no existe la ruta o falla, devuelve false.
-async function irAStripe(ruta: string, cuerpo: unknown): Promise<boolean> {
+// Va a Stripe (pago o portal). Si no se pudo, devuelve el mensaje que hay que mostrar:
+// el del servidor si lo mandó, o «muy pronto» si la ruta todavía no existe (404).
+async function irAStripe(ruta: string, cuerpo: unknown): Promise<true | string> {
   const r = await api(ruta, "POST", cuerpo);
   const url = r.data.url;
   if (r.ok && typeof url === "string" && url.startsWith("https://")) {
     window.location.href = url;
     return true;
   }
-  return false;
+  if (r.status === 404 && typeof r.data.error !== "string") return SIN_TARJETA;
+  return errorDe(r);
 }
 
 /* ---------------- Piezas comunes ---------------- */
@@ -366,8 +368,8 @@ export function ElegirPlan({
     setOcupado(plan);
     setError("");
     const fue = await irAStripe("/api/stripe/checkout", { plan });
-    if (!fue) {
-      setError(SIN_TARJETA);
+    if (fue !== true) {
+      setError(fue);
       setOcupado("");
     }
   }
@@ -442,12 +444,12 @@ function PlanCard({
 
 /* ---------------- Pausado: pagar para reactivar ---------------- */
 
-// Abre el portal de Stripe. Si todavía no está disponible, devuelve false (se muestra el pago manual).
-export async function abrirPortal(): Promise<boolean> {
+// Abre el portal de Stripe. Si no se puede, devuelve el mensaje a mostrar (junto al pago manual).
+export async function abrirPortal(): Promise<true | string> {
   return irAStripe("/api/stripe/portal", {});
 }
 
-export function PagoPendiente({ onCerrar }: { onCerrar: () => void }) {
+export function PagoPendiente({ onCerrar, mensaje = SIN_TARJETA }: { onCerrar: () => void; mensaje?: string }) {
   return (
     <div className="welcome-backdrop acct-capa" role="dialog" aria-modal="true" aria-label="Reactivar tu cuenta">
       <div className="acct-caja">
@@ -455,7 +457,7 @@ export function PagoPendiente({ onCerrar }: { onCerrar: () => void }) {
           <X size={20} aria-hidden />
         </button>
         <h2>Reactiva tu cuenta</h2>
-        <p className="muted">{SIN_TARJETA}</p>
+        <p className="muted">{mensaje}</p>
         <PagoManual />
       </div>
     </div>
@@ -491,7 +493,7 @@ export function MiCuenta({
   onRefrescar: () => Promise<void>;
   onPlanes: () => void;
 }) {
-  const [manual, setManual] = useState(false);
+  const [manual, setManual] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const [invitado, setInvitado] = useState("");
   const [error, setError] = useState("");
@@ -502,8 +504,8 @@ export function MiCuenta({
   async function portal() {
     setOcupado(true);
     const fue = await abrirPortal();
-    if (!fue) {
-      setManual(true);
+    if (fue !== true) {
+      setManual(fue);
       setOcupado(false);
     }
   }
@@ -592,7 +594,7 @@ export function MiCuenta({
         </div>
         {manual && (
           <>
-            <div className="notice">{SIN_TARJETA}</div>
+            <div className="notice">{manual}</div>
             <PagoManual />
           </>
         )}

@@ -108,6 +108,7 @@ function Lista() {
           aria-label="Buscar negocio"
         />
         <button className="btn small ghost" onClick={() => void cargar()}>Actualizar</button>
+        <PrepararStripe />
       </div>
       {error && <p className="adm-error" role="alert">{error}</p>}
       {!filas && !error && <p>Cargando negocios…</p>}
@@ -125,6 +126,38 @@ function Lista() {
         </>
       )}
     </main>
+  );
+}
+
+// Crea en Stripe los precios de Básico y Pro (si faltan) y guarda sus ids. Se puede pulsar varias veces.
+function PrepararStripe() {
+  const [ocupado, setOcupado] = useState(false);
+  const [resultado, setResultado] = useState<{ ok: boolean; texto: string } | null>(null);
+
+  async function preparar() {
+    setOcupado(true);
+    setResultado(null);
+    const r = await pedir("/api/admin/stripe", { method: "POST" });
+    setOcupado(false);
+    const precios = r.datos.precios as { basico?: string; pro?: string } | undefined;
+    if (r.ok && precios) {
+      setResultado({ ok: true, texto: `Stripe listo. Básico: ${precios.basico} · Pro: ${precios.pro}` });
+    } else {
+      setResultado({ ok: false, texto: String(r.datos.error ?? "No se pudo preparar Stripe.") });
+    }
+  }
+
+  return (
+    <>
+      <button className="btn small" disabled={ocupado} onClick={() => void preparar()}>
+        {ocupado ? "Preparando…" : "Preparar Stripe"}
+      </button>
+      {resultado && (
+        <p className={resultado.ok ? "adm-ok" : "adm-error"} role="status" data-no-translate>
+          {resultado.texto}
+        </p>
+      )}
+    </>
   );
 }
 
@@ -167,7 +200,6 @@ function Fila({ fila, onCambio }: { fila: FilaNegocio; onCambio: () => Promise<v
         <button className="btn small ghost" disabled={ocupado} onClick={() => void accion({ accion: "pausar" })}>Pausar</button>
         <button className="btn small ghost" disabled={ocupado} onClick={() => void accion({ accion: "reactivar" })}>Reactivar</button>
         <button className="btn small ghost" disabled={ocupado} onClick={() => alternar("historial")}>Historial</button>
-        {/* TODO Task 8: aquí va el botón «Preparar Stripe» */}
       </div>
       {error && <p className="adm-error adm-ancho" role="alert">{error}</p>}
       {abierto === "activar" && (

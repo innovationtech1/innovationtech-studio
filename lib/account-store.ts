@@ -51,7 +51,26 @@ export interface AccountStore {
   registrarPagoManual(p: PagoManual): Promise<void>;
   // Pagos a mano de un negocio, del más reciente al más viejo.
   listarPagosManuales(negocioId: string): Promise<PagoManual[]>;
+
+  // Stripe
+  // Mezcla `parcial` con la configuración guardada (no borra lo que no venga).
+  guardarConfig(parcial: ConfigParcial): Promise<void>;
+  // El negocio que tiene ese cliente de Stripe (stripe.customerId), o null.
+  negocioPorCustomer(customerId: string): Promise<Negocio | null>;
+  // Marca el aviso de Stripe como procesado, de forma atómica. Devuelve true si YA estaba marcado
+  // (es una entrega repetida y no hay que aplicarla otra vez).
+  eventoProcesado(id: string): Promise<boolean>;
+  // Quita la marca (si falló al aplicar el aviso, para que el reintento de Stripe sí se aplique).
+  olvidarEvento(id: string): Promise<void>;
+  // Lee el negocio y guarda lo que devuelva `fn` sin que otra petición se meta en medio.
+  // Si `fn` devuelve null no guarda nada. Devuelve false si el negocio no existe.
+  modificarNegocio(id: string, fn: (n: Negocio) => Partial<Negocio> | null): Promise<boolean>;
 }
+
+// Configuración parcial para guardarConfig: cada precio puede venir incompleto.
+export type ConfigParcial = Omit<Partial<PlanesConfig>, "precios"> & {
+  precios?: Partial<Record<"basico" | "pro", Partial<PlanesConfig["precios"]["basico"]>>>;
+};
 
 export type PagoManual = {
   id: string;
@@ -73,8 +92,17 @@ export const COL_USO = "studio_uso";
 export const COL_INVITACIONES = "studio_invitaciones";
 export const COL_CONFIG = "studio_config";
 export const COL_PAGOS_MANUALES = "studio_pagos_manuales";
+export const COL_STRIPE_EVENTOS = "studio_stripe_eventos";
 
 export const idUso = (negocioId: string, dia: string) => `${negocioId}_${dia}`;
+
+// Firestore no acepta undefined: se quitan (también dentro de stripe).
+function sinIndefinidos(c: Partial<Negocio>): Record<string, unknown> {
+  const fuera = (o: object) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+  const limpio = fuera(c);
+  if (c.stripe) limpio.stripe = fuera(c.stripe);
+  return limpio;
+}
 
 const numero = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
@@ -239,6 +267,47 @@ export function firestoreStore(): AccountStore {
       return q.docs
         .map((d) => ({ ...(d.data() as Omit<PagoManual, "id">), id: d.id }) as PagoManual)
         .sort((a, b) => b.fecha - a.fecha);
+    },
+
+    async guardarConfig(parcial) {
+      // merge: true mezcla también los mapas de adentro (precios.basico, etc.)
+      await db().collection(COL_CONFIG).doc("planes").set(parcial, { merge: true });
+    },
+
+    async negocioPorCustomer(customerId) {
+      const q = await db().collection(COL_NEGOCIOS).where("stripe.customerId", "==", customerId).limit(1).get();
+      const d = q.docs[0];
+      return d ? ({ ...(d.data() as Omit<Negocio, "id">), id: d.id } as Negocio) : null;
+    },
+
+    async eventoProcesado(id) {
+      try {
+        // create() falla si ya existe: dos entregas a la vez no se aplican dos veces
+        await db().collection(COL_STRIPE_EVENTOS).doc(id).create({ fecha: Date.now() });
+        return false;
+      } catch (e) {
+        if ((e as { code?: unknown }).code === 6) return true; // ALREADY_EXISTS
+        throw e;
+      }
+    },
+
+    async olvidarEvento(id) {
+      await db().collection(COL_STRIPE_EVENTOS).doc(id).delete();
+    },
+
+    async modificarNegocio(id, fn) {
+      const ref = db().collection(COL_NEGOCIOS).doc(id);
+      return db().runTransaction(async (t) => {
+        const s = await t.get(ref);
+        if (!s.exists) return false;
+        const cambios = fn({ ...(s.data() as Omit<Negocio, "id">), id: s.id } as Negocio);
+        if (cambios) {
+          const { id: _id, ...datos } = cambios; // el id nunca se guarda dentro del documento
+          void _id;
+          t.update(ref, sinIndefinidos(datos));
+        }
+        return true;
+      });
     },
   };
 }

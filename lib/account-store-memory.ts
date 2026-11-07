@@ -1,5 +1,5 @@
 // Versión falsa del AccountStore, guardada en memoria. Solo para pruebas.
-import type { AccountStore, Invitacion, PagoManual, Usuario, Uso } from "./account-store";
+import type { AccountStore, ConfigParcial, Invitacion, PagoManual, Usuario, Uso } from "./account-store";
 import type { Contador, Negocio, PlanesConfig } from "./plans";
 import { mezclarConfig } from "./plans";
 
@@ -26,7 +26,8 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
   const uso = new Map<string, Uso>(
     Object.entries(seed.uso ?? {}).map(([k, v]) => [k, { ...vacio(), ...v }]),
   );
-  const config = mezclarConfig(seed.config);
+  let config = mezclarConfig(seed.config);
+  const eventos = new Set<string>();
   const pagos: PagoManual[] = [];
   const invitaciones = new Map<string, Invitacion>(
     Object.entries(seed.invitaciones ?? {}).map(([k, v]) => [k.toLowerCase(), { ...v }]),
@@ -135,6 +136,42 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
     },
     async listarPagosManuales(negocioId) {
       return pagos.filter((p) => p.negocioId === negocioId).map(copia).sort((a, b) => b.fecha - a.fecha);
+    },
+    async guardarConfig(parcial: ConfigParcial) {
+      const p = copia(parcial);
+      config = mezclarConfig({
+        ...config,
+        ...p,
+        precios: {
+          basico: { ...config.precios.basico, ...p.precios?.basico },
+          pro: { ...config.precios.pro, ...p.precios?.pro },
+        },
+      });
+    },
+    async negocioPorCustomer(customerId) {
+      for (const n of negocios.values()) if (n.stripe?.customerId === customerId) return copia(n);
+      return null;
+    },
+    async eventoProcesado(id) {
+      if (eventos.has(id)) return true;
+      eventos.add(id);
+      return false;
+    },
+    async olvidarEvento(id) {
+      eventos.delete(id);
+    },
+    modificarNegocio(id, fn) {
+      return enCola(async () => {
+        const n = negocios.get(id);
+        if (!n) return false;
+        const cambios = fn(copia(n));
+        if (cambios) {
+          const { id: _id, ...datos } = copia(cambios);
+          void _id;
+          Object.assign(n, datos);
+        }
+        return true;
+      });
     },
     cantidadNegocios() {
       return negocios.size;

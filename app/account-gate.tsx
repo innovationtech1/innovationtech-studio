@@ -36,6 +36,7 @@ export default function AccountGate({ children }: { children: React.ReactNode })
   const [modal, setModal] = useState<null | "cuenta" | "planes" | "pago">(null);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [pagando, setPagando] = useState(false);
+  const [mensajePago, setMensajePago] = useState<string | undefined>(undefined);
   const pathname = usePathname();
 
   // Cada cambio de sesión invalida las respuestas que vengan en camino de la sesión anterior
@@ -160,9 +161,18 @@ export default function AccountGate({ children }: { children: React.ReactNode })
   const salir = () => void fb?.salir();
 
   async function pagarReactivar() {
+    // Sin suscripción de tarjeta que se pueda pagar (cancelada o pago a mano): elegir plan de nuevo
+    const st = cuenta?.usuario ? cuenta.negocio.stripe : undefined;
+    const conTarjeta =
+      cuenta?.usuario && cuenta.negocio.origen === "stripe" && st?.subscriptionId && st.status !== "canceled" && st.status !== "incomplete_expired";
+    if (!conTarjeta) {
+      setModal("planes");
+      return;
+    }
     setPagando(true);
     const fue = await abrirPortal();
-    if (!fue) {
+    if (fue !== true) {
+      setMensajePago(fue);
       setModal("pago");
       setPagando(false);
     }
@@ -214,7 +224,7 @@ export default function AccountGate({ children }: { children: React.ReactNode })
             onPlanes={() => setModal("planes")}
           />
         )}
-        {modal === "pago" && <PagoPendiente onCerrar={() => setModal(null)} />}
+        {modal === "pago" && <PagoPendiente mensaje={mensajePago} onCerrar={() => setModal(null)} />}
       </>
     );
   }
