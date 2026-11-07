@@ -14,12 +14,15 @@ import {
 
 export type DepsCuenta = { store?: AccountStore; now?: number };
 
-export type Falla = { ok: false; status: number; error: string };
-const falla = (status: number, error: string): Falla => ({ ok: false, status, error });
+export type Falla = { ok: false; status: number; error: string; codigo?: string };
+const falla = (status: number, error: string, codigo?: string): Falla =>
+  codigo ? { ok: false, status, error, codigo } : { ok: false, status, error };
 
 const CEROS: Record<Contador, number> = { textos: 0, imagenes: 0, voces: 0, subtitulos: 0 };
 
-export function esCorreoAdmin(email: string): boolean {
+// Solo cuenta como admin quien confirmó su correo: Firebase deja registrar un correo ajeno sin confirmar.
+export function esCorreoAdmin(email: string, emailVerified: boolean): boolean {
+  if (!emailVerified) return false;
   const lista = (process.env.STUDIO_ADMIN_EMAILS ?? "")
     .split(",")
     .map((e) => e.trim().toLowerCase())
@@ -43,10 +46,14 @@ export type EstadoCuenta =
       equipo?: { miembros: number; invitaciones: string[] };
     };
 
-export async function obtenerCuenta(uid: string, email: string, deps: DepsCuenta = {}): Promise<EstadoCuenta> {
+export async function obtenerCuenta(
+  uid: string,
+  email: string,
+  emailVerified: boolean,
+  deps: DepsCuenta = {}): Promise<EstadoCuenta> {
   const store = deps.store ?? firestoreStore();
   const ahora = deps.now ?? Date.now();
-  const esAdmin = esCorreoAdmin(email);
+  const esAdmin = esCorreoAdmin(email, emailVerified);
 
   const usuario = await store.getUsuario(uid);
   if (!usuario) return { usuario: null, esAdmin };
@@ -82,6 +89,7 @@ export async function obtenerCuenta(uid: string, email: string, deps: DepsCuenta
 export async function crearCuenta(
   uid: string,
   email: string,
+  emailVerified: boolean,
   nombreNegocio: string,
   deps: DepsCuenta = {},
 ): Promise<{ ok: true; usuario: Usuario } | Falla> {
@@ -98,11 +106,24 @@ export async function crearCuenta(
   // ¿Lo invitaron a un negocio con cupo?
   const inv = correo ? await store.getInvitacion(correo) : null;
   if (inv) {
+    // Solo un correo confirmado puede ocupar el lugar de una invitación
+    if (!emailVerified) {
+      return falla(
+        403,
+        "Confirma tu correo para unirte al equipo. Te enviamos un enlace a tu correo.",
+        "VERIFICAR_CORREO",
+      );
+    }
     const unido = await store.unirMiembro(inv.negocioId, uid, cfg.personas.pro);
     if (unido) {
       const u: Usuario = { uid, email: correo, negocioId: inv.negocioId, rol: "miembro", creado: ahora };
       const creado = await store.crearUsuario(u);
-      if (!creado) return { ok: true, usuario: (await store.getUsuario(uid)) ?? u };
+      if (!creado) {
+        const ya = await store.getUsuario(uid);
+        // Perdió la carrera: si su usuario es de otro negocio, deshace el lugar que acababa de tomar
+        if (ya && ya.negocioId !== inv.negocioId) await store.quitarMiembro(inv.negocioId, uid);
+        return { ok: true, usuario: ya ?? u };
+      }
       await store.borrarInvitacion(correo);
       return { ok: true, usuario: u };
     }
@@ -113,7 +134,10 @@ export async function crearCuenta(
   if (nombre.length < 1 || nombre.length > 80) {
     return falla(400, "Escribe el nombre de tu negocio (máximo 80 caracteres).");
   }
-  const negocio = await store.crearNegocio({
+  // Id fijo por persona: un doble clic no puede producir dos negocios
+  const idNegocio = `n_${uid}`;
+  await store.crearNegocio(
+    {
     nombre,
     duenoUid: uid,
     miembros: [uid],
@@ -123,8 +147,10 @@ export async function crearCuenta(
     origen: null,
     creado: ahora,
     actualizado: ahora,
-  });
-  const u: Usuario = { uid, email: correo, negocioId: negocio.id, rol: "dueno", creado: ahora };
+    },
+    idNegocio,
+  );
+  const u: Usuario = { uid, email: correo, negocioId: idNegocio, rol: "dueno", creado: ahora };
   const creado = await store.crearUsuario(u);
   if (!creado) return { ok: true, usuario: (await store.getUsuario(uid)) ?? u };
   return { ok: true, usuario: u };
@@ -154,11 +180,11 @@ export async function invitar(
   if (pendientes.includes(correo) || (await store.getInvitacion(correo))) {
     return falla(400, "Esa persona ya está en tu equipo o ya tiene una invitación.");
   }
-  // ¿Ya es miembro? (su correo está en el usuario)
-  for (const m of negocio.miembros) {
-    if ((await store.getUsuario(m))?.email === correo) {
-      return falla(400, "Esa persona ya está en tu equipo o ya tiene una invitación.");
-    }
+  const existente = await store.usuarioPorEmail(correo);
+  if (existente) {
+    return existente.negocioId === negocio.id
+      ? falla(400, "Esa persona ya está en tu equipo o ya tiene una invitación.")
+      : falla(400, "Esa persona ya tiene su propia cuenta en Studio.");
   }
   if (negocio.miembros.length + pendientes.length >= cfg.personas.pro) {
     return falla(400, `Tu plan permite hasta ${cfg.personas.pro} personas.`);
@@ -184,5 +210,26 @@ export async function quitarMiembro(
   if (!negocio.miembros.includes(miembroUid)) return falla(404, "Esa persona no está en tu equipo.");
 
   await store.quitarMiembro(negocio.id, miembroUid);
+  return { ok: true };
+}
+
+export async function cancelarInvitacion(
+  uid: string,
+  email: string,
+  deps: DepsCuenta = {},
+): Promise<{ ok: true } | Falla> {
+  const store = deps.store ?? firestoreStore();
+
+  const usuario = await store.getUsuario(uid);
+  const negocio = usuario ? await store.getNegocio(usuario.negocioId) : null;
+  if (!usuario || !negocio) return falla(403, "Crea tu cuenta para empezar.");
+  if (negocio.duenoUid !== uid) return falla(403, "Solo el dueño del negocio puede cancelar invitaciones.");
+
+  const correo = String(email ?? "").trim().toLowerCase();
+  const inv = correo ? await store.getInvitacion(correo) : null;
+  // Solo invitaciones de este negocio
+  if (!inv || inv.negocioId !== negocio.id) return falla(404, "No encontramos esa invitación.");
+
+  await store.borrarInvitacion(correo);
   return { ok: true };
 }

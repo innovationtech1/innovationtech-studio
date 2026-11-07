@@ -14,6 +14,7 @@ export type SemillaMemoria = {
 export type MemoryStore = AccountStore & {
   // Para revisar los contadores en las pruebas
   uso(negocioId: string, dia: string): Uso;
+  cantidadNegocios(): number;
 };
 
 const vacio = (): Uso => ({ textos: 0, imagenes: 0, voces: 0, subtitulos: 0 });
@@ -73,8 +74,9 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
         f[c] = Math.max(0, f[c] - unidades);
       });
     },
-    async crearNegocio(n) {
-      const nuevo: Negocio = { ...copia(n), id: `neg${++contador}` };
+    async crearNegocio(n, id) {
+      if (id && negocios.has(id)) return null;
+      const nuevo: Negocio = { ...copia(n), id: id ?? `neg${++contador}` };
       negocios.set(nuevo.id, nuevo);
       return copia(nuevo);
     },
@@ -82,6 +84,11 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
       if (usuarios.has(u.uid)) return false;
       usuarios.set(u.uid, { ...copia(u), email: u.email.toLowerCase() });
       return true;
+    },
+    async usuarioPorEmail(email) {
+      const e = email.toLowerCase();
+      for (const u of usuarios.values()) if (u.email.toLowerCase() === e) return copia(u);
+      return null;
     },
     async getInvitacion(email) {
       const i = invitaciones.get(email.toLowerCase());
@@ -107,10 +114,13 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
     async quitarMiembro(negocioId, uid) {
       const n = negocios.get(negocioId);
       if (n) n.miembros = n.miembros.filter((m) => m !== uid);
-      usuarios.delete(uid);
+      if (usuarios.get(uid)?.negocioId === negocioId) usuarios.delete(uid);
     },
     async getUso(negocioId, dia) {
       return { ...(uso.get(`${negocioId}_${dia}`) ?? vacio()) };
+    },
+    cantidadNegocios() {
+      return negocios.size;
     },
     uso(negocioId, dia) {
       return { ...fila(negocioId, dia) };

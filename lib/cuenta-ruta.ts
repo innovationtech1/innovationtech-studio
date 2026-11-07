@@ -8,8 +8,8 @@ export function json(cuerpo: unknown, status = 200): Response {
   return Response.json(cuerpo, { status, headers: SIN_CACHE });
 }
 
-export function errorJson(r: { status: number; error: string }): Response {
-  return json({ error: r.error }, r.status);
+export function errorJson(r: { status: number; error: string; codigo?: string }): Response {
+  return json(r.codigo ? { error: r.error, codigo: r.codigo } : { error: r.error }, r.status);
 }
 
 export async function sesionDe(req: Request): Promise<SesionVerificada | null> {

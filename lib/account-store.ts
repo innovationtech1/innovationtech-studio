@@ -26,7 +26,9 @@ export interface AccountStore {
   devolverUso(negocioId: string, dia: string, c: Contador, unidades: number): Promise<void>;
 
   // Cuentas y equipo. Los correos siempre se guardan y se buscan en minúsculas.
-  crearNegocio(n: Omit<Negocio, "id">): Promise<Negocio>;
+  // Con `id` crea el negocio con ese id solo si no existe (devuelve null si ya existía).
+  crearNegocio(n: Omit<Negocio, "id">, id?: string): Promise<Negocio | null>;
+  usuarioPorEmail(email: string): Promise<Usuario | null>;
   // Crea el usuario solo si no existe. Devuelve false si ya existía (no lo pisa).
   crearUsuario(u: Usuario): Promise<boolean>;
   getInvitacion(email: string): Promise<Invitacion | null>;
@@ -35,7 +37,8 @@ export interface AccountStore {
   listarInvitaciones(negocioId: string): Promise<string[]>;
   // Agrega a `uid` a los miembros (sin repetirlo). Si pasas `max` y el negocio ya está lleno, devuelve false.
   unirMiembro(negocioId: string, uid: string, max?: number): Promise<boolean>;
-  // Saca a `uid` de los miembros y borra su usuario, para que pueda crear su propio negocio.
+  // Saca a `uid` de los miembros y borra su usuario (para que pueda crear su propio negocio),
+  // pero solo si ese usuario pertenece a este negocio; si no, deja su usuario intacto.
   quitarMiembro(negocioId: string, uid: string): Promise<void>;
   // Contadores del día (ceros si todavía no hay).
   getUso(negocioId: string, dia: string): Promise<Uso>;
@@ -97,10 +100,31 @@ export function firestoreStore(): AccountStore {
       });
     },
 
-    async crearNegocio(n) {
-      const ref = db().collection(COL_NEGOCIOS).doc();
-      await ref.set(n);
-      return { ...n, id: ref.id };
+    async crearNegocio(n, id) {
+      const col = db().collection(COL_NEGOCIOS);
+      const ref = id ? col.doc(id) : col.doc();
+      if (!id) {
+        await ref.set(n);
+        return { ...n, id: ref.id };
+      }
+      try {
+        // create() falla si ya existe: un doble clic no produce dos negocios
+        await ref.create(n);
+        return { ...n, id: ref.id };
+      } catch (e) {
+        if ((e as { code?: unknown }).code === 6) return null; // ALREADY_EXISTS
+        throw e;
+      }
+    },
+
+    async usuarioPorEmail(email) {
+      const q = await db()
+        .collection(COL_USUARIOS)
+        .where("email", "==", email.toLowerCase())
+        .limit(1)
+        .get();
+      const d = q.docs[0];
+      return d ? ({ ...(d.data() as Omit<Usuario, "uid">), uid: d.id } as Usuario) : null;
     },
 
     async crearUsuario(u) {
@@ -147,13 +171,14 @@ export function firestoreStore(): AccountStore {
     },
 
     async quitarMiembro(negocioId, uid) {
-      const batch = db().batch();
-      batch.update(db().collection(COL_NEGOCIOS).doc(negocioId), {
-        miembros: FieldValue.arrayRemove(uid),
-        actualizado: Date.now(),
+      const refN = db().collection(COL_NEGOCIOS).doc(negocioId);
+      const refU = db().collection(COL_USUARIOS).doc(uid);
+      await db().runTransaction(async (t) => {
+        const u = await t.get(refU);
+        t.update(refN, { miembros: FieldValue.arrayRemove(uid), actualizado: Date.now() });
+        // Solo se borra el usuario si de verdad es de este negocio
+        if (u.exists && u.data()?.negocioId === negocioId) t.delete(refU);
       });
-      batch.delete(db().collection(COL_USUARIOS).doc(uid));
-      await batch.commit();
     },
 
     async getUso(negocioId, dia) {
