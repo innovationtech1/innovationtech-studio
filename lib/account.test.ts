@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { cuentasActivas, jsonAcceso, requireAccess } from "./account";
 import type { AccountStore, Usuario } from "./account-store";
 import { memoryStore } from "./account-store-memory";
-import { DEFAULT_CONFIG, diaChicago, type Negocio } from "./plans";
+import { DEFAULT_CONFIG, mesChicago, type Negocio } from "./plans";
 
 const AHORA = Date.parse("2026-11-07T18:00:00Z");
-const DIA = diaChicago(AHORA);
+const DIA = mesChicago(AHORA); // el almacén ahora cuenta por mes
 const MIN = 60 * 1000;
 
 function negocio(extra: Partial<Negocio> = {}): Negocio {
@@ -225,7 +225,7 @@ test("devolver() resta lo reservado, una sola vez", async () => {
 
 test("devolverUso nunca deja un contador debajo de 0", async () => {
   const store = tienda();
-  await store.devolverUso("n1", DIA, "voces", 5);
+  await store.devolverUso("n1", DIA, "voces", { delMes: 5, delSaldo: 0 });
   assert.equal(store.uso("n1", DIA).voces, 0);
 });
 

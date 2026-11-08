@@ -3,9 +3,9 @@ import { firestoreStore, type AccountStore } from "./account-store";
 import { stripeModoLive } from "./stripe-server";
 import { verifyIdToken } from "./verify-token";
 import {
-  diaChicago,
   estadoEfectivo,
   limiteMes,
+  mesChicago,
   puedeUsar,
   type Contador,
   type Herramienta,
@@ -128,9 +128,9 @@ export async function requireAccess(
   // Entero de 1 o más: nunca un número negativo que bajaría el contador
   const unidades = Number.isFinite(o.unidades) ? Math.max(1, Math.ceil(o.unidades as number)) : 1;
   const tope = limiteMes(cfg, plan, contador);
-  const dia = diaChicago(ahora);
-  const pudo = await store.reservarUso(negocio.id, dia, contador, unidades, tope);
-  if (!pudo) {
+  const mes = mesChicago(ahora);
+  const reserva = await store.reservarUso(negocio.id, mes, contador, unidades, tope);
+  if (!reserva) {
     const mensaje =
       plan === "prueba"
         ? "Llegaste al límite de la prueba. Elige un plan para seguir creando."
@@ -143,7 +143,7 @@ export async function requireAccess(
   const devolver = async () => {
     if (devuelto) return;
     devuelto = true;
-    await store.devolverUso(negocio.id, dia, contador, unidades);
+    await store.devolverUso(negocio.id, mes, contador, reserva);
   };
   return { ok: true, uid, negocio, plan, contado: true, devolver };
 }

@@ -25,5 +25,6 @@ export function colecciones() {
     config: `${p}config`,
     pagosManuales: `${p}pagos_manuales`,
     stripeEventos: `${p}stripe_eventos`,
+    movimientosPaquetes: `${p}paquetes_movimientos`,
   };
 }
