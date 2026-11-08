@@ -323,6 +323,7 @@ export default function AccountGate({ children }: { children: React.ReactNode })
         {estado !== "sin_plan" && modal === "planes" && (
           <ElegirPlan
             precios={conNegocio.precios}
+            cuenta={conNegocio}
             titulo={conNegocio.efectivo.plan === "basico" ? "Mejora a Pro" : "Elige tu plan"}
             texto="Elige el plan que mejor le queda a tu negocio."
             onCerrar={() => setModal(null)}

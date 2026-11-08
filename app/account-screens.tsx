@@ -5,6 +5,7 @@ import { Check, LogOut, Mail, Shield, X } from "lucide-react";
 import type { CuentaConNegocio } from "./account-context";
 import { mensajeAuth } from "@/lib/auth-mensajes";
 import { textoPaquete } from "@/lib/aviso-uso";
+import { confirmacionCambio, type DatosCambio } from "@/lib/confirmar-plan";
 import type { PaqueteId } from "@/lib/plans";
 
 // Pantallas de la cuenta: bienvenida, crear negocio, elegir plan, pago manual y Mi cuenta.
@@ -58,6 +59,43 @@ function Logo() {
       <div className="logo">
         Innovation<span>TECH</span>
         <small>Studio</small>
+      </div>
+    </div>
+  );
+}
+
+// Pregunta «¿seguro?» dentro de la página (sin window.confirm), encima de la pantalla que la abre.
+// El contenido puede traer partes que no se traducen (por ejemplo, un correo).
+function Confirmar({
+  etiqueta,
+  children,
+  boton,
+  ocupado,
+  error,
+  onSi,
+  onNo,
+}: {
+  etiqueta: string;
+  children: React.ReactNode;
+  boton: string;
+  ocupado: boolean;
+  error?: string;
+  onSi: () => void;
+  onNo: () => void;
+}) {
+  return (
+    <div className="welcome-backdrop acct-capa" role="alertdialog" aria-modal="true" aria-label={etiqueta}>
+      <div className="acct-caja">
+        <p>{children}</p>
+        {error && <div className="error">{error}</div>}
+        <div className="acct-acciones col">
+          <button className="btn" disabled={ocupado} onClick={onSi}>
+            {boton}
+          </button>
+          <button className="btn ghost" disabled={ocupado} onClick={onNo} autoFocus>
+            Cancelar
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -353,12 +391,15 @@ const INCLUYE_PRO = [
 
 export function ElegirPlan({
   precios,
+  cuenta,
   onCerrar,
   onSalir,
   titulo = "Elige tu plan",
   texto = "Tu prueba terminó. Elige un plan para seguir creando.",
 }: {
   precios: { basico: number; pro: number };
+  // Para saber si ya paga con tarjeta: entonces el cambio se cobra al momento y se pide confirmar
+  cuenta?: DatosCambio;
   onCerrar?: () => void;
   onSalir?: () => void;
   titulo?: string;
@@ -366,50 +407,73 @@ export function ElegirPlan({
 }) {
   const [ocupado, setOcupado] = useState<"" | "basico" | "pro">("");
   const [error, setError] = useState("");
+  const [pregunta, setPregunta] = useState<{ plan: "basico" | "pro"; mensaje: string; boton: string } | null>(null);
 
-  async function elegir(plan: "basico" | "pro") {
+  async function ir(plan: "basico" | "pro") {
     setOcupado(plan);
     setError("");
     const fue = await irAStripe("/api/stripe/checkout", { plan });
     if (fue !== true) {
       setError(fue);
       setOcupado("");
+      setPregunta(null);
     }
   }
 
+  function elegir(plan: "basico" | "pro") {
+    const c = cuenta ? confirmacionCambio(cuenta, plan) : null;
+    if (c) {
+      setError("");
+      setPregunta({ plan, ...c });
+    } else void ir(plan);
+  }
+
   return (
-    <div className="welcome-backdrop acct-capa" role="dialog" aria-modal="true" aria-label={titulo}>
-      <div className="acct-caja acct-ancha">
-        {onCerrar && (
-          <button className="acct-cerrar" onClick={onCerrar} title="Cerrar">
-            <X size={20} aria-hidden />
-          </button>
-        )}
-        <h2>{titulo}</h2>
-        <p className="muted acct-pitch">{texto}</p>
-        <div className="acct-planes">
-          <PlanCard nombre="Básico" precio={precios.basico} incluye={INCLUYE_BASICO}>
-            <button className="btn ghost acct-ancho" disabled={!!ocupado} onClick={() => elegir("basico")}>
-              {ocupado === "basico" ? "Abriendo…" : "Elegir Básico"}
+    <>
+      <div className="welcome-backdrop acct-capa" role="dialog" aria-modal="true" aria-label={titulo}>
+        <div className="acct-caja acct-ancha">
+          {onCerrar && (
+            <button className="acct-cerrar" onClick={onCerrar} title="Cerrar">
+              <X size={20} aria-hidden />
             </button>
-          </PlanCard>
-          <PlanCard nombre="Pro" precio={precios.pro} incluye={INCLUYE_PRO} destacado>
-            <button className="btn acct-ancho" disabled={!!ocupado} onClick={() => elegir("pro")}>
-              {ocupado === "pro" ? "Abriendo…" : "Elegir Pro"}
-            </button>
-          </PlanCard>
-        </div>
-        {error && <div className="notice">{error}</div>}
-        <PagoManual />
-        {onSalir && (
-          <div className="acct-links">
-            <button className="acct-link" onClick={onSalir}>
-              Cerrar sesión
-            </button>
+          )}
+          <h2>{titulo}</h2>
+          <p className="muted acct-pitch">{texto}</p>
+          <div className="acct-planes">
+            <PlanCard nombre="Básico" precio={precios.basico} incluye={INCLUYE_BASICO}>
+              <button className="btn ghost acct-ancho" disabled={!!ocupado} onClick={() => elegir("basico")}>
+                {ocupado === "basico" ? "Abriendo…" : "Elegir Básico"}
+              </button>
+            </PlanCard>
+            <PlanCard nombre="Pro" precio={precios.pro} incluye={INCLUYE_PRO} destacado>
+              <button className="btn acct-ancho" disabled={!!ocupado} onClick={() => elegir("pro")}>
+                {ocupado === "pro" ? "Abriendo…" : "Elegir Pro"}
+              </button>
+            </PlanCard>
           </div>
-        )}
+          {error && <div className="notice">{error}</div>}
+          <PagoManual />
+          {onSalir && (
+            <div className="acct-links">
+              <button className="acct-link" onClick={onSalir}>
+                Cerrar sesión
+              </button>
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+      {pregunta && (
+        <Confirmar
+          etiqueta="Confirmar cambio de plan"
+          boton={ocupado ? "Abriendo…" : pregunta.boton}
+          ocupado={!!ocupado}
+          onSi={() => void ir(pregunta.plan)}
+          onNo={() => setPregunta(null)}
+        >
+          {pregunta.mensaje}
+        </Confirmar>
+      )}
+    </>
   );
 }
 
