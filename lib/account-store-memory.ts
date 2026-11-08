@@ -171,6 +171,11 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
           basico: { ...config.precios.basico, ...p.precios?.basico },
           pro: { ...config.precios.pro, ...p.precios?.pro },
         },
+        // Como merge:true de Firestore: un paquete parcial (p. ej. solo stripePriceId) no borra el resto
+        paquetes: {
+          creativo: { ...config.paquetes.creativo, ...p.paquetes?.creativo },
+          voz: { ...config.paquetes.voz, ...p.paquetes?.voz },
+        },
       });
     },
     async negocioPorCustomer(customerId) {

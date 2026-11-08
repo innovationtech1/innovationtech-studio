@@ -2,7 +2,7 @@ import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import Stripe from "stripe";
 import { aplicarEvento, EVENTOS_STRIPE } from "./stripe-events";
-import { abrirPortal, pagarPlan, prepararStripe, procesarWebhook, type ClienteStripe } from "./stripe-api";
+import { abrirPortal, comprarPaquete, pagarPlan, prepararStripe, procesarWebhook, type ClienteStripe } from "./stripe-api";
 import type { Usuario } from "./account-store";
 import { memoryStore, type MemoryStore } from "./account-store-memory";
 import { mezclarConfig, type Negocio, type PlanesConfig } from "./plans";
@@ -529,7 +529,8 @@ function stripeFalso(op: {
             lookup_key: x.lookup_key,
             unit_amount: x.unit_amount,
             currency: x.currency ?? "usd",
-            recurring: { interval: x.interval ?? "month" },
+            // Los paquetes son de pago único (sin recurring)
+            recurring: x.lookup_key.includes("paquete") ? null : { interval: x.interval ?? "month" },
             active: true,
           }));
         return { data };
@@ -538,7 +539,8 @@ function stripeFalso(op: {
         anotar("prices.create", p);
         const nuevo = { id: `price_nuevo_${++n}`, lookup_key: p.lookup_key, unit_amount: p.unit_amount };
         precios.push(nuevo);
-        return { ...nuevo, currency: "usd", recurring: { interval: "month" } };
+        const unico = p.lookup_key.includes("paquete");
+        return { ...nuevo, currency: "usd", recurring: unico ? null : { interval: "month" } };
       },
     },
     checkout: {
@@ -627,7 +629,7 @@ test("prepararStripe: crea los dos precios y guarda los ids; la segunda vez no c
   const r = await prepararStripe(ADMIN, true, { store, stripe: f.cliente });
   assert.equal(r.ok, true);
   const creados = f.llamadas.filter((l) => l.metodo === "prices.create").map((l) => l.args[0] as Record<string, unknown>);
-  assert.equal(creados.length, 2);
+  assert.equal(creados.length, 4);
   const basico = creados.find((c) => c.lookup_key === "studio_basico_mensual")!;
   const pro = creados.find((c) => c.lookup_key === "studio_pro_mensual")!;
   assert.equal(basico.unit_amount, 1900);
@@ -637,21 +639,47 @@ test("prepararStripe: crea los dos precios y guarda los ids; la segunda vez no c
   assert.equal((basico.product_data as { name: string }).name, "Studio Básico");
   assert.equal((pro.product_data as { name: string }).name, "Studio Pro");
   const listado = f.llamadas.find((l) => l.metodo === "prices.list")!.args[0] as Record<string, unknown>;
-  assert.deepEqual(listado.lookup_keys, ["studio_basico_mensual", "studio_pro_mensual"]);
+  assert.deepEqual(listado.lookup_keys, [
+    "studio_basico_mensual",
+    "studio_pro_mensual",
+    "studio_paquete_creativo",
+    "studio_paquete_voz",
+  ]);
+  // Paquetes: pago único (sin recurring), en dólares
+  const creativo = creados.find((c) => c.lookup_key === "studio_paquete_creativo")!;
+  const voz = creados.find((c) => c.lookup_key === "studio_paquete_voz")!;
+  assert.equal(creativo.unit_amount, 500);
+  assert.equal(voz.unit_amount, 900);
+  for (const c of [creativo, voz]) {
+    assert.equal(c.currency, "usd");
+    assert.equal("recurring" in c, false);
+  }
+  assert.equal((creativo.product_data as { name: string }).name, "Studio Paquete Creativo");
+  assert.equal((voz.product_data as { name: string }).name, "Studio Paquete Voz");
 
   const cfgG = await store.getConfig();
   assert.ok(cfgG.precios.basico.stripePriceId?.startsWith("price_nuevo_"));
   assert.ok(cfgG.precios.pro.stripePriceId?.startsWith("price_nuevo_"));
   assert.equal(cfgG.precios.basico.monto, 19);
   assert.equal(cfgG.precios.pro.monto, 39);
+  assert.ok(cfgG.paquetes.creativo.stripePriceId?.startsWith("price_nuevo_"));
+  assert.ok(cfgG.paquetes.voz.stripePriceId?.startsWith("price_nuevo_"));
+  // Guardar el id no borra monto, contenido ni planes del paquete
+  assert.equal(cfgG.paquetes.voz.monto, 9);
+  assert.deepEqual(cfgG.paquetes.voz.contenido, { voces: 100, subtitulos: 100 });
+  assert.deepEqual(cfgG.paquetes.voz.planes, ["pro"]);
   // El resto de la configuración no se toca
   assert.deepEqual(cfgG.limitesMes, mezclarConfig(null).limitesMes);
-  if (r.ok) assert.deepEqual(r.precios, { basico: cfgG.precios.basico.stripePriceId, pro: cfgG.precios.pro.stripePriceId });
+  if (r.ok) {
+    assert.deepEqual(r.precios, { basico: cfgG.precios.basico.stripePriceId, pro: cfgG.precios.pro.stripePriceId });
+    assert.deepEqual(r.paquetes, { creativo: cfgG.paquetes.creativo.stripePriceId, voz: cfgG.paquetes.voz.stripePriceId });
+  }
 
   const r2 = await prepararStripe(ADMIN, true, { store, stripe: f.cliente });
   assert.equal(r2.ok, true);
-  assert.equal(f.llamadas.filter((l) => l.metodo === "prices.create").length, 2);
+  assert.equal(f.llamadas.filter((l) => l.metodo === "prices.create").length, 4);
   assert.deepEqual((await store.getConfig()).precios, cfgG.precios);
+  assert.deepEqual((await store.getConfig()).paquetes, cfgG.paquetes);
 });
 
 test("prepararStripe: si ya existe uno, solo crea el que falta", async () => {
@@ -659,7 +687,7 @@ test("prepararStripe: si ya existe uno, solo crea el que falta", async () => {
   const store = memoryStore();
   const r = await prepararStripe(ADMIN, true, { store, stripe: f.cliente });
   assert.equal(r.ok, true);
-  assert.equal(f.llamadas.filter((l) => l.metodo === "prices.create").length, 1);
+  assert.equal(f.llamadas.filter((l) => l.metodo === "prices.create").length, 3); // pro + 2 paquetes
   assert.equal((await store.getConfig()).precios.basico.stripePriceId, "price_b_viejo");
 });
 
@@ -1088,4 +1116,140 @@ test("lookup_key desconocido y precio desconocido → Básico con aviso", async 
   );
   assert.equal(c?.plan, "basico");
   assert.equal(avisos.length, 1);
+});
+
+/* ---------- Paquetes (pago único) ---------- */
+
+const PRECIO_CREATIVO = "price_paq_creativo";
+const PRECIO_VOZ = "price_paq_voz";
+const CONFIG_PAQ: Partial<PlanesConfig> = {
+  ...CONFIG,
+  paquetes: {
+    creativo: { ...mezclarConfig(null).paquetes.creativo, stripePriceId: PRECIO_CREATIVO },
+    voz: { ...mezclarConfig(null).paquetes.voz, stripePriceId: PRECIO_VOZ },
+  },
+};
+const storePaq = (n: Negocio, config: Partial<PlanesConfig> = CONFIG_PAQ) =>
+  memoryStore({ negocios: [n], usuarios: [dueno, miembro], config });
+const proActivo = (extra: Partial<Negocio> = {}) =>
+  conStripe({ customerId: "cus_1", status: "active", livemode: false }, { plan: "pro", ...extra });
+const comprar = (store: MemoryStore, paquete: unknown, f = stripeFalso(), uid = "u1", extra: Record<string, unknown> = {}) =>
+  comprarPaquete(uid, "dueno@ejemplo.com", paquete, ORIGEN, { ...depsP(store, f.cliente), stripeLive: false, ...extra });
+
+test("comprarPaquete: dueño Pro activo compra Voz (pago único con el cliente existente)", async () => {
+  const f = stripeFalso();
+  const r = await comprar(storePaq(proActivo()), "voz", f);
+  assert.deepEqual(r, { ok: true, url: "https://checkout.stripe.com/c/pay/cs_nuevo" });
+  const p = f.llamadas.find((l) => l.metodo === "checkout.sessions.create")!.args[0] as Record<string, unknown>;
+  assert.equal(p.mode, "payment");
+  assert.deepEqual(p.line_items, [{ price: PRECIO_VOZ, quantity: 1 }]);
+  assert.deepEqual(p.metadata, { negocioId: "n1", paquete: "voz" });
+  assert.equal(p.success_url, `${ORIGEN}/?paquete=ok`);
+  assert.equal(p.cancel_url, `${ORIGEN}/?paquete=cancelado`);
+  assert.equal(p.client_reference_id, "n1");
+  assert.equal(p.customer, "cus_1");
+  assert.equal("customer_email" in p, false);
+  assert.equal("payment_method_types" in p, false);
+  assert.equal("subscription_data" in p, false);
+});
+
+test("comprarPaquete: sin cliente de Stripe usa el correo; Básico puede comprar Creativo", async () => {
+  const f = stripeFalso();
+  const n = conStripe(undefined, { plan: "basico", origen: "manual", pagadoHasta: AHORA + DIA });
+  const r = await comprar(storePaq(n), "creativo", f);
+  assert.equal(r.ok, true);
+  const p = f.llamadas.find((l) => l.metodo === "checkout.sessions.create")!.args[0] as Record<string, unknown>;
+  assert.deepEqual(p.line_items, [{ price: PRECIO_CREATIVO, quantity: 1 }]);
+  assert.equal(p.customer_email, "dueno@ejemplo.com");
+  assert.equal("customer" in p, false);
+  assert.equal(p.client_reference_id, "n1");
+});
+
+test("comprarPaquete: un cliente guardado del otro modo no se usa", async () => {
+  const f = stripeFalso();
+  const n = conStripe({ customerId: "cus_viejo", status: "active", livemode: true }, { plan: "pro" });
+  // Claves de prueba: lo guardado es real, así que el negocio no tiene plan aquí
+  const r = await comprar(storePaq(n), "voz", f);
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.equal(r.status, 400);
+  assert.equal(f.llamadas.length, 0);
+});
+
+test("comprarPaquete: Básico no puede comprar Voz (400)", async () => {
+  const f = stripeFalso();
+  const r = await comprar(storePaq(conStripe({ customerId: "cus_1", status: "active", livemode: false })), "voz", f);
+  assert.deepEqual(r, { ok: false, status: 400, error: "El paquete Voz es del plan Pro." });
+  assert.equal(f.metodos().includes("checkout.sessions.create"), false);
+});
+
+test("comprarPaquete: pausada, en prueba o sin plan no compra (400)", async () => {
+  const casos = [
+    proActivo({ estado: "pausado" }),
+    negocio({ estado: "prueba", pruebaHasta: AHORA + DIA }),
+    negocio({ estado: "prueba", pruebaHasta: AHORA - DIA }),
+    conStripe({ customerId: "cus_1", status: "past_due", livemode: false }, { plan: "pro" }),
+    conStripe({ customerId: "cus_1", status: "active", livemode: false }, { plan: null }),
+  ];
+  for (const n of casos) {
+    const f = stripeFalso();
+    const r = await comprar(storePaq(n), "creativo", f);
+    assert.deepEqual(r, { ok: false, status: 400, error: "Necesitas un plan activo para comprar paquetes." });
+    assert.equal(f.llamadas.length, 0);
+  }
+});
+
+test("comprarPaquete: un miembro (no dueño) recibe 403", async () => {
+  const f = stripeFalso();
+  const r = await comprar(storePaq(proActivo()), "voz", f, "u2");
+  assert.deepEqual(r, { ok: false, status: 403, error: "Solo el dueño del negocio puede pagar el plan." });
+  assert.equal(f.llamadas.length, 0);
+});
+
+test("comprarPaquete: paquete desconocido (400)", async () => {
+  for (const x of ["otro", undefined, 5, null]) {
+    const r = await comprar(storePaq(proActivo()), x);
+    assert.deepEqual(r, { ok: false, status: 400, error: "Elige un paquete." });
+  }
+});
+
+test("comprarPaquete: sin precio del paquete en la configuración responde 503", async () => {
+  const f = stripeFalso();
+  const r = await comprar(storePaq(proActivo(), CONFIG), "voz", f);
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.equal(r.status, 503);
+  assert.equal(f.llamadas.length, 0);
+});
+
+test("comprarPaquete: si Stripe falla responde 502", async () => {
+  const f = stripeFalso();
+  (f.cliente as unknown as { checkout: { sessions: { create: () => Promise<never> } } }).checkout.sessions.create = async () => {
+    throw new Error("boom");
+  };
+  const r = await comprar(storePaq(proActivo()), "voz", f);
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.equal(r.status, 502);
+});
+
+test("prepararStripe: un precio de paquete con otro monto es un error (no se usa)", async () => {
+  const f = stripeFalso({ precios: [{ id: "price_raro", lookup_key: "studio_paquete_voz", unit_amount: 500 }] });
+  const store = memoryStore();
+  const r = await prepararStripe(ADMIN, true, { store, stripe: f.cliente });
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.equal(r.status, 409);
+  assert.equal((await store.getConfig()).paquetes.voz.stripePriceId, undefined);
+});
+
+test("prepararStripe: un precio de paquete recurrente no sirve (409)", async () => {
+  const f = stripeFalso({
+    precios: [{ id: "price_rec", lookup_key: "studio_paquete_creativo", unit_amount: 500, interval: "month" }],
+  });
+  // El falso devuelve sin recurring los "paquete": se fuerza uno recurrente
+  const original = f.cliente.prices.list;
+  f.cliente.prices.list = async (p) => {
+    const r = await original(p);
+    return { data: r.data.map((x) => (x.lookup_key === "studio_paquete_creativo" ? { ...x, recurring: { interval: "month" } } : x)) as typeof r.data };
+  };
+  const r = await prepararStripe(ADMIN, true, { store: memoryStore(), stripe: f.cliente });
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.equal(r.status, 409);
 });

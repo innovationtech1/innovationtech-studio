@@ -2,8 +2,8 @@ import "server-only";
 import Stripe from "stripe";
 import { firestoreStore, type AccountStore } from "./account-store";
 import { esCorreoAdmin, type Falla } from "./account-api";
-import type { Negocio } from "./plans";
-import { aplicarEvento, EVENTOS_STRIPE, idDe, LOOKUP_PLANES, referenciasDeEvento, SUSCRIPCION_VIVA } from "./stripe-events";
+import { estadoEfectivo, esPaquete, type Negocio, type PaqueteId } from "./plans";
+import { aplicarEvento, EVENTOS_STRIPE, idDe, LOOKUP_PAQUETES, LOOKUP_PLANES, referenciasDeEvento, SUSCRIPCION_VIVA } from "./stripe-events";
 import { SIN_CONFIGURAR, stripe, stripeConfigurado, stripeModoLive } from "./stripe-server";
 
 // Lo que hacen las rutas de Stripe (pago, portal, avisos y «Preparar Stripe»).
@@ -56,6 +56,9 @@ const LOOKUP = LOOKUP_PLANES;
 const PRODUCTO: Record<PlanPagado, string> = { basico: "Studio Básico", pro: "Studio Pro" };
 const CENTAVOS: Record<PlanPagado, number> = { basico: 1900, pro: 3900 };
 const PLANES: PlanPagado[] = ["basico", "pro"];
+const PAQUETES: PaqueteId[] = ["creativo", "voz"];
+const PRODUCTO_PAQUETE: Record<PaqueteId, string> = { creativo: "Studio Paquete Creativo", voz: "Studio Paquete Voz" };
+const CENTAVOS_PAQUETE: Record<PaqueteId, number> = { creativo: 500, voz: 900 };
 
 // Crea en Stripe (si no existen) los precios mensuales de Básico y Pro y guarda sus ids.
 // Se puede pulsar varias veces: busca primero por lookup_key y solo crea lo que falta.
@@ -63,7 +66,7 @@ export async function prepararStripe(
   adminEmail: string,
   emailVerified: boolean,
   deps: DepsStripe = {},
-): Promise<{ ok: true; precios: Record<PlanPagado, string> } | Falla> {
+): Promise<{ ok: true; precios: Record<PlanPagado, string>; paquetes: Record<PaqueteId, string> } | Falla> {
   if (!esCorreoAdmin(adminEmail, emailVerified)) {
     return falla(403, "No tienes permiso para el panel de administrador.", "NO_ADMIN");
   }
@@ -73,9 +76,9 @@ export async function prepararStripe(
 
   try {
     const lista = await cliente.prices.list({
-      lookup_keys: PLANES.map((p) => LOOKUP[p]),
+      lookup_keys: [...PLANES.map((p) => LOOKUP[p]), ...PAQUETES.map((p) => LOOKUP_PAQUETES[p])],
       expand: ["data.product"],
-      limit: 10,
+      limit: 20,
     });
     const ids = {} as Record<PlanPagado, string>;
     for (const plan of PLANES) {
@@ -106,13 +109,45 @@ export async function prepararStripe(
         ids[plan] = nuevo.id;
       }
     }
+    // Paquetes: pago único (sin recurring)
+    const idsPaquetes = {} as Record<PaqueteId, string>;
+    for (const paq of PAQUETES) {
+      const hay = lista.data.find((p) => p.lookup_key === LOOKUP_PAQUETES[paq]);
+      if (hay) {
+        const bien =
+          hay.active !== false &&
+          hay.unit_amount === CENTAVOS_PAQUETE[paq] &&
+          hay.currency === "usd" &&
+          !hay.recurring;
+        if (!bien) {
+          return falla(
+            409,
+            `En Stripe ya hay un precio «${LOOKUP_PAQUETES[paq]}» que no es un pago único de $${CENTAVOS_PAQUETE[paq] / 100} USD (o está archivado). Revísalo en Stripe antes de continuar.`,
+          );
+        }
+        idsPaquetes[paq] = hay.id;
+      } else {
+        const nuevo = await cliente.prices.create({
+          currency: "usd",
+          unit_amount: CENTAVOS_PAQUETE[paq],
+          lookup_key: LOOKUP_PAQUETES[paq],
+          product_data: { name: PRODUCTO_PAQUETE[paq] },
+        });
+        idsPaquetes[paq] = nuevo.id;
+      }
+    }
+    // Los paquetes guardan solo el id: monto, contenido y planes no se tocan
     await store.guardarConfig({
       precios: {
         basico: { monto: CENTAVOS.basico / 100, stripePriceId: ids.basico },
         pro: { monto: CENTAVOS.pro / 100, stripePriceId: ids.pro },
       },
+      paquetes: {
+        creativo: { stripePriceId: idsPaquetes.creativo },
+        voz: { stripePriceId: idsPaquetes.voz },
+      },
     });
-    return { ok: true, precios: ids };
+    return { ok: true, precios: ids, paquetes: idsPaquetes };
   } catch (e) {
     console.error("Stripe: no se pudieron preparar los precios:", mensaje(e));
     return falla(502, `Stripe respondió con un error: ${mensaje(e)}`);
@@ -331,6 +366,55 @@ export async function pagarPlan(
     return { ok: true, url: sesion.url };
   } catch (e) {
     console.error("Stripe: no se pudo iniciar el pago:", mensaje(e));
+    return ERROR_STRIPE();
+  }
+}
+
+// «Comprar paquete»: pago único con tarjeta. Solo para el dueño de un negocio con plan activo
+// (también si paga a mano: es un cobro aparte, no hay riesgo de cobrar dos veces).
+export async function comprarPaquete(
+  uid: string,
+  email: string,
+  paquete: unknown,
+  origin: string,
+  deps: DepsStripe = {},
+): Promise<{ ok: true; url: string } | Falla> {
+  const store = deps.store ?? firestoreStore();
+  const ahora = deps.now ?? Date.now();
+  const live = deps.stripeLive ?? stripeModoLive();
+  const guardado = await negocioDelDueno(store, uid);
+  if (esFalla(guardado)) return guardado;
+  if (!esPaquete(paquete)) return falla(400, "Elige un paquete.");
+  const negocio = vistaDelModo(guardado, live);
+  const cliente = clienteDe(deps);
+  if (!cliente) return NO_CONFIGURADO();
+  const efectivo = estadoEfectivo(guardado, ahora, { stripeLive: live });
+  if (efectivo.estado !== "activo" || (efectivo.plan !== "basico" && efectivo.plan !== "pro")) {
+    return falla(400, "Necesitas un plan activo para comprar paquetes.");
+  }
+  const cfg = await store.getConfig();
+  const conf = cfg.paquetes[paquete];
+  if (!conf.planes.includes(efectivo.plan)) {
+    return falla(400, paquete === "voz" ? "El paquete Voz es del plan Pro." : "Este paquete no está disponible en tu plan.");
+  }
+  if (!conf.stripePriceId) return NO_CONFIGURADO();
+
+  try {
+    const customer = negocio.stripe?.customerId;
+    const correo = email.trim();
+    const sesion = await cliente.checkout.sessions.create({
+      mode: "payment",
+      line_items: [{ price: conf.stripePriceId, quantity: 1 }],
+      client_reference_id: negocio.id,
+      ...(customer ? { customer } : correo ? { customer_email: correo } : {}),
+      success_url: `${origin}/?paquete=ok`,
+      cancel_url: `${origin}/?paquete=cancelado`,
+      metadata: { negocioId: negocio.id, paquete },
+    });
+    if (!sesion.url) return ERROR_STRIPE();
+    return { ok: true, url: sesion.url };
+  } catch (e) {
+    console.error("Stripe: no se pudo iniciar la compra del paquete:", mensaje(e));
     return ERROR_STRIPE();
   }
 }

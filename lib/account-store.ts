@@ -8,6 +8,7 @@ import {
   sumarSaldo,
   type Contador,
   type Negocio,
+  type PaqueteConfig,
   type PaqueteId,
   type PlanesConfig,
   type Saldo,
@@ -102,8 +103,9 @@ export type MovimientoPaquete = {
 export type ResultadoModificar = "ok" | "duplicado" | "no_existe";
 
 // Configuración parcial para guardarConfig: cada precio puede venir incompleto.
-export type ConfigParcial = Omit<Partial<PlanesConfig>, "precios"> & {
+export type ConfigParcial = Omit<Partial<PlanesConfig>, "precios" | "paquetes"> & {
   precios?: Partial<Record<"basico" | "pro", Partial<PlanesConfig["precios"]["basico"]>>>;
+  paquetes?: Partial<Record<PaqueteId, Partial<PaqueteConfig>>>;
 };
 
 export type PagoManual = {
