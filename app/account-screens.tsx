@@ -586,7 +586,7 @@ export function MiCuenta({
               {efectivo.plan === "basico" ? "Mejorar a Pro" : "Elegir plan"}
             </button>
           )}
-          {cuenta.esDueno && (efectivo.estado === "activo" || efectivo.estado === "pausado") && (
+          {cuenta.esDueno && negocio.stripe?.customerId && (efectivo.estado === "activo" || efectivo.estado === "pausado") && (
             <button className="btn ghost small" disabled={ocupado} onClick={portal}>
               Administrar suscripción
             </button>
