@@ -126,7 +126,7 @@ test("básico pide voz → 403 PLAN", async () => {
 });
 
 test("básico con 20 imágenes usadas pide 1 → 429 LIMITE", async () => {
-  const store = tienda({}, { [`n1_${DIA}`]: { imagenes: 20 } });
+  const store = tienda({}, { [`n1_${DIA}`]: { imagenes: 300 } });
   const a = await requireAccess(req(), { herramienta: "imagenes", contador: "imagenes", clavePropia: false }, { store, verify, now: AHORA });
   assert.ok(!a.ok);
   if (a.ok) return;
@@ -134,15 +134,15 @@ test("básico con 20 imágenes usadas pide 1 → 429 LIMITE", async () => {
   assert.equal(a.codigo, "LIMITE");
   assert.equal(
     a.mensaje,
-    "Llegaste al límite de hoy (20 imágenes). Se reinicia a medianoche. Puedes pasarte a Pro o conectar tu propia cuenta para usarlo sin límite.",
+    "Llegaste al límite de hoy (300 imágenes). Se reinicia a medianoche. Puedes pasarte a Pro o conectar tu propia cuenta para usarlo sin límite.",
   );
-  assert.equal(store.uso("n1", DIA).imagenes, 20);
+  assert.equal(store.uso("n1", DIA).imagenes, 300);
 });
 
 test("LIMITE de textos usa la palabra 'mensajes y textos'", async () => {
-  const store = tienda({}, { [`n1_${DIA}`]: { textos: 60 } });
+  const store = tienda({}, { [`n1_${DIA}`]: { textos: 1000 } });
   const a = await requireAccess(req(), { herramienta: "textos", contador: "textos", clavePropia: false }, { store, verify, now: AHORA });
-  assert.ok(!a.ok && a.mensaje.startsWith("Llegaste al límite de hoy (60 mensajes y textos)."));
+  assert.ok(!a.ok && a.mensaje.startsWith("Llegaste al límite de hoy (1000 mensajes y textos)."));
 });
 
 test("LIMITE en prueba usa el mensaje de la prueba", async () => {
@@ -171,14 +171,14 @@ test("éxito: reserva 1 uso y devuelve negocio y plan", async () => {
 });
 
 test("unidades > 1 se reservan juntas y respetan el tope", async () => {
-  const store = tienda({}, { [`n1_${DIA}`]: { imagenes: 17 } });
+  const store = tienda({}, { [`n1_${DIA}`]: { imagenes: 297 } });
   const o = { herramienta: "imagenes" as const, contador: "imagenes" as const, unidades: 4, clavePropia: false };
   const no = await requireAccess(req(), o, { store, verify, now: AHORA });
   assert.ok(!no.ok && no.codigo === "LIMITE");
-  assert.equal(store.uso("n1", DIA).imagenes, 17);
+  assert.equal(store.uso("n1", DIA).imagenes, 297);
   const si = await requireAccess(req(), { ...o, unidades: 3 }, { store, verify, now: AHORA });
   assert.ok(si.ok);
-  assert.equal(store.uso("n1", DIA).imagenes, 20);
+  assert.equal(store.uso("n1", DIA).imagenes, 300);
 });
 
 test("con clavePropia:true no cuenta (el contador sigue igual)", async () => {
@@ -230,7 +230,7 @@ test("devolverUso nunca deja un contador debajo de 0", async () => {
 });
 
 test("dos requireAccess en paralelo con 19 imágenes usadas → exactamente uno ok", async () => {
-  const store = tienda({}, { [`n1_${DIA}`]: { imagenes: 19 } });
+  const store = tienda({}, { [`n1_${DIA}`]: { imagenes: 299 } });
   const o = { herramienta: "imagenes" as const, contador: "imagenes" as const, clavePropia: false };
   const [a, b] = await Promise.all([
     requireAccess(req(), o, { store, verify, now: AHORA }),
@@ -239,7 +239,7 @@ test("dos requireAccess en paralelo con 19 imágenes usadas → exactamente uno 
   assert.equal([a, b].filter((x) => x.ok).length, 1);
   const malo = [a, b].find((x) => !x.ok);
   assert.ok(malo && !malo.ok && malo.codigo === "LIMITE");
-  assert.equal(store.uso("n1", DIA).imagenes, 20);
+  assert.equal(store.uso("n1", DIA).imagenes, 300);
 });
 
 test("reservarUso del store falso es atómico con muchas llamadas en paralelo", async () => {
@@ -259,7 +259,7 @@ test("getConfig del store falso mezcla lo guardado sobre DEFAULT_CONFIG", async 
   const store = memoryStore({ config: { pruebaMinutos: 30 } });
   const cfg = await store.getConfig();
   assert.equal(cfg.pruebaMinutos, 30);
-  assert.deepEqual(cfg.limites, DEFAULT_CONFIG.limites);
+  assert.deepEqual(cfg.limitesMes, DEFAULT_CONFIG.limitesMes);
 });
 
 test("STUDIO_CUENTAS sin definir → ok sin tocar el store", async () => {

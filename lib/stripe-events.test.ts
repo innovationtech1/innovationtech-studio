@@ -534,7 +534,7 @@ test("prepararStripe: crea los dos precios y guarda los ids; la segunda vez no c
   assert.equal(cfgG.precios.basico.monto, 19);
   assert.equal(cfgG.precios.pro.monto, 39);
   // El resto de la configuración no se toca
-  assert.deepEqual(cfgG.limites, mezclarConfig(null).limites);
+  assert.deepEqual(cfgG.limitesMes, mezclarConfig(null).limitesMes);
   if (r.ok) assert.deepEqual(r.precios, { basico: cfgG.precios.basico.stripePriceId, pro: cfgG.precios.pro.stripePriceId });
 
   const r2 = await prepararStripe(ADMIN, true, { store, stripe: f.cliente });

@@ -1,7 +1,7 @@
 import "server-only";
 import { firestoreStore, type AccountStore, type PagoManual } from "./account-store";
 import { esCorreoAdmin, type Falla } from "./account-api";
-import { diaChicago, estadoEfectivo, type Contador, type Efectivo, type Negocio } from "./plans";
+import { diaChicago, estadoEfectivo, instanteChicago, type Contador, type Efectivo, type Negocio } from "./plans";
 import { SUSCRIPCION_VIVA } from "./stripe-events";
 import { stripeModoLive } from "./stripe-server";
 
@@ -42,27 +42,8 @@ export function finDelDiaChicago(fecha: string): number {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fecha);
   if (!m) return Number.NaN;
   const [y, mes, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
-  const base = Date.UTC(y, mes - 1, d, 23, 59, 59);
-  if (new Date(base).getUTCMonth() !== mes - 1) return Number.NaN; // p. ej. 31 de febrero
-  // Chicago va 5 h (verano) o 6 h (invierno) detrás de UTC: se prueba cuál da 23:59:59 ese día.
-  // Se comparan las partes (año, mes, día, hora…) y no el texto, que depende de cómo se formatea.
-  const reloj = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Chicago",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  });
-  const esperado = { year: m[1], month: m[2], day: m[3], hour: "23", minute: "59", second: "59" };
-  for (const horas of [5, 6]) {
-    const t = base + horas * 3600_000;
-    const p = Object.fromEntries(reloj.formatToParts(t).map((x) => [x.type, x.value]));
-    if (Object.entries(esperado).every(([k, v]) => p[k] === v)) return t;
-  }
-  return Number.NaN;
+  if (new Date(Date.UTC(y, mes - 1, d, 23, 59, 59)).getUTCMonth() !== mes - 1) return Number.NaN; // p. ej. 31 de febrero
+  return instanteChicago(y, mes, d, 23, 59, 59);
 }
 
 export async function listar(

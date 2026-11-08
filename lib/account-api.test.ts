@@ -194,7 +194,7 @@ test("obtenerCuenta del dueño: plan, herramientas, límites, uso y equipo", asy
   assert.ok(r.usuario);
   assert.equal(r.efectivo?.plan, "pro");
   assert.equal(r.uso?.textos, 5);
-  assert.equal(r.limites?.textos, 200);
+  assert.equal(r.limites?.textos, 3000);
   assert.ok(r.herramientas?.includes("video_ia"));
   assert.deepEqual(r.precios, { basico: 19, pro: 39 });
   assert.equal(r.esDueno, true);

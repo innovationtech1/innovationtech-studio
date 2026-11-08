@@ -5,7 +5,7 @@ import { verifyIdToken } from "./verify-token";
 import {
   diaChicago,
   estadoEfectivo,
-  limite,
+  limiteMes,
   puedeUsar,
   type Contador,
   type Herramienta,
@@ -127,7 +127,7 @@ export async function requireAccess(
   const contador = o.contador;
   // Entero de 1 o más: nunca un número negativo que bajaría el contador
   const unidades = Number.isFinite(o.unidades) ? Math.max(1, Math.ceil(o.unidades as number)) : 1;
-  const tope = limite(cfg, plan, contador);
+  const tope = limiteMes(cfg, plan, contador);
   const dia = diaChicago(ahora);
   const pudo = await store.reservarUso(negocio.id, dia, contador, unidades, tope);
   if (!pudo) {

@@ -76,7 +76,7 @@ export async function obtenerCuenta(
     negocio,
     efectivo,
     herramientas: plan ? [...cfg.herramientas[plan]] : [],
-    limites: plan ? { ...cfg.limites[plan] } : { ...CEROS },
+    limites: plan ? { ...cfg.limitesMes[plan] } : { ...CEROS },
     uso,
     esAdmin,
     esDueno,
