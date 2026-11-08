@@ -3,9 +3,10 @@ import { firestoreStore, type AccountStore } from "./account-store";
 import { stripeModoLive } from "./stripe-server";
 import { verifyIdToken } from "./verify-token";
 import {
-  diaChicago,
   estadoEfectivo,
-  limite,
+  inicioMesSiguienteChicago,
+  limiteMes,
+  mesChicago,
   puedeUsar,
   type Contador,
   type Herramienta,
@@ -14,7 +15,7 @@ import {
 } from "./plans";
 
 // Guardián del servidor: cada ruta /api de IA lo llama antes de trabajar.
-// Revisa la sesión, el estado del negocio, el plan y el límite diario.
+// Revisa la sesión, el estado del negocio, el plan y el límite del mes (más el saldo de paquetes).
 
 export function cuentasActivas(): boolean {
   return process.env.STUDIO_CUENTAS === "on";
@@ -54,6 +55,13 @@ const NOMBRE_CONTADOR: Record<Contador, string> = {
   voces: "voces",
   subtitulos: "subtítulos",
 };
+
+// «1 de diciembre»: día y mes en español, en la hora de Chicago
+const formatoFecha = new Intl.DateTimeFormat("es-MX", {
+  timeZone: "America/Chicago",
+  day: "numeric",
+  month: "long",
+});
 
 const nada = async () => {};
 
@@ -120,21 +128,25 @@ export async function requireAccess(
     return falla(403, "PLAN", "Esta herramienta es del plan Pro. Mejora a Pro para usarla.");
   }
 
-  // 5) Límite diario (con clave propia no se cuenta)
+  // 5) Límite del mes y saldo (con clave propia no se cuenta)
   if (!o.contador || o.clavePropia) {
     return { ok: true, uid, negocio, plan, contado: false, devolver: nada };
   }
   const contador = o.contador;
   // Entero de 1 o más: nunca un número negativo que bajaría el contador
   const unidades = Number.isFinite(o.unidades) ? Math.max(1, Math.ceil(o.unidades as number)) : 1;
-  const tope = limite(cfg, plan, contador);
-  const dia = diaChicago(ahora);
-  const pudo = await store.reservarUso(negocio.id, dia, contador, unidades, tope);
-  if (!pudo) {
+  const tope = limiteMes(cfg, plan, contador);
+  const mes = mesChicago(ahora);
+  const reserva = await store.reservarUso(negocio.id, mes, contador, unidades, tope);
+  if (!reserva) {
+    const fecha = formatoFecha.format(inicioMesSiguienteChicago(ahora));
     const mensaje =
       plan === "prueba"
         ? "Llegaste al límite de la prueba. Elige un plan para seguir creando."
-        : `Llegaste al límite de hoy (${tope} ${NOMBRE_CONTADOR[contador]}). Se reinicia a medianoche. Puedes pasarte a Pro o conectar tu propia cuenta para usarlo sin límite.`;
+        : negocio.duenoUid === uid
+          ? `Se acabó lo incluido este mes (${tope} ${NOMBRE_CONTADOR[contador]}). Compra un paquete o espera al ${fecha}.`
+          : // Un miembro no puede comprar: solo el dueño paga
+            `Se acabó lo incluido este mes (${tope} ${NOMBRE_CONTADOR[contador]}). Pídele al dueño de la cuenta que compre un paquete o espera al ${fecha}.`;
     return falla(429, "LIMITE", mensaje);
   }
 
@@ -143,7 +155,7 @@ export async function requireAccess(
   const devolver = async () => {
     if (devuelto) return;
     devuelto = true;
-    await store.devolverUso(negocio.id, dia, contador, unidades);
+    await store.devolverUso(negocio.id, mes, contador, reserva);
   };
   return { ok: true, uid, negocio, plan, contado: true, devolver };
 }

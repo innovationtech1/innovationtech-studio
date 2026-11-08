@@ -1,4 +1,4 @@
-// Reglas de planes: qué herramientas y cuántos usos diarios tiene cada plan,
+// Reglas de planes: qué herramientas y cuántos usos mensuales tiene cada plan,
 // y si un negocio puede usar la plataforma ahora mismo.
 // Son funciones "puras": no leen ni guardan nada, solo calculan. Por eso
 // son fáciles de probar.
@@ -18,13 +18,27 @@ export type Herramienta =
   | "subtitulos"
   | "video_ia";
 
-// Cosas que se cuentan por día.
+// Cosas que se cuentan por mes.
 export type Contador = "textos" | "imagenes" | "voces" | "subtitulos";
+
+// Usos extra comprados (saldo de paquetes). Solo aparecen los contadores con saldo.
+export type Saldo = Partial<Record<Contador, number>>;
+
+// Paquetes prepagados que se compran una sola vez.
+export type PaqueteId = "creativo" | "voz";
+
+export type PaqueteConfig = {
+  monto: number; // USD
+  contenido: Saldo; // lo que suma el paquete
+  planes: ("basico" | "pro")[]; // planes que pueden comprarlo
+  stripePriceId?: string;
+};
 
 export type PlanesConfig = {
   precios: Record<"basico" | "pro", { monto: number; stripePriceId?: string }>;
   herramientas: Record<Plan, Herramienta[]>;
-  limites: Record<Plan, Record<Contador, number>>;
+  limitesMes: Record<Plan, Record<Contador, number>>;
+  paquetes: Record<PaqueteId, PaqueteConfig>;
   personas: Record<"basico" | "pro", number>;
   pruebaMinutos: number;
 };
@@ -46,10 +60,14 @@ export const DEFAULT_CONFIG: PlanesConfig = {
     basico: [...BASE],
     pro: [...BASE, ...AVANZADAS, "video_ia"],
   },
-  limites: {
+  limitesMes: {
     prueba: { textos: 10, imagenes: 3, voces: 2, subtitulos: 2 },
-    basico: { textos: 60, imagenes: 20, voces: 0, subtitulos: 0 },
-    pro: { textos: 200, imagenes: 60, voces: 30, subtitulos: 30 },
+    basico: { textos: 1000, imagenes: 300, voces: 0, subtitulos: 0 },
+    pro: { textos: 3000, imagenes: 1000, voces: 250, subtitulos: 250 },
+  },
+  paquetes: {
+    creativo: { monto: 5, contenido: { textos: 500, imagenes: 150 }, planes: ["basico", "pro"] },
+    voz: { monto: 9, contenido: { voces: 100, subtitulos: 100 }, planes: ["pro"] },
   },
   personas: { basico: 1, pro: 3 },
   pruebaMinutos: 10,
@@ -66,6 +84,7 @@ export type Negocio = {
   pruebaHasta?: number;
   origen: "stripe" | "manual" | null;
   pagadoHasta?: number;
+  paquetes?: Saldo; // saldo de paquetes comprados
   stripe?: {
     customerId?: string;
     subscriptionId?: string;
@@ -128,8 +147,89 @@ export function puedeUsar(cfg: PlanesConfig, plan: Plan, h: Herramienta): boolea
   return cfg.herramientas[plan].includes(h);
 }
 
-export function limite(cfg: PlanesConfig, plan: Plan, c: Contador): number {
-  return cfg.limites[plan][c];
+export function limiteMes(cfg: PlanesConfig, plan: Plan, c: Contador): number {
+  return cfg.limitesMes[plan][c];
+}
+
+export function esPaquete(x: unknown): x is PaqueteId {
+  return x === "creativo" || x === "voz";
+}
+
+// Reparte `unidades` entre lo que queda del mes y el saldo de paquetes (primero el mes).
+// Devuelve null si no alcanza. Si el admin bajó el tope y ya se pasó, el mes aporta 0.
+export function repartirReserva(
+  usadoMes: number,
+  tope: number,
+  saldo: number,
+  unidades: number,
+): { delMes: number; delSaldo: number } | null {
+  const quedaMes = Math.max(0, tope - usadoMes);
+  const delMes = Math.min(quedaMes, unidades);
+  const delSaldo = unidades - delMes;
+  if (delSaldo > saldo) return null;
+  return { delMes, delSaldo };
+}
+
+// Una cantidad guardada (p. ej. el saldo en Firestore) como entero seguro: 0 o más.
+// Un texto con número ("100") se acepta; cualquier otra cosa (vacío, NaN, negativo) cuenta como 0.
+export function cantidadSegura(v: unknown): number {
+  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : Number.NaN;
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+}
+
+// Suma (signo 1) o resta (signo -1) un saldo. Nunca baja de 0 y quita los contadores en 0.
+export function sumarSaldo(saldo: Saldo | undefined, mas: Saldo, signo: 1 | -1): Saldo {
+  const r: Saldo = { ...saldo };
+  for (const [k, v] of Object.entries(mas) as [Contador, unknown][]) {
+    const nuevo = Math.max(0, cantidadSegura(r[k]) + signo * cantidadSegura(v));
+    if (nuevo > 0) r[k] = nuevo;
+    else delete r[k];
+  }
+  return r;
+}
+
+// Mes de los contadores (AAAA-MM) en la hora de Chicago.
+export function mesChicago(ahora: number): string {
+  return diaChicago(ahora).slice(0, 7);
+}
+
+// Busca el instante en que en Chicago el reloj marca exactamente esa hora, ese día.
+// Chicago va 5 h (verano) o 6 h (invierno) detrás de UTC: se prueba cuál coincide.
+// Se comparan las partes (año, mes, día, hora…) y no el texto, que depende de cómo se formatea.
+// Devuelve NaN si ninguna coincide (p. ej. una hora que no existe por el cambio de horario).
+export function instanteChicago(y: number, mes: number, d: number, h: number, min: number, s: number): number {
+  const base = Date.UTC(y, mes - 1, d, h, min, s);
+  const reloj = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+  const dos = (n: number) => String(n).padStart(2, "0");
+  const esperado = {
+    year: String(y),
+    month: dos(mes),
+    day: dos(d),
+    hour: dos(h),
+    minute: dos(min),
+    second: dos(s),
+  };
+  for (const horas of [5, 6]) {
+    const t = base + horas * 3600_000;
+    const p = Object.fromEntries(reloj.formatToParts(t).map((x) => [x.type, x.value]));
+    if (Object.entries(esperado).every(([k, v]) => p[k] === v)) return t;
+  }
+  return Number.NaN;
+}
+
+// Medianoche de Chicago del día 1 del mes siguiente (cuando se reinician los contadores), en ms.
+export function inicioMesSiguienteChicago(ahora: number): number {
+  const [y, m] = mesChicago(ahora).split("-").map(Number);
+  return m === 12 ? instanteChicago(y + 1, 1, 1, 0, 0, 0) : instanteChicago(y, m + 1, 1, 0, 0, 0);
 }
 
 // Día de los contadores (AAAA-MM-DD) en la hora de Chicago.
@@ -143,6 +243,18 @@ const formatoDia = new Intl.DateTimeFormat("en-US", {
 export function diaChicago(ahora: number): string {
   const p = Object.fromEntries(formatoDia.formatToParts(ahora).map((x) => [x.type, x.value]));
   return `${p.year}-${p.month}-${p.day}`;
+}
+
+// Mezcla un paquete: monto y precio de Stripe pueden cambiar; `contenido` y `planes`
+// solo se toman de lo guardado si vienen completos, si no se queda el valor por defecto.
+function mezclarPaquete(d: PaqueteConfig, g: Partial<PaqueteConfig> | undefined): PaqueteConfig {
+  const contenidoCompleto = g?.contenido && Object.keys(d.contenido).every((k) => k in g.contenido!);
+  return {
+    ...d,
+    ...g,
+    contenido: { ...(contenidoCompleto ? g!.contenido : d.contenido) },
+    planes: [...(Array.isArray(g?.planes) && g.planes.length > 0 ? g.planes : d.planes)],
+  };
 }
 
 // Pone lo guardado encima de DEFAULT_CONFIG; lo que falte se queda con el valor por defecto.
@@ -160,10 +272,14 @@ export function mezclarConfig(g: Partial<PlanesConfig> | null | undefined): Plan
       basico: [...(guardada.herramientas?.basico ?? d.herramientas.basico)],
       pro: [...(guardada.herramientas?.pro ?? d.herramientas.pro)],
     },
-    limites: {
-      prueba: { ...d.limites.prueba, ...guardada.limites?.prueba },
-      basico: { ...d.limites.basico, ...guardada.limites?.basico },
-      pro: { ...d.limites.pro, ...guardada.limites?.pro },
+    limitesMes: {
+      prueba: { ...d.limitesMes.prueba, ...guardada.limitesMes?.prueba },
+      basico: { ...d.limitesMes.basico, ...guardada.limitesMes?.basico },
+      pro: { ...d.limitesMes.pro, ...guardada.limitesMes?.pro },
+    },
+    paquetes: {
+      creativo: mezclarPaquete(d.paquetes.creativo, guardada.paquetes?.creativo),
+      voz: mezclarPaquete(d.paquetes.voz, guardada.paquetes?.voz),
     },
     personas: { ...d.personas, ...guardada.personas },
     pruebaMinutos: guardada.pruebaMinutos ?? d.pruebaMinutos,

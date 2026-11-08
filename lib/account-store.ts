@@ -2,7 +2,18 @@ import "server-only";
 import { FieldValue } from "firebase-admin/firestore";
 import { colecciones } from "./colecciones";
 import { db } from "./firebase-server";
-import { mezclarConfig, type Contador, type Negocio, type PlanesConfig } from "./plans";
+import {
+  cantidadSegura,
+  mezclarConfig,
+  repartirReserva,
+  sumarSaldo,
+  type Contador,
+  type Negocio,
+  type PaqueteConfig,
+  type PaqueteId,
+  type PlanesConfig,
+  type Saldo,
+} from "./plans";
 
 // Dónde se guardan las cuentas, los negocios y los contadores de uso.
 // La interfaz permite cambiar Firestore por una versión falsa en las pruebas.
@@ -21,10 +32,12 @@ export interface AccountStore {
   getUsuario(uid: string): Promise<Usuario | null>;
   getNegocio(id: string): Promise<Negocio | null>;
   getConfig(): Promise<PlanesConfig>;
-  // Suma `unidades` al contador del día solo si no pasa del tope. Devuelve si pudo.
-  reservarUso(negocioId: string, dia: string, c: Contador, unidades: number, tope: number): Promise<boolean>;
-  // Resta `unidades` (por ejemplo, si la IA falló). Nunca baja de 0.
-  devolverUso(negocioId: string, dia: string, c: Contador, unidades: number): Promise<void>;
+  // Reserva `unidades`: primero del contador del mes (hasta el tope) y lo que falte del saldo de
+  // paquetes del negocio, todo en una sola transacción. Devuelve de dónde salió cada parte,
+  // o null si no alcanza (o si el negocio no existe) y no cambia nada.
+  reservarUso(negocioId: string, mes: string, c: Contador, unidades: number, tope: number): Promise<Reserva | null>;
+  // Regresa cada parte a su lugar (por ejemplo, si la IA falló). El contador nunca baja de 0.
+  devolverUso(negocioId: string, mes: string, c: Contador, r: Reserva): Promise<void>;
 
   // Cuentas y equipo. Los correos siempre se guardan y se buscan en minúsculas.
   // Con `id` crea el negocio con ese id solo si no existe (devuelve null si ya existía).
@@ -41,8 +54,8 @@ export interface AccountStore {
   // Saca a `uid` de los miembros y borra su usuario (para que pueda crear su propio negocio),
   // pero solo si ese usuario pertenece a este negocio; si no, deja su usuario intacto.
   quitarMiembro(negocioId: string, uid: string): Promise<void>;
-  // Contadores del día (ceros si todavía no hay).
-  getUso(negocioId: string, dia: string): Promise<Uso>;
+  // Contadores del mes (AAAA-MM; ceros si todavía no hay).
+  getUso(negocioId: string, mes: string): Promise<Uso>;
 
   // Panel del administrador
   // Todos los negocios, del más nuevo al más viejo (son pocas decenas: sin paginar).
@@ -52,6 +65,9 @@ export interface AccountStore {
   registrarPagoManual(p: PagoManual): Promise<void>;
   // Pagos a mano de un negocio, del más reciente al más viejo.
   listarPagosManuales(negocioId: string): Promise<PagoManual[]>;
+  // Historial de paquetes agregados o quitados a mano. Del más reciente al más viejo.
+  registrarMovimiento(m: MovimientoPaquete): Promise<void>;
+  listarMovimientos(negocioId: string): Promise<MovimientoPaquete[]>;
 
   // Stripe
   // Mezcla `parcial` con la configuración guardada (no borra lo que no venga).
@@ -70,11 +86,27 @@ export interface AccountStore {
   ): Promise<ResultadoModificar>;
 }
 
+// De dónde salió lo reservado: del contador del mes o del saldo de paquetes.
+export type Reserva = { delMes: number; delSaldo: number };
+
+export type MovimientoPaquete = {
+  id: string;
+  negocioId: string;
+  tipo: "agregar" | "quitar";
+  paquete?: PaqueteId;
+  cantidades: Saldo;
+  metodo?: PagoManual["metodo"];
+  nota?: string;
+  registradoPor: string; // correo del administrador
+  fecha: number; // ms
+};
+
 export type ResultadoModificar = "ok" | "duplicado" | "no_existe";
 
 // Configuración parcial para guardarConfig: cada precio puede venir incompleto.
-export type ConfigParcial = Omit<Partial<PlanesConfig>, "precios"> & {
+export type ConfigParcial = Omit<Partial<PlanesConfig>, "precios" | "paquetes"> & {
   precios?: Partial<Record<"basico" | "pro", Partial<PlanesConfig["precios"]["basico"]>>>;
+  paquetes?: Partial<Record<PaqueteId, Partial<PaqueteConfig>>>;
 };
 
 export type PagoManual = {
@@ -93,7 +125,7 @@ export type Invitacion = { negocioId: string; invitadoPor: string; creado: numbe
 
 // Los nombres de las colecciones están en lib/colecciones.ts (con el prefijo configurable).
 
-export const idUso = (negocioId: string, dia: string) => `${negocioId}_${dia}`;
+export const idUso = (negocioId: string, mes: string) => `${negocioId}_${mes}`;
 
 // Firestore no acepta undefined: se quitan (también dentro de stripe).
 function sinIndefinidos(c: Partial<Negocio>): Record<string, unknown> {
@@ -138,6 +170,7 @@ export function firestoreStore(): AccountStore {
   const COL_CONFIG = C.config;
   const COL_PAGOS_MANUALES = C.pagosManuales;
   const COL_STRIPE_EVENTOS = C.stripeEventos;
+  const COL_MOVIMIENTOS = C.movimientosPaquetes;
   return {
     async getUsuario(uid) {
       const s = await db().collection(COL_USUARIOS).doc(uid).get();
@@ -156,28 +189,42 @@ export function firestoreStore(): AccountStore {
       });
     },
 
-    async reservarUso(negocioId, dia, c, unidades, tope) {
-      const ref = db().collection(COL_USO).doc(idUso(negocioId, dia));
-      // Transacción: leer, comparar con el tope y guardar, sin que otra petición se meta en medio
-      return db().runTransaction(async (t) => {
-        const s = await t.get(ref);
-        const actual = numero(s.data()?.[c]);
-        if (actual + unidades > tope) return false;
-        t.set(ref, { [c]: actual + unidades }, { merge: true });
-        return true;
+    async reservarUso(negocioId, mes, c, unidades, tope) {
+      const refUso = db().collection(COL_USO).doc(idUso(negocioId, mes));
+      const refNegocio = db().collection(COL_NEGOCIOS).doc(negocioId);
+      // Transacción: se leen el contador y el saldo, y se guardan juntos o no se guarda nada
+      return db().runTransaction(async (t): Promise<Reserva | null> => {
+        // En una transacción se lee todo antes de escribir.
+        // Para cuidar las lecturas gratis, el negocio (su saldo) solo se lee si lo del mes no alcanza.
+        const u = await t.get(refUso);
+        const usado = numero(u.data()?.[c]);
+        const soloMes = repartirReserva(usado, tope, 0, unidades);
+        if (soloMes) {
+          t.set(refUso, { [c]: usado + soloMes.delMes }, { merge: true });
+          return soloMes;
+        }
+        const n = await t.get(refNegocio);
+        if (!n.exists) return null;
+        const paquetes = (n.data() as Negocio).paquetes;
+        const r = repartirReserva(usado, tope, cantidadSegura(paquetes?.[c]), unidades);
+        if (!r) return null;
+        if (r.delMes > 0) t.set(refUso, { [c]: usado + r.delMes }, { merge: true });
+        if (r.delSaldo > 0) t.update(refNegocio, { paquetes: sumarSaldo(paquetes, { [c]: r.delSaldo }, -1) });
+        return r;
       });
     },
 
-    async devolverUso(negocioId, dia, c, unidades) {
-      const ref = db().collection(COL_USO).doc(idUso(negocioId, dia));
+    async devolverUso(negocioId, mes, c, r) {
+      const refUso = db().collection(COL_USO).doc(idUso(negocioId, mes));
+      const refNegocio = db().collection(COL_NEGOCIOS).doc(negocioId);
       await db().runTransaction(async (t) => {
-        const s = await t.get(ref);
-        if (!s.exists) return;
-        const actual = numero(s.data()?.[c]);
-        if (actual >= unidades) {
-          t.update(ref, { [c]: FieldValue.increment(-unidades) });
-        } else {
-          t.update(ref, { [c]: 0 }); // nunca debajo de 0
+        // Se lee todo antes de escribir, y solo lo que hay que regresar (mes, saldo o los dos)
+        const [u, n] = await Promise.all([r.delMes > 0 ? t.get(refUso) : null, r.delSaldo > 0 ? t.get(refNegocio) : null]);
+        if (u?.exists) {
+          t.update(refUso, { [c]: Math.max(0, numero(u.data()?.[c]) - r.delMes) }); // nunca debajo de 0
+        }
+        if (n?.exists) {
+          t.update(refNegocio, { paquetes: sumarSaldo((n.data() as Negocio).paquetes, { [c]: r.delSaldo }, 1) });
         }
       });
     },
@@ -263,8 +310,8 @@ export function firestoreStore(): AccountStore {
       });
     },
 
-    async getUso(negocioId, dia) {
-      const s = await db().collection(COL_USO).doc(idUso(negocioId, dia)).get();
+    async getUso(negocioId, mes) {
+      const s = await db().collection(COL_USO).doc(idUso(negocioId, mes)).get();
       const d = s.data() ?? {};
       return {
         textos: numero(d.textos),
@@ -298,6 +345,20 @@ export function firestoreStore(): AccountStore {
       const q = await db().collection(COL_PAGOS_MANUALES).where("negocioId", "==", negocioId).get();
       return q.docs
         .map((d) => ({ ...(d.data() as Omit<PagoManual, "id">), id: d.id }) as PagoManual)
+        .sort((a, b) => b.fecha - a.fecha);
+    },
+
+    async registrarMovimiento(m) {
+      const { id, ...datos } = m;
+      // Firestore no acepta valores undefined
+      const limpio = Object.fromEntries(Object.entries(datos).filter(([, v]) => v !== undefined));
+      await db().collection(COL_MOVIMIENTOS).doc(id).set(limpio);
+    },
+
+    async listarMovimientos(negocioId) {
+      const q = await db().collection(COL_MOVIMIENTOS).where("negocioId", "==", negocioId).get();
+      return q.docs
+        .map((d) => ({ ...(d.data() as Omit<MovimientoPaquete, "id">), id: d.id }) as MovimientoPaquete)
         .sort((a, b) => b.fecha - a.fecha);
     },
 

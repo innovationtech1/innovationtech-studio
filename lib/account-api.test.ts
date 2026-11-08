@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { cancelarInvitacion, crearCuenta, invitar, obtenerCuenta as obtener, quitarMiembro, type EstadoCuenta } from "./account-api";
 import type { Usuario } from "./account-store";
 import { memoryStore } from "./account-store-memory";
-import { diaChicago, type Negocio } from "./plans";
+import { mesChicago, type Negocio } from "./plans";
 
 const AHORA = Date.parse("2026-11-07T18:00:00Z");
 const MIN = 60 * 1000;
@@ -187,14 +187,14 @@ test("obtenerCuenta del dueño: plan, herramientas, límites, uso y equipo", asy
   const store = memoryStore({
     usuarios: [dueno, miembro("u2")],
     negocios: [negocio({ miembros: ["u1", "u2"] })],
-    uso: { [`n1_${diaChicago(AHORA)}`]: { textos: 5 } },
+    uso: { [`n1_${mesChicago(AHORA)}`]: { textos: 5 } },
   });
   await invitar("u1", "a@x.com", { store, now: AHORA });
   const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA });
   assert.ok(r.usuario);
   assert.equal(r.efectivo?.plan, "pro");
   assert.equal(r.uso?.textos, 5);
-  assert.equal(r.limites?.textos, 200);
+  assert.equal(r.limites?.textos, 3000);
   assert.ok(r.herramientas?.includes("video_ia"));
   assert.deepEqual(r.precios, { basico: 19, pro: 39 });
   assert.equal(r.esDueno, true);
@@ -355,4 +355,34 @@ test("invitación de un negocio en prueba no cuenta como Pro: no se une", async 
   const r = await crearCuenta("u2", "ana@gmail.com", true, "Lo mío", { store, now: AHORA });
   assert.ok(r.ok);
   assert.notEqual((await store.getUsuario("u2"))?.negocioId, "n1");
+});
+
+test("obtenerCuenta: límites del mes, reinicio, saldo y paquetes según el plan", async () => {
+  const ocho = Date.parse("2026-11-08T18:00:00Z");
+  const pro = memoryStore({ usuarios: [dueno], negocios: [negocio({ paquetes: { voces: 7 } })] });
+  const r = await cuenta("u1", "dueno@ejemplo.com", true, { store: pro, now: ocho });
+  assert.equal(r.limites?.voces, 250);
+  assert.equal(r.reinicio, Date.parse("2026-12-01T06:00:00Z"));
+  assert.deepEqual(r.saldo, { voces: 7 });
+  assert.deepEqual(r.paquetes?.map((p) => p.id), ["creativo", "voz"]);
+  assert.deepEqual(r.paquetes?.find((p) => p.id === "voz")?.contenido, { voces: 100, subtitulos: 100 });
+
+  const basico = memoryStore({ usuarios: [dueno], negocios: [negocio({ plan: "basico" })] });
+  const b = await cuenta("u1", "dueno@ejemplo.com", true, { store: basico, now: ocho });
+  assert.deepEqual(b.paquetes?.map((p) => p.id), ["creativo"]);
+  assert.deepEqual(b.saldo, {});
+
+  const sin = memoryStore({
+    usuarios: [dueno],
+    negocios: [negocio({ estado: "prueba", origen: null, pruebaHasta: ocho - 1 })],
+  });
+  const s = await cuenta("u1", "dueno@ejemplo.com", true, { store: sin, now: ocho });
+  assert.deepEqual(s.paquetes, []);
+});
+
+test("obtenerCuenta: un negocio pausado no ofrece paquetes", async () => {
+  const store = memoryStore({ usuarios: [dueno], negocios: [negocio({ estado: "pausado" })] });
+  const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA });
+  assert.equal(r.efectivo?.estado, "pausado");
+  assert.deepEqual(r.paquetes, []);
 });

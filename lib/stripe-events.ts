@@ -1,5 +1,5 @@
 import type Stripe from "stripe";
-import type { Negocio, PlanesConfig } from "./plans";
+import { esPaquete, sumarSaldo, type Negocio, type PaqueteId, type PlanesConfig } from "./plans";
 
 // Qué le pasa a un negocio cuando llega un aviso (evento) de Stripe.
 // Todo aquí es "puro": no lee ni guarda nada, solo calcula. Así se puede probar sin Stripe.
@@ -20,6 +20,7 @@ const SIN_PRIMER_PAGO = new Set(["incomplete", "incomplete_expired"]);
 // Los tipos de aviso que maneja Studio (los que hay que encender en Stripe).
 export const EVENTOS_STRIPE = [
   "checkout.session.completed",
+  "checkout.session.async_payment_succeeded",
   "customer.subscription.created",
   "customer.subscription.updated",
   "customer.subscription.deleted",
@@ -34,6 +35,12 @@ export const idDe = (v: ConId): string | undefined => (typeof v === "string" ? v
 export const LOOKUP_PLANES: Record<"basico" | "pro", string> = {
   basico: "studio_basico_mensual",
   pro: "studio_pro_mensual",
+};
+
+// Nombres fijos (lookup_key) que «Preparar Stripe» pone a los precios de los paquetes.
+export const LOOKUP_PAQUETES: Record<PaqueteId, string> = {
+  creativo: "studio_paquete_creativo",
+  voz: "studio_paquete_voz",
 };
 
 // El plan que corresponde a un precio de Stripe (null si no es ninguno de los nuestros).
@@ -77,8 +84,51 @@ function limpio<T extends object>(o: T): T {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
 }
 
+// Acredita un paquete pagado (pago único). Devuelve null si no hay nada que acreditar.
+// No usa el reloj de la suscripción: un pago es independiente y no debe perderse por llegar tarde.
+// Ojo: el saldo se suma sobre el negocio leído dentro de la transacción del webhook, y el
+// aviso se aplica una sola vez (marca por id de evento), así que no se acredita doble.
+function pagoDePaquete(
+  evento: Stripe.Event,
+  ses: Stripe.Checkout.Session,
+  negocio: Negocio,
+  cfg: PlanesConfig,
+): Partial<Negocio> | null {
+  if (ses.mode !== "payment") return null;
+  const asincrono = evento.type === "checkout.session.async_payment_succeeded";
+  // Un "completed" sin pagar todavía (pago diferido) es normal: llega el aviso de pago exitoso después
+  if (!asincrono && ses.payment_status !== "paid") return null;
+
+  const paquete = ses.metadata?.paquete;
+  // Sin paquete en metadata no es nuestro (p. ej. otra app con la misma cuenta de Stripe): nada que anotar
+  if (paquete === undefined) return null;
+  // Desde aquí alguien pagó un paquete y no se acredita: queda como error para agregarlo a mano
+  const noSeAcredita = (motivo: string) => {
+    console.error(
+      `Stripe: el pago ${ses.id} (negocio ${negocio.id}) ${motivo}; no se acredita. ` +
+        "Si se cobró, agrégalo a mano en /admin (Agregar paquete).",
+    );
+    return null;
+  };
+  if (!esPaquete(paquete)) return noSeAcredita(`no trae un paquete válido («${paquete.slice(0, 40)}»)`);
+  if (ses.metadata?.negocioId !== negocio.id) {
+    return noSeAcredita(`dice ser del negocio ${String(ses.metadata?.negocioId ?? "ninguno").slice(0, 60)}, no de este (paquete ${paquete})`);
+  }
+  const config = cfg.paquetes[paquete];
+  if (ses.amount_total !== Math.round(config.monto * 100) || ses.currency !== "usd") {
+    return noSeAcredita(`no coincide con el precio del paquete ${paquete}`);
+  }
+  return { paquetes: sumarSaldo(negocio.paquetes, config.contenido, 1) };
+}
+
 // Calcula los cambios del negocio para un aviso. Devuelve null si no hay que cambiar nada.
 export function aplicarEvento(evento: Stripe.Event, negocio: Negocio, cfg: PlanesConfig): Partial<Negocio> | null {
+  // Los pagos de paquetes van aparte: no tocan la suscripción ni su reloj
+  if (evento.type === "checkout.session.async_payment_succeeded") return pagoDePaquete(evento, evento.data.object, negocio, cfg);
+  if (evento.type === "checkout.session.completed" && evento.data.object.mode === "payment") {
+    return pagoDePaquete(evento, evento.data.object, negocio, cfg);
+  }
+
   const cuando = evento.created * 1000;
   const livemode = evento.livemode;
   // Lo guardado es del otro modo de Stripe (prueba ↔ real): no sirve aquí, se empieza de cero

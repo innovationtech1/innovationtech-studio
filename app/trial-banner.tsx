@@ -1,14 +1,28 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Clock, CirclePause } from "lucide-react";
+import { useEffect, useRef, useState, type RefObject } from "react";
+import { Clock, CirclePause, Gauge, X } from "lucide-react";
 
 // Mientras se muestra un aviso fijo arriba, el resto de la app baja un poco para no quedar tapada.
-function useEspacioArriba() {
+// Con `medir`, el aviso puede crecer (su texto ocupa 2 o más renglones en un celular angosto):
+// se mide su alto real y la app baja exactamente eso (--acct-espacio).
+function useEspacioArriba(medir?: RefObject<HTMLElement | null>) {
   useEffect(() => {
     document.body.classList.add("acct-con-aviso");
-    return () => document.body.classList.remove("acct-con-aviso");
-  }, []);
+    const el = medir?.current;
+    let obs: ResizeObserver | undefined;
+    if (el && typeof ResizeObserver !== "undefined") {
+      const poner = () => document.body.style.setProperty("--acct-espacio", `${Math.ceil(el.getBoundingClientRect().height)}px`);
+      poner();
+      obs = new ResizeObserver(poner);
+      obs.observe(el);
+    }
+    return () => {
+      obs?.disconnect();
+      document.body.style.removeProperty("--acct-espacio");
+      document.body.classList.remove("acct-con-aviso");
+    };
+  }, [medir]);
 }
 
 const mmss = (ms: number) => {
@@ -68,6 +82,25 @@ export function PausaBanner({ onPagar, ocupado }: { onPagar: () => void; ocupado
       </span>
       <button className="btn small" onClick={onPagar} disabled={ocupado}>
         Pagar para reactivar
+      </button>
+    </div>
+  );
+}
+
+// Aviso suave: ya usó el 80% de lo incluido este mes en un contador. Se queda hasta que lo cierre.
+export function AvisoUsoBanner({ texto, onVer, onCerrar }: { texto: string; onVer: () => void; onCerrar: () => void }) {
+  const caja = useRef<HTMLDivElement>(null);
+  useEspacioArriba(caja);
+  return (
+    <div className="acct-aviso uso" role="status" ref={caja}>
+      <span>
+        <Gauge size={16} aria-hidden /> {texto}
+      </span>
+      <button className="btn small" onClick={onVer}>
+        Ver paquetes
+      </button>
+      <button className="acct-cerrar-toast" onClick={onCerrar} title="Cerrar">
+        <X size={16} aria-hidden />
       </button>
     </div>
   );
