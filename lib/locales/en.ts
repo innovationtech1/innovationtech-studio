@@ -1006,6 +1006,7 @@ export const EN: Record<string, string> = {
   "Crea tu cuenta para empezar.": "Create your account to get started.",
   "Llegaste al límite de la prueba. Elige un plan para seguir creando.": "You reached the trial limit. Choose a plan to keep creating.",
   "Confirma tu correo para unirte al equipo. Te enviamos un enlace a tu correo.": "Confirm your email to join the team. We sent a link to your email.",
+  "Confirma tu correo para empezar tu prueba gratis. Te enviamos un enlace a tu correo.": "Confirm your email to start your free trial. We sent a link to your email.",
   "Escribe el nombre de tu negocio (máximo 80 caracteres).": "Enter your business name (80 characters max).",
   "¡Listo! Tu plan está activo.": "Done! Your plan is active.",
   "El pago se canceló. Puedes intentarlo cuando quieras.": "The payment was canceled. You can try again anytime.",

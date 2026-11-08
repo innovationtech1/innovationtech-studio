@@ -155,6 +155,15 @@ export async function crearCuenta(
   if (nombre.length < 1 || nombre.length > 80) {
     return falla(400, "Escribe el nombre de tu negocio (máximo 80 caracteres).");
   }
+  // La prueba gratis solo empieza con un correo confirmado (evita pruebas infinitas con correos inventados).
+  // La prueba cuenta desde aquí (cuando ya confirmó), no desde que se registró.
+  if (!emailVerified) {
+    return falla(
+      403,
+      "Confirma tu correo para empezar tu prueba gratis. Te enviamos un enlace a tu correo.",
+      "VERIFICAR_CORREO",
+    );
+  }
   // Id fijo por persona: un doble clic no puede producir dos negocios
   const idNegocio = `n_${uid}`;
   await store.crearNegocio(

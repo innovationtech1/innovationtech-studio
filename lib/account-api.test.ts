@@ -234,9 +234,42 @@ test("invitado sin correo confirmado: rechazado con VERIFICAR_CORREO y no se cre
   assert.ok(await store.getInvitacion("ana@gmail.com"));
 });
 
-test("sin invitación, un correo sin confirmar sí puede crear su negocio", async () => {
+/* ---------- Correo confirmado antes de la prueba gratis ---------- */
+
+test("sin invitación, un correo sin confirmar no crea negocio: VERIFICAR_CORREO", async () => {
   const store = memoryStore();
-  assert.ok((await crearCuenta("u9", "a@x.com", false, "Mío", { store, now: AHORA })).ok);
+  const r = await crearCuenta("u9", "a@x.com", false, "Mío", { store, now: AHORA });
+  assert.deepEqual(r, {
+    ok: false,
+    status: 403,
+    error: "Confirma tu correo para empezar tu prueba gratis. Te enviamos un enlace a tu correo.",
+    codigo: "VERIFICAR_CORREO",
+  });
+  assert.equal(await store.getUsuario("u9"), null);
+  assert.equal(store.cantidadNegocios(), 0);
+});
+
+test("sin confirmar y con nombre inválido: primero se pide el nombre (400)", async () => {
+  const r = await crearCuenta("u9", "a@x.com", false, "  ", { store: memoryStore(), now: AHORA });
+  assert.deepEqual(r, { ok: false, status: 400, error: "Escribe el nombre de tu negocio (máximo 80 caracteres)." });
+});
+
+test("después de confirmar el correo, la prueba empieza desde esa llamada", async () => {
+  const store = memoryStore();
+  await crearCuenta("u9", "a@x.com", false, "Mío", { store, now: AHORA });
+  const despues = AHORA + 7 * MIN;
+  const r = await crearCuenta("u9", "a@x.com", true, "Mío", { store, now: despues });
+  assert.ok(r.ok);
+  const cfg = await store.getConfig();
+  const n = await store.getNegocio((await store.getUsuario("u9"))!.negocioId);
+  assert.equal(n?.estado, "prueba");
+  assert.equal(n?.pruebaHasta, despues + cfg.pruebaMinutos * 60000);
+});
+
+test("quien ya tiene cuenta entra aunque su correo no esté confirmado", async () => {
+  const store = memoryStore({ usuarios: [dueno], negocios: [negocio()] });
+  const r = await crearCuenta("u1", "dueno@ejemplo.com", false, "", { store, now: AHORA });
+  assert.deepEqual(r, { ok: true, usuario: dueno });
 });
 
 test("cancelarInvitacion: dueño libera el lugar; miembro no; otra invitación ajena da 404", async () => {

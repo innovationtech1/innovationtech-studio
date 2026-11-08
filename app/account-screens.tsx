@@ -266,7 +266,8 @@ export function CrearNegocio({ fb, onListo }: { fb: FB; onListo: () => Promise<v
       return;
     }
     if (r.data.codigo === "VERIFICAR_CORREO") {
-      // Lo invitaron a un equipo: primero tiene que confirmar su correo
+      // Primero tiene que confirmar su correo: para empezar su prueba gratis o para unirse al equipo
+      // que lo invitó. El texto que se muestra es el del servidor (dice cuál de los dos casos es).
       if (!verificar) await fb.enviarVerificacion().catch(() => {});
       setVerificar(true);
     }
