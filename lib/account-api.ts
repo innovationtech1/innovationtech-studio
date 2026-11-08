@@ -36,6 +36,8 @@ export function esCorreoAdmin(email: string, emailVerified: boolean): boolean {
   return lista.includes(email.trim().toLowerCase());
 }
 
+export type PersonaEquipo = { uid: string; email: string; esDueno: boolean };
+
 export type EstadoCuenta =
   | { usuario: null; esAdmin: boolean }
   | {
@@ -51,8 +53,9 @@ export type EstadoCuenta =
       esAdmin: boolean;
       esDueno: boolean;
       precios: { basico: number; pro: number };
-      // Solo lo ve el dueño. Las invitaciones solo vienen si se piden (GET /api/cuenta?equipo=1).
-      equipo?: { miembros: number; invitaciones?: string[] };
+      // Solo lo ve el dueño. Las invitaciones y la lista de personas solo vienen si se piden
+      // (GET /api/cuenta?equipo=1).
+      equipo?: { miembros: number; invitaciones?: string[]; personas?: PersonaEquipo[] };
     };
 
 export async function obtenerCuenta(
@@ -96,12 +99,28 @@ export async function obtenerCuenta(
     precios: { basico: cfg.precios.basico.monto, pro: cfg.precios.pro.monto },
   };
   if (esDueno) {
-    // Las invitaciones pendientes cuestan una consulta más: solo cuando las pide «Mi cuenta»
+    // Las invitaciones pendientes y la lista de personas cuestan lecturas de más: solo cuando las pide «Mi cuenta»
     cuenta.equipo = opciones.equipo
-      ? { miembros: negocio.miembros.length, invitaciones: await store.listarInvitaciones(negocio.id) }
+      ? {
+          miembros: negocio.miembros.length,
+          invitaciones: await store.listarInvitaciones(negocio.id),
+          personas: await personasDelEquipo(store, negocio, usuario),
+        }
       : { miembros: negocio.miembros.length };
   }
   return cuenta;
+}
+
+// Personas del negocio para «Mi equipo»: el dueño primero y el resto por correo.
+// El dueño ya se leyó (es quien pide la cuenta): no se vuelve a leer.
+async function personasDelEquipo(store: AccountStore, negocio: Negocio, dueno: Usuario): Promise<PersonaEquipo[]> {
+  const personas = await Promise.all(
+    negocio.miembros.map(async (uid): Promise<PersonaEquipo> => {
+      const u = uid === dueno.uid ? dueno : await store.getUsuario(uid);
+      return { uid, email: u?.email ?? "", esDueno: uid === negocio.duenoUid };
+    }),
+  );
+  return personas.sort((a, b) => Number(b.esDueno) - Number(a.esDueno) || a.email.localeCompare(b.email));
 }
 
 export async function crearCuenta(
@@ -235,7 +254,7 @@ export async function quitarMiembro(
   const negocio = usuario ? await store.getNegocio(usuario.negocioId) : null;
   if (!usuario || !negocio) return falla(403, "Crea tu cuenta para empezar.");
   if (negocio.duenoUid !== uid) return falla(403, "Solo el dueño del negocio puede quitar personas.");
-  if (miembroUid === uid) return falla(400, "No puedes quitarte a ti mismo.");
+  if (miembroUid === uid) return falla(400, "No puedes quitarte a ti mismo del equipo.");
   // Solo gente de este negocio: nunca se toca a nadie de otro
   if (!negocio.miembros.includes(miembroUid)) return falla(404, "Esa persona no está en tu equipo.");
 
