@@ -86,7 +86,7 @@ export async function obtenerCuenta(
     uso,
     saldo: { ...negocio.paquetes },
     reinicio: inicioMesSiguienteChicago(ahora),
-    paquetes: plan === "basico" || plan === "pro"
+    paquetes: efectivo.estado === "activo" && (plan === "basico" || plan === "pro")
       ? (Object.entries(cfg.paquetes) as [PaqueteId, (typeof cfg.paquetes)[PaqueteId]][])
           .filter(([, p]) => p.planes.includes(plan))
           .map(([id, p]) => ({ id, monto: p.monto, contenido: { ...p.contenido } }))

@@ -379,3 +379,10 @@ test("obtenerCuenta: límites del mes, reinicio, saldo y paquetes según el plan
   const s = await cuenta("u1", "dueno@ejemplo.com", true, { store: sin, now: ocho });
   assert.deepEqual(s.paquetes, []);
 });
+
+test("obtenerCuenta: un negocio pausado no ofrece paquetes", async () => {
+  const store = memoryStore({ usuarios: [dueno], negocios: [negocio({ estado: "pausado" })] });
+  const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA });
+  assert.equal(r.efectivo?.estado, "pausado");
+  assert.deepEqual(r.paquetes, []);
+});
