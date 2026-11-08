@@ -80,7 +80,8 @@ export async function entrarConCorreo(email: string, clave: string): Promise<voi
   await signInWithEmailAndPassword(auth(), email.trim(), clave);
 }
 
-// Crea la cuenta y manda el correo para confirmarlo (se necesita para unirse a un equipo)
+// Crea la cuenta y manda el correo para confirmarlo (se necesita para empezar la prueba gratis
+// y para unirse a un equipo)
 export async function crearConCorreo(email: string, clave: string): Promise<void> {
   const r = await createUserWithEmailAndPassword(auth(), email.trim(), clave);
   try {

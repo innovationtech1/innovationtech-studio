@@ -3,9 +3,11 @@
 import { useState, type FormEvent } from "react";
 import { Check, LogOut, Mail, Shield, X } from "lucide-react";
 import type { CuentaConNegocio } from "./account-context";
-import { mensajeAuth } from "@/lib/auth-mensajes";
+import { mensajeAuth, mensajeReenvio, REENVIO_OK } from "@/lib/auth-mensajes";
 import { textoPaquete } from "@/lib/aviso-uso";
+import { confirmacionCambio, type DatosCambio } from "@/lib/confirmar-plan";
 import type { PaqueteId } from "@/lib/plans";
+import type { PersonaEquipo } from "@/lib/account-api";
 
 // Pantallas de la cuenta: bienvenida, crear negocio, elegir plan, pago manual y Mi cuenta.
 // No importan Firebase: reciben sus funciones (fb) desde AccountGate, que lo carga solo con las cuentas encendidas.
@@ -58,6 +60,43 @@ function Logo() {
       <div className="logo">
         Innovation<span>TECH</span>
         <small>Studio</small>
+      </div>
+    </div>
+  );
+}
+
+// Pregunta «¿seguro?» dentro de la página (sin window.confirm), encima de la pantalla que la abre.
+// El contenido puede traer partes que no se traducen (por ejemplo, un correo).
+function Confirmar({
+  etiqueta,
+  children,
+  boton,
+  ocupado,
+  error,
+  onSi,
+  onNo,
+}: {
+  etiqueta: string;
+  children: React.ReactNode;
+  boton: string;
+  ocupado: boolean;
+  error?: string;
+  onSi: () => void;
+  onNo: () => void;
+}) {
+  return (
+    <div className="welcome-backdrop acct-capa" role="alertdialog" aria-modal="true" aria-label={etiqueta}>
+      <div className="acct-caja">
+        <p>{children}</p>
+        {error && <div className="error">{error}</div>}
+        <div className="acct-acciones col">
+          <button className="btn" disabled={ocupado} onClick={onSi}>
+            {boton}
+          </button>
+          <button className="btn ghost" disabled={ocupado} onClick={onNo} autoFocus>
+            Cancelar
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -255,6 +294,7 @@ export function CrearNegocio({ fb, onListo }: { fb: FB; onListo: () => Promise<v
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState("");
   const [verificar, setVerificar] = useState(false);
+  const [reenvio, setReenvio] = useState<{ ok: boolean; texto: string } | null>(null);
 
   async function crear() {
     setOcupado(true);
@@ -266,17 +306,31 @@ export function CrearNegocio({ fb, onListo }: { fb: FB; onListo: () => Promise<v
       return;
     }
     if (r.data.codigo === "VERIFICAR_CORREO") {
-      // Lo invitaron a un equipo: primero tiene que confirmar su correo
-      if (!verificar) await fb.enviarVerificacion().catch(() => {});
+      // Primero tiene que confirmar su correo: para empezar su prueba gratis o para unirse al equipo
+      // que lo invitó. El texto que se muestra es el del servidor (dice cuál de los dos casos es).
+      // No se manda otro correo solo: al crear la cuenta ya se mandó uno. Si no le llegó, usa «Reenviar correo».
       setVerificar(true);
     }
     setError(errorDe(r));
     setOcupado(false);
   }
 
+  async function reenviar() {
+    setOcupado(true);
+    setReenvio(null);
+    try {
+      await fb.enviarVerificacion();
+      setReenvio({ ok: true, texto: REENVIO_OK });
+    } catch (e) {
+      setReenvio({ ok: false, texto: mensajeReenvio(e) });
+    }
+    setOcupado(false);
+  }
+
   async function yaConfirme() {
     setOcupado(true);
     setError("");
+    setReenvio(null);
     try {
       await fb.recargarUsuario();
     } catch {
@@ -316,9 +370,17 @@ export function CrearNegocio({ fb, onListo }: { fb: FB; onListo: () => Promise<v
         </form>
         {error && <div className="error">{error}</div>}
         {verificar && (
-          <button className="btn ghost acct-ancho" disabled={ocupado} onClick={yaConfirme}>
-            <Check size={16} aria-hidden /> Ya confirmé mi correo
-          </button>
+          <>
+            <div className="acct-acciones col">
+              <button className="btn ghost" disabled={ocupado} onClick={yaConfirme}>
+                <Check size={16} aria-hidden /> Ya confirmé mi correo
+              </button>
+              <button className="btn ghost" disabled={ocupado} onClick={reenviar}>
+                <Mail size={16} aria-hidden /> Reenviar correo
+              </button>
+            </div>
+            {reenvio && <div className={reenvio.ok ? "ok" : "error"}>{reenvio.texto}</div>}
+          </>
         )}
         <div className="acct-links">
           <button className="acct-link" onClick={() => fb.salir()}>
@@ -352,12 +414,15 @@ const INCLUYE_PRO = [
 
 export function ElegirPlan({
   precios,
+  cuenta,
   onCerrar,
   onSalir,
   titulo = "Elige tu plan",
   texto = "Tu prueba terminó. Elige un plan para seguir creando.",
 }: {
   precios: { basico: number; pro: number };
+  // Para saber si ya paga con tarjeta: entonces el cambio se cobra al momento y se pide confirmar
+  cuenta?: DatosCambio;
   onCerrar?: () => void;
   onSalir?: () => void;
   titulo?: string;
@@ -365,50 +430,73 @@ export function ElegirPlan({
 }) {
   const [ocupado, setOcupado] = useState<"" | "basico" | "pro">("");
   const [error, setError] = useState("");
+  const [pregunta, setPregunta] = useState<{ plan: "basico" | "pro"; mensaje: string; boton: string } | null>(null);
 
-  async function elegir(plan: "basico" | "pro") {
+  async function ir(plan: "basico" | "pro") {
     setOcupado(plan);
     setError("");
     const fue = await irAStripe("/api/stripe/checkout", { plan });
     if (fue !== true) {
       setError(fue);
       setOcupado("");
+      setPregunta(null);
     }
   }
 
+  function elegir(plan: "basico" | "pro") {
+    const c = cuenta ? confirmacionCambio(cuenta, plan) : null;
+    if (c) {
+      setError("");
+      setPregunta({ plan, ...c });
+    } else void ir(plan);
+  }
+
   return (
-    <div className="welcome-backdrop acct-capa" role="dialog" aria-modal="true" aria-label={titulo}>
-      <div className="acct-caja acct-ancha">
-        {onCerrar && (
-          <button className="acct-cerrar" onClick={onCerrar} title="Cerrar">
-            <X size={20} aria-hidden />
-          </button>
-        )}
-        <h2>{titulo}</h2>
-        <p className="muted acct-pitch">{texto}</p>
-        <div className="acct-planes">
-          <PlanCard nombre="Básico" precio={precios.basico} incluye={INCLUYE_BASICO}>
-            <button className="btn ghost acct-ancho" disabled={!!ocupado} onClick={() => elegir("basico")}>
-              {ocupado === "basico" ? "Abriendo…" : "Elegir Básico"}
+    <>
+      <div className="welcome-backdrop acct-capa" role="dialog" aria-modal="true" aria-label={titulo}>
+        <div className="acct-caja acct-ancha">
+          {onCerrar && (
+            <button className="acct-cerrar" onClick={onCerrar} title="Cerrar">
+              <X size={20} aria-hidden />
             </button>
-          </PlanCard>
-          <PlanCard nombre="Pro" precio={precios.pro} incluye={INCLUYE_PRO} destacado>
-            <button className="btn acct-ancho" disabled={!!ocupado} onClick={() => elegir("pro")}>
-              {ocupado === "pro" ? "Abriendo…" : "Elegir Pro"}
-            </button>
-          </PlanCard>
-        </div>
-        {error && <div className="notice">{error}</div>}
-        <PagoManual />
-        {onSalir && (
-          <div className="acct-links">
-            <button className="acct-link" onClick={onSalir}>
-              Cerrar sesión
-            </button>
+          )}
+          <h2>{titulo}</h2>
+          <p className="muted acct-pitch">{texto}</p>
+          <div className="acct-planes">
+            <PlanCard nombre="Básico" precio={precios.basico} incluye={INCLUYE_BASICO}>
+              <button className="btn ghost acct-ancho" disabled={!!ocupado} onClick={() => elegir("basico")}>
+                {ocupado === "basico" ? "Abriendo…" : "Elegir Básico"}
+              </button>
+            </PlanCard>
+            <PlanCard nombre="Pro" precio={precios.pro} incluye={INCLUYE_PRO} destacado>
+              <button className="btn acct-ancho" disabled={!!ocupado} onClick={() => elegir("pro")}>
+                {ocupado === "pro" ? "Abriendo…" : "Elegir Pro"}
+              </button>
+            </PlanCard>
           </div>
-        )}
+          {error && <div className="notice">{error}</div>}
+          <PagoManual />
+          {onSalir && (
+            <div className="acct-links">
+              <button className="acct-link" onClick={onSalir}>
+                Cerrar sesión
+              </button>
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+      {pregunta && (
+        <Confirmar
+          etiqueta="Confirmar cambio de plan"
+          boton={ocupado ? "Abriendo…" : pregunta.boton}
+          ocupado={!!ocupado}
+          onSi={() => void ir(pregunta.plan)}
+          onNo={() => setPregunta(null)}
+        >
+          {pregunta.mensaje}
+        </Confirmar>
+      )}
+    </>
   );
 }
 
@@ -504,8 +592,13 @@ export function MiCuenta({
   const [aviso, setAviso] = useState("");
   const [comprando, setComprando] = useState<"" | PaqueteId>("");
   const [errorPaquete, setErrorPaquete] = useState("");
+  const [quitando, setQuitando] = useState<PersonaEquipo | null>(null); // a quién se pregunta si se quita
+  const [errorQuitar, setErrorQuitar] = useState("");
   const { negocio, efectivo, uso, limites, saldo, equipo } = cuenta;
   const planPro = efectivo.plan === "pro";
+  // En Básico, si quedaron personas o invitaciones de cuando era Pro, el dueño todavía puede quitarlas
+  const restosEnBasico =
+    efectivo.plan === "basico" && !!equipo && (equipo.miembros > 1 || (equipo.invitaciones?.length ?? 0) > 0);
 
   async function comprar(id: PaqueteId) {
     setComprando(id);
@@ -550,139 +643,198 @@ export function MiCuenta({
     setOcupado(false);
   }
 
+  async function quitar(p: PersonaEquipo) {
+    setOcupado(true);
+    setErrorQuitar("");
+    const r = await api(`/api/cuenta/miembros/${encodeURIComponent(p.uid)}`, "DELETE");
+    if (r.ok) {
+      setQuitando(null);
+      await onRefrescar();
+    } else setErrorQuitar(errorDe(r));
+    setOcupado(false);
+  }
+
   return (
-    <div className="welcome-backdrop acct-capa" role="dialog" aria-modal="true" aria-label="Mi cuenta">
-      <div className="acct-caja acct-ancha">
-        <button className="acct-cerrar" onClick={onCerrar} title="Cerrar">
-          <X size={20} aria-hidden />
-        </button>
-        <h2>Mi cuenta</h2>
-        <p className="acct-negocio" data-no-translate>
-          {negocio.nombre}
-        </p>
-        <p className="muted" data-no-translate>
-          {cuenta.usuario.email}
-        </p>
-        <div className="acct-fila">
-          <span>
-            Plan: <strong>{efectivo.plan ? NOMBRE_PLAN[efectivo.plan] : "Sin plan"}</strong>
-          </span>
-          <span className={`acct-estado ${efectivo.estado}`}>{NOMBRE_ESTADO[efectivo.estado]}</span>
-        </div>
-
-        <h3 className="acct-sub">Uso del mes</h3>
-        <ul className="acct-uso">
-          {CONTADORES.map(([c, nombre]) => {
-            const tope = limites[c];
-            const usado = uso[c] ?? 0;
-            const extra = saldo[c] ?? 0;
-            return (
-              <li key={c}>
-                <span>{nombre}</span>
-                {tope > 0 ? (
-                  <>
-                    {/* Un solo texto, para que el traductor lo reconozca completo (lib/locales/en.ts) */}
-                    <span>{`Te quedan ${Math.max(0, tope - usado)} de ${tope} este mes`}</span>
-                    <div className="bar">
-                      <div style={{ width: `${Math.min(100, (usado / tope) * 100)}%` }} />
-                    </div>
-                  </>
-                ) : (
-                  <span className="muted">No incluido</span>
-                )}
-                {extra > 0 && (
-                  <span className="acct-saldo">{`+${extra} de paquete`}</span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-        <p className="muted">
-          Se reinicia el <span data-no-translate>{fechaReinicio.format(cuenta.reinicio)}</span>
-        </p>
-
-        <div className="acct-acciones">
-          {efectivo.plan !== "pro" && (
-            <button className="btn small" onClick={onPlanes}>
-              {efectivo.plan === "basico" ? "Mejorar a Pro" : "Elegir plan"}
-            </button>
-          )}
-          {cuenta.esDueno && negocio.stripe?.customerId && (efectivo.estado === "activo" || efectivo.estado === "pausado") && (
-            <button className="btn ghost small" disabled={ocupado} onClick={portal}>
-              Administrar suscripción
-            </button>
-          )}
-        </div>
-        {manual && (
-          <>
-            <div className="notice">{manual}</div>
-            <PagoManual />
-          </>
-        )}
-
-        {cuenta.esDueno && cuenta.paquetes.length > 0 && (
-          <>
-            <h3 className="acct-sub">Paquetes extra</h3>
-            <p className="muted">Se pagan una sola vez y no vencen. Se usan cuando se acaba lo incluido en el mes.</p>
-            <div className="acct-acciones col acct-paquetes">
-              {cuenta.paquetes.map((p) => (
-                <button key={p.id} className="btn ghost" disabled={!!comprando} onClick={() => void comprar(p.id)}>
-                  {comprando === p.id ? "Abriendo…" : textoPaquete(p.id, p.monto, p.contenido)}
-                </button>
-              ))}
-            </div>
-            {errorPaquete && <div className="error">{errorPaquete}</div>}
-          </>
-        )}
-
-        {cuenta.esDueno && equipo && planPro && (
-          <>
-            <h3 className="acct-sub">Mi equipo</h3>
-            <p className="muted">
-              Personas en tu equipo: <strong data-no-translate>{equipo.miembros}</strong>. El plan Pro permite hasta 3 personas, contando las invitaciones.
-            </p>
-            <form className="acct-invitar" onSubmit={invitar}>
-              <input
-                type="email"
-                required
-                value={invitado}
-                onChange={(e) => setInvitado(e.target.value)}
-                placeholder="correo@ejemplo.com"
-                aria-label="Correo de la persona"
-              />
-              <button className="btn small" type="submit" disabled={ocupado || !invitado.trim()}>
-                Invitar
-              </button>
-            </form>
-            {equipo.invitaciones && equipo.invitaciones.length > 0 && (
-              <ul className="acct-invitaciones">
-                {equipo.invitaciones.map((e) => (
-                  <li key={e}>
-                    <span data-no-translate>{e}</span>
-                    <span className="muted">Pendiente</span>
-                    <button className="btn ghost small" disabled={ocupado} onClick={() => cancelar(e)}>
-                      Cancelar
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </>
-        )}
-        {error && <div className="error">{error}</div>}
-        {aviso && <div className="ok">{aviso}</div>}
-
-        <div className="acct-acciones acct-pie">
-          {cuenta.esAdmin && (
-            <a className="btn ghost small" href="/admin">
-              <Shield size={15} aria-hidden /> Panel de administrador
-            </a>
-          )}
-          <button className="btn ghost small" onClick={() => fb.salir()}>
-            <LogOut size={15} aria-hidden /> Cerrar sesión
+    <>
+      <div className="welcome-backdrop acct-capa" role="dialog" aria-modal="true" aria-label="Mi cuenta">
+        <div className="acct-caja acct-ancha">
+          <button className="acct-cerrar" onClick={onCerrar} title="Cerrar">
+            <X size={20} aria-hidden />
           </button>
+          <h2>Mi cuenta</h2>
+          <p className="acct-negocio" data-no-translate>
+            {negocio.nombre}
+          </p>
+          <p className="muted" data-no-translate>
+            {cuenta.usuario.email}
+          </p>
+          <div className="acct-fila">
+            <span>
+              Plan: <strong>{efectivo.plan ? NOMBRE_PLAN[efectivo.plan] : "Sin plan"}</strong>
+            </span>
+            <span className={`acct-estado ${efectivo.estado}`}>{NOMBRE_ESTADO[efectivo.estado]}</span>
+          </div>
+
+          <h3 className="acct-sub">Uso del mes</h3>
+          <ul className="acct-uso">
+            {CONTADORES.map(([c, nombre]) => {
+              const tope = limites[c];
+              const usado = uso[c] ?? 0;
+              const extra = saldo[c] ?? 0;
+              return (
+                <li key={c}>
+                  <span>{nombre}</span>
+                  {tope > 0 ? (
+                    <>
+                      {/* Un solo texto, para que el traductor lo reconozca completo (lib/locales/en.ts) */}
+                      <span>{`Te quedan ${Math.max(0, tope - usado)} de ${tope} este mes`}</span>
+                      <div className="bar">
+                        <div style={{ width: `${Math.min(100, (usado / tope) * 100)}%` }} />
+                      </div>
+                    </>
+                  ) : (
+                    <span className="muted">No incluido</span>
+                  )}
+                  {extra > 0 && (
+                    <span className="acct-saldo">{`+${extra} de paquete`}</span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          <p className="muted">
+            Se reinicia el <span data-no-translate>{fechaReinicio.format(cuenta.reinicio)}</span>
+          </p>
+
+          <div className="acct-acciones">
+            {efectivo.plan !== "pro" && (
+              <button className="btn small" onClick={onPlanes}>
+                {efectivo.plan === "basico" ? "Mejorar a Pro" : "Elegir plan"}
+              </button>
+            )}
+            {cuenta.esDueno && negocio.stripe?.customerId && (efectivo.estado === "activo" || efectivo.estado === "pausado") && (
+              <button className="btn ghost small" disabled={ocupado} onClick={portal}>
+                Administrar suscripción
+              </button>
+            )}
+          </div>
+          {manual && (
+            <>
+              <div className="notice">{manual}</div>
+              <PagoManual />
+            </>
+          )}
+
+          {cuenta.esDueno && cuenta.paquetes.length > 0 && (
+            <>
+              <h3 className="acct-sub">Paquetes extra</h3>
+              <p className="muted">Se pagan una sola vez y no vencen. Se usan cuando se acaba lo incluido en el mes.</p>
+              <div className="acct-acciones col acct-paquetes">
+                {cuenta.paquetes.map((p) => (
+                  <button key={p.id} className="btn ghost" disabled={!!comprando} onClick={() => void comprar(p.id)}>
+                    {comprando === p.id ? "Abriendo…" : textoPaquete(p.id, p.monto, p.contenido)}
+                  </button>
+                ))}
+              </div>
+              {errorPaquete && <div className="error">{errorPaquete}</div>}
+            </>
+          )}
+
+          {cuenta.esDueno && equipo && (planPro || restosEnBasico) && (
+            <>
+              <h3 className="acct-sub">Mi equipo</h3>
+              {planPro ? (
+                <p className="muted">
+                  Personas en tu equipo: <strong data-no-translate>{equipo.miembros}</strong>. El plan Pro permite hasta 3 personas, contando las invitaciones.
+                </p>
+              ) : (
+                <p className="notice">Tu plan Básico es para 1 persona: tu equipo no puede usar Studio hasta que pases a Pro.</p>
+              )}
+              {equipo.personas && equipo.personas.length > 0 && (
+                <ul className="acct-invitaciones">
+                  {equipo.personas.map((p) => (
+                    <li key={p.uid}>
+                      <span>
+                        {p.email ? <span data-no-translate>{p.email}</span> : <span>Persona sin correo</span>}
+                        {p.esDueno && (
+                          <>
+                            {" · "}
+                            <span>Dueño</span>
+                          </>
+                        )}
+                      </span>
+                      {!p.esDueno && (
+                        <button
+                          className="btn ghost small"
+                          disabled={ocupado}
+                          onClick={() => (setErrorQuitar(""), setQuitando(p))}
+                        >
+                          Quitar
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {planPro && (
+                <form className="acct-invitar" onSubmit={invitar}>
+                  <input
+                    type="email"
+                    required
+                    value={invitado}
+                    onChange={(e) => setInvitado(e.target.value)}
+                    placeholder="correo@ejemplo.com"
+                    aria-label="Correo de la persona"
+                  />
+                  <button className="btn small" type="submit" disabled={ocupado || !invitado.trim()}>
+                    Invitar
+                  </button>
+                </form>
+              )}
+              {equipo.invitaciones && equipo.invitaciones.length > 0 && (
+                <ul className="acct-invitaciones">
+                  {equipo.invitaciones.map((e) => (
+                    <li key={e}>
+                      <span data-no-translate>{e}</span>
+                      <span className="muted">Pendiente</span>
+                      <button className="btn ghost small" disabled={ocupado} onClick={() => cancelar(e)}>
+                        Cancelar
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+          {error && <div className="error">{error}</div>}
+          {aviso && <div className="ok">{aviso}</div>}
+
+          <div className="acct-acciones acct-pie">
+            {cuenta.esAdmin && (
+              <a className="btn ghost small" href="/admin">
+                <Shield size={15} aria-hidden /> Panel de administrador
+              </a>
+            )}
+            <button className="btn ghost small" onClick={() => fb.salir()}>
+              <LogOut size={15} aria-hidden /> Cerrar sesión
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+      {quitando && (
+        <Confirmar
+          etiqueta="Quitar del equipo"
+          boton={ocupado ? "Quitando…" : "Sí, quitar"}
+          ocupado={ocupado}
+          error={errorQuitar}
+          onSi={() => void quitar(quitando)}
+          onNo={() => (setQuitando(null), setErrorQuitar(""))}
+        >
+          ¿Quitar a{" "}
+          {quitando.email ? <span data-no-translate>{quitando.email}</span> : <span>esta persona</span>} del equipo? Ya no
+          podrá usar Studio con tu cuenta.
+        </Confirmar>
+      )}
+    </>
   );
 }

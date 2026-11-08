@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mensajeAuth } from "./auth-mensajes";
+import { mensajeAuth, mensajeReenvio, REENVIO_OK } from "./auth-mensajes";
 
 const err = (code: string) => Object.assign(new Error("x"), { code });
 
@@ -21,4 +21,11 @@ test("cerrar la ventana de Google no es un error", () => {
 test("cualquier otro error da un mensaje general", () => {
   assert.equal(mensajeAuth(err("auth/algo-raro")), "No se pudo iniciar sesión. Intenta de nuevo.");
   assert.equal(mensajeAuth(null), "No se pudo iniciar sesión. Intenta de nuevo.");
+});
+
+test("reenviar el correo de confirmación: mensajes en español", () => {
+  assert.equal(mensajeReenvio(err("auth/too-many-requests")), "Espera unos minutos antes de pedir otro correo.");
+  assert.equal(mensajeReenvio(err("auth/network-request-failed")), "Revisa tu conexión a internet.");
+  assert.equal(mensajeReenvio(err("auth/algo-raro")), "No pudimos enviar el correo. Intenta de nuevo.");
+  assert.equal(REENVIO_OK, "Te enviamos otro enlace. Revisa también Spam.");
 });

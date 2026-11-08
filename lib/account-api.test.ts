@@ -158,7 +158,7 @@ test("quitarMiembro: dueño quita a otro; no a sí mismo; miembro no puede", asy
     ok: false, status: 403, error: "Solo el dueño del negocio puede quitar personas.",
   });
   assert.deepEqual(await quitarMiembro("u1", "u1", { store, now: AHORA }), {
-    ok: false, status: 400, error: "No puedes quitarte a ti mismo.",
+    ok: false, status: 400, error: "No puedes quitarte a ti mismo del equipo.",
   });
   assert.ok((await quitarMiembro("u1", "u2", { store, now: AHORA })).ok);
   assert.deepEqual((await store.getNegocio("n1"))?.miembros, ["u1"]);
@@ -201,7 +201,14 @@ test("obtenerCuenta del dueño: plan, herramientas, límites, uso y equipo", asy
   // Sin pedirlo, no se leen las invitaciones (cuida las lecturas de Firestore)
   assert.deepEqual(r.equipo, { miembros: 2 });
   const conEquipo = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA }, { equipo: true });
-  assert.deepEqual(conEquipo.equipo, { miembros: 2, invitaciones: ["a@x.com"] });
+  assert.deepEqual(conEquipo.equipo, {
+    miembros: 2,
+    invitaciones: ["a@x.com"],
+    personas: [
+      { uid: "u1", email: "dueno@ejemplo.com", esDueno: true },
+      { uid: "u2", email: "u2@x.com", esDueno: false },
+    ],
+  });
   const m = await cuenta("u2", "u2@x.com", true, { store, now: AHORA }, { equipo: true });
   assert.equal(m.esDueno, false);
   assert.equal(m.equipo, undefined);
@@ -234,9 +241,42 @@ test("invitado sin correo confirmado: rechazado con VERIFICAR_CORREO y no se cre
   assert.ok(await store.getInvitacion("ana@gmail.com"));
 });
 
-test("sin invitación, un correo sin confirmar sí puede crear su negocio", async () => {
+/* ---------- Correo confirmado antes de la prueba gratis ---------- */
+
+test("sin invitación, un correo sin confirmar no crea negocio: VERIFICAR_CORREO", async () => {
   const store = memoryStore();
-  assert.ok((await crearCuenta("u9", "a@x.com", false, "Mío", { store, now: AHORA })).ok);
+  const r = await crearCuenta("u9", "a@x.com", false, "Mío", { store, now: AHORA });
+  assert.deepEqual(r, {
+    ok: false,
+    status: 403,
+    error: "Confirma tu correo para empezar tu prueba gratis. Te enviamos un enlace a tu correo.",
+    codigo: "VERIFICAR_CORREO",
+  });
+  assert.equal(await store.getUsuario("u9"), null);
+  assert.equal(store.cantidadNegocios(), 0);
+});
+
+test("sin confirmar y con nombre inválido: primero se pide el nombre (400)", async () => {
+  const r = await crearCuenta("u9", "a@x.com", false, "  ", { store: memoryStore(), now: AHORA });
+  assert.deepEqual(r, { ok: false, status: 400, error: "Escribe el nombre de tu negocio (máximo 80 caracteres)." });
+});
+
+test("después de confirmar el correo, la prueba empieza desde esa llamada", async () => {
+  const store = memoryStore();
+  await crearCuenta("u9", "a@x.com", false, "Mío", { store, now: AHORA });
+  const despues = AHORA + 7 * MIN;
+  const r = await crearCuenta("u9", "a@x.com", true, "Mío", { store, now: despues });
+  assert.ok(r.ok);
+  const cfg = await store.getConfig();
+  const n = await store.getNegocio((await store.getUsuario("u9"))!.negocioId);
+  assert.equal(n?.estado, "prueba");
+  assert.equal(n?.pruebaHasta, despues + cfg.pruebaMinutos * 60000);
+});
+
+test("quien ya tiene cuenta entra aunque su correo no esté confirmado", async () => {
+  const store = memoryStore({ usuarios: [dueno], negocios: [negocio()] });
+  const r = await crearCuenta("u1", "dueno@ejemplo.com", false, "", { store, now: AHORA });
+  assert.deepEqual(r, { ok: true, usuario: dueno });
 });
 
 test("cancelarInvitacion: dueño libera el lugar; miembro no; otra invitación ajena da 404", async () => {
@@ -385,4 +425,56 @@ test("obtenerCuenta: un negocio pausado no ofrece paquetes", async () => {
   const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA });
   assert.equal(r.efectivo?.estado, "pausado");
   assert.deepEqual(r.paquetes, []);
+});
+
+/* ---------- Lista del equipo ---------- */
+
+test("obtenerCuenta con equipo: personas con el dueño primero y el resto por correo", async () => {
+  const store = memoryStore({
+    usuarios: [
+      dueno,
+      { ...miembro("u2"), email: "zeta@x.com" },
+      { ...miembro("u3"), email: "ana@x.com" },
+    ],
+    negocios: [negocio({ miembros: ["u2", "u1", "u3"] })],
+  });
+  const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA }, { equipo: true });
+  assert.deepEqual(r.equipo?.personas, [
+    { uid: "u1", email: "dueno@ejemplo.com", esDueno: true },
+    { uid: "u3", email: "ana@x.com", esDueno: false },
+    { uid: "u2", email: "zeta@x.com", esDueno: false },
+  ]);
+});
+
+test("obtenerCuenta con equipo: un miembro sin usuario sale con correo vacío", async () => {
+  const store = memoryStore({ usuarios: [dueno], negocios: [negocio({ miembros: ["u1", "fantasma"] })] });
+  const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA }, { equipo: true });
+  assert.deepEqual(r.equipo?.personas, [
+    { uid: "u1", email: "dueno@ejemplo.com", esDueno: true },
+    { uid: "fantasma", email: "", esDueno: false },
+  ]);
+});
+
+test("obtenerCuenta sin equipo=1 no trae la lista de personas", async () => {
+  const store = memoryStore({ usuarios: [dueno, miembro("u2")], negocios: [negocio({ miembros: ["u1", "u2"] })] });
+  const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA });
+  assert.equal(r.equipo?.personas, undefined);
+});
+
+test("obtenerCuenta con equipo en Básico: el dueño igual ve personas e invitaciones que quedaron", async () => {
+  const store = memoryStore({
+    usuarios: [dueno, miembro("u2")],
+    negocios: [negocio({ plan: "basico", miembros: ["u1", "u2"] })],
+  });
+  await store.crearInvitacion("a@x.com", { negocioId: "n1", invitadoPor: "u1", creado: AHORA });
+  const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA }, { equipo: true });
+  assert.equal(r.efectivo.plan, "basico");
+  assert.deepEqual(r.equipo, {
+    miembros: 2,
+    invitaciones: ["a@x.com"],
+    personas: [
+      { uid: "u1", email: "dueno@ejemplo.com", esDueno: true },
+      { uid: "u2", email: "u2@x.com", esDueno: false },
+    ],
+  });
 });
