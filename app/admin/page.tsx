@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CUENTAS_ON, useCuenta } from "../account-context";
 import type { FilaNegocio } from "@/lib/admin-api";
-import type { PagoManual } from "@/lib/account-store";
-import { diaChicago } from "@/lib/plans";
+import type { MovimientoPaquete, PagoManual } from "@/lib/account-store";
+import { diaChicago, type Contador, type PaqueteId, type Saldo } from "@/lib/plans";
 
 // Panel mínimo del administrador: activar planes pagados a mano, pausar y reactivar negocios.
 // El permiso se vuelve a revisar en el servidor en cada /api/admin/*; aquí solo se oculta la pantalla.
@@ -30,6 +30,19 @@ const venceTexto = (f: FilaNegocio) =>
   f.negocio.origen === "manual" && f.negocio.pagadoHasta !== undefined ? fechaCorta(f.negocio.pagadoHasta) : "—";
 const usoTexto = (u: FilaNegocio["usoMes"]) =>
   `${u.textos} textos · ${u.imagenes} imágenes · ${u.voces} voces · ${u.subtitulos} subtítulos`;
+
+const CONTADORES: [Contador, string][] = [
+  ["textos", "textos"],
+  ["imagenes", "imágenes"],
+  ["voces", "voces"],
+  ["subtitulos", "subtítulos"],
+];
+const PAQUETES: Record<PaqueteId, string> = { creativo: "Creativo", voz: "Voz" };
+// «500 textos · 150 imágenes» (solo lo que tiene); con signo para el historial: «+500 textos, +150 imágenes»
+const saldoTexto = (s: Saldo, signo = "") => {
+  const partes = CONTADORES.filter(([c]) => (s[c] ?? 0) > 0).map(([c, n]) => `${signo}${s[c]} ${n}`);
+  return partes.length ? partes.join(signo ? ", " : " · ") : "—";
+};
 
 export default function PaginaAdmin() {
   if (!CUENTAS_ON) {
@@ -121,7 +134,7 @@ function Lista() {
         <>
           <div className="adm-cab" aria-hidden>
             <span>Negocio</span><span>Dueño</span><span>Plan</span><span>Estado</span>
-            <span>Origen</span><span>Vence</span><span>Uso de hoy</span><span />
+            <span>Origen</span><span>Vence</span><span>Uso del mes</span><span>Paquetes</span><span />
           </div>
           {visibles.map((f) => (
             <Fila key={f.negocio.id} fila={f} onCambio={cargar} />
@@ -167,7 +180,7 @@ function PrepararStripe() {
 
 function Fila({ fila, onCambio }: { fila: FilaNegocio; onCambio: () => Promise<void> }) {
   const { negocio, efectivo } = fila;
-  const [abierto, setAbierto] = useState<"" | "activar" | "historial">("");
+  const [abierto, setAbierto] = useState<"" | "activar" | "paquete" | "quitar" | "historial">("");
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState("");
 
@@ -188,7 +201,7 @@ function Fila({ fila, onCambio }: { fila: FilaNegocio; onCambio: () => Promise<v
     return true;
   }
 
-  const alternar = (que: "activar" | "historial") => setAbierto(abierto === que ? "" : que);
+  const alternar = (que: Exclude<typeof abierto, "">) => setAbierto(abierto === que ? "" : que);
 
   return (
     <section className="adm-fila">
@@ -198,11 +211,14 @@ function Fila({ fila, onCambio }: { fila: FilaNegocio; onCambio: () => Promise<v
       <span data-et="Estado"><em className={`adm-estado ${efectivo.estado}`}>{ESTADOS[efectivo.estado]}</em></span>
       <span data-et="Origen">{origenTexto(fila)}</span>
       <span data-et="Vence">{venceTexto(fila)}</span>
-      <span data-et="Uso de hoy">{usoTexto(fila.usoMes)}</span>
+      <span data-et="Uso del mes">{usoTexto(fila.usoMes)}</span>
+      <span data-et="Paquetes">{saldoTexto(fila.saldo)}</span>
       <div className="adm-acciones">
         <button className="btn small" disabled={ocupado} onClick={() => alternar("activar")}>Activar plan</button>
         <button className="btn small ghost" disabled={ocupado} onClick={() => void accion({ accion: "pausar" })}>Pausar</button>
         <button className="btn small ghost" disabled={ocupado} onClick={() => void accion({ accion: "reactivar" })}>Reactivar</button>
+        <button className="btn small ghost" disabled={ocupado} onClick={() => alternar("paquete")}>Agregar paquete</button>
+        <button className="btn small ghost" disabled={ocupado} onClick={() => alternar("quitar")}>Quitar saldo</button>
         <button className="btn small ghost" disabled={ocupado} onClick={() => alternar("historial")}>Historial</button>
       </div>
       {negocio.origen === "stripe" && (
@@ -215,6 +231,25 @@ function Fila({ fila, onCambio }: { fila: FilaNegocio; onCambio: () => Promise<v
           onCancelar={() => setAbierto("")}
           onEnviar={async (c) => {
             if (await accion({ accion: "activar", ...c })) setAbierto("");
+          }}
+        />
+      )}
+      {abierto === "paquete" && (
+        <FormPaquete
+          ocupado={ocupado}
+          onCancelar={() => setAbierto("")}
+          onEnviar={async (c) => {
+            if (await accion({ accion: "paquete", ...c })) setAbierto("");
+          }}
+        />
+      )}
+      {abierto === "quitar" && (
+        <FormQuitar
+          saldo={fila.saldo}
+          ocupado={ocupado}
+          onCancelar={() => setAbierto("")}
+          onEnviar={async (c) => {
+            if (await accion({ accion: "quitar_saldo", ...c })) setAbierto("");
           }}
         />
       )}
@@ -283,15 +318,152 @@ function FormActivar({
   );
 }
 
+// Suma a mano un paquete pagado en efectivo, Zelle, Cash App u otro (queda en el Historial).
+function FormPaquete({
+  ocupado,
+  onCancelar,
+  onEnviar,
+}: {
+  ocupado: boolean;
+  onCancelar: () => void;
+  onEnviar: (c: Record<string, unknown>) => Promise<void>;
+}) {
+  const [paquete, setPaquete] = useState<PaqueteId>("creativo");
+  const [metodo, setMetodo] = useState<PagoManual["metodo"]>("efectivo");
+  const [nota, setNota] = useState("");
+
+  return (
+    <form
+      className="adm-form adm-ancho"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void onEnviar({ paquete, metodo, nota });
+      }}
+    >
+      <label>Paquete
+        <select value={paquete} onChange={(e) => setPaquete(e.target.value as PaqueteId)}>
+          <option value="creativo">Creativo (textos e imágenes)</option>
+          <option value="voz">Voz (voces y subtítulos)</option>
+        </select>
+      </label>
+      <label>Forma de pago
+        <select value={metodo} onChange={(e) => setMetodo(e.target.value as PagoManual["metodo"])}>
+          {Object.entries(METODOS).map(([k, v]) => (
+            <option key={k} value={k}>{v}</option>
+          ))}
+        </select>
+      </label>
+      <label className="adm-nota">Nota
+        <input type="text" maxLength={300} value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Opcional" />
+      </label>
+      <div className="adm-acciones">
+        <button className="btn small" type="submit" disabled={ocupado}>Agregar paquete</button>
+        <button className="btn small ghost" type="button" onClick={onCancelar}>Cancelar</button>
+      </div>
+    </form>
+  );
+}
+
+// Resta saldo de paquetes (reembolso o error). El servidor nunca lo deja por debajo de 0.
+function FormQuitar({
+  saldo,
+  ocupado,
+  onCancelar,
+  onEnviar,
+}: {
+  saldo: Saldo;
+  ocupado: boolean;
+  onCancelar: () => void;
+  onEnviar: (c: Record<string, unknown>) => Promise<void>;
+}) {
+  const [cantidades, setCantidades] = useState<Record<Contador, string>>({ textos: "", imagenes: "", voces: "", subtitulos: "" });
+  const [nota, setNota] = useState("");
+  const [error, setError] = useState("");
+
+  return (
+    <form
+      className="adm-form adm-ancho"
+      onSubmit={(e) => {
+        e.preventDefault();
+        // Solo se mandan los contadores con un número mayor que 0
+        const pedido: Saldo = {};
+        for (const [c] of CONTADORES) {
+          const v = cantidades[c].trim();
+          if (v === "") continue;
+          const n = Number(v);
+          if (!Number.isInteger(n) || n < 0) {
+            setError("Escribe números enteros (0 o más).");
+            return;
+          }
+          if (n > 0) pedido[c] = n;
+        }
+        if (Object.keys(pedido).length === 0) {
+          setError("Escribe cuánto quitar en al menos un contador.");
+          return;
+        }
+        setError("");
+        void onEnviar({ cantidades: pedido, nota });
+      }}
+    >
+      <p className="muted adm-ancho">Saldo actual: {saldoTexto(saldo)}</p>
+      {CONTADORES.map(([c, nombre]) => (
+        <label key={c}>Quitar {nombre}
+          <input
+            type="number"
+            inputMode="numeric"
+            min="0"
+            step="1"
+            value={cantidades[c]}
+            onChange={(e) => setCantidades({ ...cantidades, [c]: e.target.value })}
+            placeholder="0"
+          />
+        </label>
+      ))}
+      <label className="adm-nota">Nota
+        <input type="text" maxLength={300} value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Opcional (p. ej. reembolso)" />
+      </label>
+      {error && <p className="adm-error adm-ancho" role="alert">{error}</p>}
+      <div className="adm-acciones">
+        <button className="btn small" type="submit" disabled={ocupado}>Quitar saldo</button>
+        <button className="btn small ghost" type="button" onClick={onCancelar}>Cancelar</button>
+      </div>
+    </form>
+  );
+}
+
+// Pagos a mano y movimientos de paquetes, juntos y del más nuevo al más viejo.
+type Renglon = { id: string; fecha: number; texto: string; por: string };
+const renglonPago = (p: PagoManual): Renglon => ({
+  id: `pago-${p.id}`,
+  fecha: p.fecha,
+  texto: `${fechaCorta(p.fecha)} · ${PLANES[p.plan]} · $${p.monto} · ${METODOS[p.metodo]} · hasta ${fechaCorta(p.hasta)}${p.nota ? ` · ${p.nota}` : ""}`,
+  por: p.registradoPor,
+});
+const renglonMovimiento = (m: MovimientoPaquete): Renglon => {
+  const que =
+    m.tipo === "agregar"
+      ? `Paquete ${m.paquete ? PAQUETES[m.paquete] : ""} agregado · ${saldoTexto(m.cantidades, "+")}`
+      : `Saldo quitado · ${saldoTexto(m.cantidades, "−")}`;
+  return {
+    id: `mov-${m.id}`,
+    fecha: m.fecha,
+    texto: `${fechaCorta(m.fecha)} · ${que}${m.metodo ? ` · ${METODOS[m.metodo]}` : ""}${m.nota ? ` · ${m.nota}` : ""}`,
+    por: m.registradoPor,
+  };
+};
+
 function Historial({ negocioId }: { negocioId: string }) {
-  const [pagos, setPagos] = useState<PagoManual[] | null>(null);
+  const [renglones, setRenglones] = useState<Renglon[] | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
     let vivo = true;
     void pedir(`/api/admin/negocios/${encodeURIComponent(negocioId)}`, { cache: "no-store" }).then((r) => {
       if (!vivo) return;
-      if (r.ok) setPagos(r.datos.pagos as PagoManual[]);
-      else setError(String(r.datos.error ?? "No pudimos cargar el historial."));
+      if (r.ok) {
+        const pagos = ((r.datos.pagos as PagoManual[] | undefined) ?? []).map(renglonPago);
+        const movimientos = ((r.datos.movimientos as MovimientoPaquete[] | undefined) ?? []).map(renglonMovimiento);
+        setRenglones([...pagos, ...movimientos].sort((a, b) => b.fecha - a.fecha));
+      } else setError(String(r.datos.error ?? "No pudimos cargar el historial."));
     });
     return () => {
       vivo = false;
@@ -301,14 +473,13 @@ function Historial({ negocioId }: { negocioId: string }) {
   return (
     <div className="adm-historial adm-ancho">
       {error && <p className="adm-error" role="alert">{error}</p>}
-      {!pagos && !error && <p>Cargando historial…</p>}
-      {pagos && pagos.length === 0 && <p>Todavía no hay pagos a mano.</p>}
-      {pagos && pagos.length > 0 && (
+      {!renglones && !error && <p>Cargando historial…</p>}
+      {renglones && renglones.length === 0 && <p>Todavía no hay pagos a mano ni paquetes.</p>}
+      {renglones && renglones.length > 0 && (
         <ul>
-          {pagos.map((p) => (
-            <li key={p.id}>
-              {fechaCorta(p.fecha)} · {PLANES[p.plan]} · ${p.monto} · {METODOS[p.metodo]} · hasta {fechaCorta(p.hasta)}
-              {p.nota ? ` · ${p.nota}` : ""} <small>({p.registradoPor})</small>
+          {renglones.map((x) => (
+            <li key={x.id}>
+              {x.texto} <small>({x.por})</small>
             </li>
           ))}
         </ul>

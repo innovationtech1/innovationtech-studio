@@ -769,6 +769,8 @@ h3.step { font-size: 18px; margin: 28px 0 8px; }
 .acct-aviso svg { color: var(--signal); flex: none; }
 .acct-aviso.pausa { background: #2a1a10; border-bottom-color: var(--amber); }
 .acct-aviso.pausa svg { color: var(--amber); }
+.acct-aviso.uso { background: var(--deck); border-bottom-color: var(--line); }
+.acct-aviso.uso > span { white-space: normal; line-height: 1.25; min-width: 0; }
 .acct-aviso .btn { margin-top: 0; min-height: 32px; white-space: nowrap; }
 body.acct-con-aviso .app { padding-top: var(--acct-aviso); }
 body.acct-con-aviso .rail { top: var(--acct-aviso); }
@@ -799,6 +801,8 @@ body.acct-con-aviso .rail { top: var(--acct-aviso); }
 .acct-uso { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .acct-uso li { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-size: 14px; }
 .acct-uso .bar { grid-column: 1 / -1; margin-top: 2px; }
+.acct-uso .acct-saldo { grid-column: 1 / -1; font-size: 13px; color: var(--go); }
+.acct-paquetes .btn { min-height: 46px; height: auto; padding: 10px 14px; text-align: center; white-space: normal; }
 .acct-invitar { display: flex; gap: 8px; align-items: center; }
 .acct-invitar .btn { margin-top: 0; min-height: 46px; }
 .acct-invitaciones { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
@@ -828,7 +832,7 @@ body.acct-con-aviso .rail { top: var(--acct-aviso); }
 .adm-ok { color: #8be0a4; margin: 8px 0; font-size: 14px; }
 .adm-barra .btn { margin-top: 0; }
 .adm-error { color: #ff9aa6; margin: 8px 0; font-size: 14px; }
-.adm-fila, .adm-cab { display: grid; gap: 8px 12px; align-items: center; grid-template-columns: 1.3fr 1.5fr 0.7fr 0.8fr 0.7fr 1fr 2fr; }
+.adm-fila, .adm-cab { display: grid; gap: 8px 12px; align-items: center; grid-template-columns: 1.3fr 1.5fr 0.7fr 0.8fr 0.7fr 1fr 2fr 1.3fr; }
 .adm-cab { padding: 0 14px 6px; color: var(--fog); font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.04em; }
 .adm-cab span:last-child { display: none; }
 .adm-fila { background: var(--deck); border: 1px solid var(--line); border-radius: var(--radius-inner); padding: 12px 14px; margin-bottom: 10px; font-size: 14px; }
