@@ -1,7 +1,18 @@
 import "server-only";
-import { firestoreStore, type AccountStore, type PagoManual } from "./account-store";
+import { firestoreStore, type AccountStore, type MovimientoPaquete, type PagoManual } from "./account-store";
 import { esCorreoAdmin, type Falla } from "./account-api";
-import { diaChicago, estadoEfectivo, instanteChicago, type Contador, type Efectivo, type Negocio } from "./plans";
+import {
+  estadoEfectivo,
+  esPaquete,
+  instanteChicago,
+  mesChicago,
+  sumarSaldo,
+  type Contador,
+  type Efectivo,
+  type Negocio,
+  type PaqueteId,
+  type Saldo,
+} from "./plans";
 import { SUSCRIPCION_VIVA } from "./stripe-events";
 import { stripeModoLive } from "./stripe-server";
 
@@ -22,7 +33,8 @@ export type FilaNegocio = {
   negocio: Negocio;
   efectivo: Efectivo;
   dueno: string; // correo del dueño ("" si no se encuentra)
-  usoHoy: Record<Contador, number>;
+  usoMes: Record<Contador, number>;
+  saldo: Saldo;
 };
 
 export type DatosActivar = {
@@ -54,12 +66,15 @@ export async function listar(
   if (!esCorreoAdmin(adminEmail, emailVerified)) return NO_ADMIN();
   const store = deps.store ?? firestoreStore();
   const ahora = deps.now ?? Date.now();
-  const dia = diaChicago(ahora);
+  const mes = mesChicago(ahora);
   const negocios = await store.listarNegocios();
   const filas = await Promise.all(
     negocios.map(async (negocio): Promise<FilaNegocio> => {
-      const [dueno, usoHoy] = await Promise.all([store.getUsuario(negocio.duenoUid), store.getUso(negocio.id, dia)]);
-      return { negocio, efectivo: estadoEfectivo(negocio, ahora, modo(deps)), dueno: dueno?.email ?? "", usoHoy };
+      const [dueno, usoMes] = await Promise.all([store.getUsuario(negocio.duenoUid), store.getUso(negocio.id, mes)]);
+      return { negocio, efectivo: estadoEfectivo(negocio, ahora, modo(deps)), dueno: dueno?.email ?? "",
+        usoMes,
+        saldo: { ...negocio.paquetes },
+      };
     }),
   );
   return { ok: true, negocios: filas };
@@ -70,7 +85,7 @@ export async function obtenerNegocio(
   emailVerified: boolean,
   negocioId: string,
   deps: DepsAdmin = {},
-): Promise<{ ok: true; negocio: Negocio; efectivo: Efectivo; pagos: PagoManual[] } | Falla> {
+): Promise<{ ok: true; negocio: Negocio; efectivo: Efectivo; pagos: PagoManual[]; movimientos: MovimientoPaquete[] } | Falla> {
   if (!esCorreoAdmin(adminEmail, emailVerified)) return NO_ADMIN();
   const store = deps.store ?? firestoreStore();
   const ahora = deps.now ?? Date.now();
@@ -81,6 +96,7 @@ export async function obtenerNegocio(
     negocio,
     efectivo: estadoEfectivo(negocio, ahora, modo(deps)),
     pagos: await store.listarPagosManuales(negocioId),
+    movimientos: await store.listarMovimientos(negocioId),
   };
 }
 
@@ -172,5 +188,96 @@ export async function reactivar(
     return falla(400, "Este negocio no tiene un plan pagado.");
   }
   await store.actualizarNegocio(negocioId, { estado: "activo", actualizado: ahora });
+  return { ok: true };
+}
+
+const CONTADORES: Contador[] = ["textos", "imagenes", "voces", "subtitulos"];
+const notaLimpia = (n: unknown) => (typeof n === "string" ? n.trim().slice(0, 300) : "");
+
+// Suma a mano el contenido de un paquete al saldo (el admin decide, sin importar el plan del negocio).
+export async function agregarPaquete(
+  adminEmail: string,
+  emailVerified: boolean,
+  negocioId: string,
+  d: { paquete: PaqueteId; metodo: PagoManual["metodo"]; nota?: string },
+  deps: DepsAdmin = {},
+): Promise<{ ok: true } | Falla> {
+  if (!esCorreoAdmin(adminEmail, emailVerified)) return NO_ADMIN();
+  const store = deps.store ?? firestoreStore();
+  const ahora = deps.now ?? Date.now();
+
+  if (!esPaquete(d.paquete)) return falla(400, "Elige un paquete.");
+  if (!METODOS.includes(d.metodo)) return falla(400, "Método de pago no válido.");
+
+  const contenido = (await store.getConfig()).paquetes[d.paquete].contenido;
+  const r = await store.modificarNegocio(negocioId, (n) => ({
+    paquetes: sumarSaldo(n.paquetes, contenido, 1),
+    actualizado: ahora,
+  }));
+  if (r === "no_existe") return NO_NEGOCIO();
+
+  const nota = notaLimpia(d.nota);
+  await store.registrarMovimiento({
+    id: crypto.randomUUID(),
+    negocioId,
+    tipo: "agregar",
+    paquete: d.paquete,
+    cantidades: { ...contenido },
+    metodo: d.metodo,
+    ...(nota ? { nota } : {}),
+    registradoPor: adminEmail.trim().toLowerCase(),
+    fecha: ahora,
+  });
+  return { ok: true };
+}
+
+// Quita saldo a mano (por un error o un reembolso). Se quita como mucho lo que hay.
+export async function quitarSaldo(
+  adminEmail: string,
+  emailVerified: boolean,
+  negocioId: string,
+  d: { cantidades: Saldo; nota?: string },
+  deps: DepsAdmin = {},
+): Promise<{ ok: true } | Falla> {
+  if (!esCorreoAdmin(adminEmail, emailVerified)) return NO_ADMIN();
+  const store = deps.store ?? firestoreStore();
+  const ahora = deps.now ?? Date.now();
+
+  const c = d.cantidades as unknown;
+  if (typeof c !== "object" || c === null || Array.isArray(c)) return falla(400, "Cantidades no válidas.");
+  const pedido: Saldo = {};
+  for (const [k, v] of Object.entries(c)) {
+    if (!CONTADORES.includes(k as Contador) || typeof v !== "number" || !Number.isInteger(v) || v < 0) {
+      return falla(400, "Cantidades no válidas.");
+    }
+    pedido[k as Contador] = v;
+  }
+  if (!Object.values(pedido).some((v) => v > 0)) return falla(400, "Cantidades no válidas.");
+
+  const quitado: Saldo = {};
+  const r = await store.modificarNegocio(negocioId, (n) => {
+    // Se recalcula dentro de la transacción: si la hace reintentar, no se acumula
+    for (const k of Object.keys(quitado) as Contador[]) delete quitado[k];
+    for (const [k, v] of Object.entries(pedido) as [Contador, number][]) {
+      const real = Math.min(v, n.paquetes?.[k] ?? 0);
+      if (real > 0) quitado[k] = real;
+    }
+    if (Object.keys(quitado).length === 0) return null;
+    return { paquetes: sumarSaldo(n.paquetes, quitado, -1), actualizado: ahora };
+  });
+  if (r === "no_existe") return NO_NEGOCIO();
+
+  if (Object.keys(quitado).length > 0) {
+    const nota = notaLimpia(d.nota);
+    await store.registrarMovimiento({
+      id: crypto.randomUUID(),
+      negocioId,
+      tipo: "quitar",
+      cantidades: quitado,
+      ...(nota ? { nota } : {}),
+      registradoPor: adminEmail.trim().toLowerCase(),
+      fecha: ahora,
+    });
+  }
   return { ok: true };
 }

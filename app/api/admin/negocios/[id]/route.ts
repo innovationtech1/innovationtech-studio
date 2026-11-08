@@ -1,4 +1,5 @@
-import { activarManual, finDelDiaChicago, obtenerNegocio, pausar, reactivar } from "@/lib/admin-api";
+import { activarManual, agregarPaquete, finDelDiaChicago, obtenerNegocio, pausar, quitarSaldo, reactivar } from "@/lib/admin-api";
+import type { PaqueteId, Saldo } from "@/lib/plans";
 import { cuerpoJson, errorJson, json, sesionDe, sinSesion } from "@/lib/cuenta-ruta";
 
 export const dynamic = "force-dynamic";
@@ -11,10 +12,11 @@ export async function GET(req: Request, ctx: Ctx) {
   if (!s) return sinSesion();
   const { id } = await ctx.params;
   const r = await obtenerNegocio(s.email, s.emailVerified, id);
-  return r.ok ? json({ negocio: r.negocio, efectivo: r.efectivo, pagos: r.pagos }) : errorJson(r);
+  return r.ok ? json({ negocio: r.negocio, efectivo: r.efectivo, pagos: r.pagos, movimientos: r.movimientos }) : errorJson(r);
 }
 
 // Acciones: { accion: "activar", plan, fecha | hasta, monto, metodo, nota? } | { accion: "pausar" } | { accion: "reactivar" }
+//   | { accion: "paquete", paquete, metodo, nota? } | { accion: "quitar_saldo", cantidades, nota? }
 export async function POST(req: Request, ctx: Ctx) {
   const s = await sesionDe(req);
   if (!s) return sinSesion();
@@ -35,6 +37,17 @@ export async function POST(req: Request, ctx: Ctx) {
     r = await pausar(s.email, s.emailVerified, id);
   } else if (b.accion === "reactivar") {
     r = await reactivar(s.email, s.emailVerified, id);
+  } else if (b.accion === "paquete") {
+    r = await agregarPaquete(s.email, s.emailVerified, id, {
+      paquete: b.paquete as PaqueteId,
+      metodo: b.metodo as "efectivo",
+      nota: typeof b.nota === "string" ? b.nota : undefined,
+    });
+  } else if (b.accion === "quitar_saldo") {
+    r = await quitarSaldo(s.email, s.emailVerified, id, {
+      cantidades: b.cantidades as Saldo,
+      nota: typeof b.nota === "string" ? b.nota : undefined,
+    });
   } else {
     return json({ error: "Acción no válida." }, 400);
   }

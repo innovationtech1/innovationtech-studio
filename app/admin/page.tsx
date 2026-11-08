@@ -28,7 +28,7 @@ function dentroDeUnMes(): string {
 const origenTexto = (f: FilaNegocio) => (f.negocio.origen === "stripe" ? "Tarjeta" : f.negocio.origen === "manual" ? "A mano" : "—");
 const venceTexto = (f: FilaNegocio) =>
   f.negocio.origen === "manual" && f.negocio.pagadoHasta !== undefined ? fechaCorta(f.negocio.pagadoHasta) : "—";
-const usoTexto = (u: FilaNegocio["usoHoy"]) =>
+const usoTexto = (u: FilaNegocio["usoMes"]) =>
   `${u.textos} textos · ${u.imagenes} imágenes · ${u.voces} voces · ${u.subtitulos} subtítulos`;
 
 export default function PaginaAdmin() {
@@ -197,7 +197,7 @@ function Fila({ fila, onCambio }: { fila: FilaNegocio; onCambio: () => Promise<v
       <span data-et="Estado"><em className={`adm-estado ${efectivo.estado}`}>{ESTADOS[efectivo.estado]}</em></span>
       <span data-et="Origen">{origenTexto(fila)}</span>
       <span data-et="Vence">{venceTexto(fila)}</span>
-      <span data-et="Uso de hoy">{usoTexto(fila.usoHoy)}</span>
+      <span data-et="Uso de hoy">{usoTexto(fila.usoMes)}</span>
       <div className="adm-acciones">
         <button className="btn small" disabled={ocupado} onClick={() => alternar("activar")}>Activar plan</button>
         <button className="btn small ghost" disabled={ocupado} onClick={() => void accion({ accion: "pausar" })}>Pausar</button>

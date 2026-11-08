@@ -2,12 +2,15 @@ import "server-only";
 import { firestoreStore, type AccountStore, type Usuario } from "./account-store";
 import { stripeModoLive } from "./stripe-server";
 import {
-  diaChicago,
   estadoEfectivo,
+  inicioMesSiguienteChicago,
+  mesChicago,
   type Contador,
   type Efectivo,
   type Herramienta,
   type Negocio,
+  type PaqueteId,
+  type Saldo,
 } from "./plans";
 
 // Lo que hacen las rutas /api/cuenta. Son funciones sin Request/Response para poder probarlas;
@@ -41,7 +44,10 @@ export type EstadoCuenta =
       efectivo: Efectivo;
       herramientas: Herramienta[];
       limites: Record<Contador, number>;
-      uso: Record<Contador, number>;
+      uso: Record<Contador, number>; // del mes
+      saldo: Saldo; // paquetes comprados (no vencen)
+      reinicio: number; // ms: cuando los contadores del mes vuelven a cero
+      paquetes: { id: PaqueteId; monto: number; contenido: Saldo }[]; // los que el plan puede comprar
       esAdmin: boolean;
       esDueno: boolean;
       precios: { basico: number; pro: number };
@@ -68,7 +74,7 @@ export async function obtenerCuenta(
   const cfg = await store.getConfig();
   const efectivo = estadoEfectivo(negocio, ahora, modo(deps));
   const plan = efectivo.plan;
-  const uso = await store.getUso(negocio.id, diaChicago(ahora));
+  const uso = await store.getUso(negocio.id, mesChicago(ahora));
   const esDueno = negocio.duenoUid === uid;
 
   const cuenta: EstadoCuenta = {
@@ -78,6 +84,13 @@ export async function obtenerCuenta(
     herramientas: plan ? [...cfg.herramientas[plan]] : [],
     limites: plan ? { ...cfg.limitesMes[plan] } : { ...CEROS },
     uso,
+    saldo: { ...negocio.paquetes },
+    reinicio: inicioMesSiguienteChicago(ahora),
+    paquetes: plan === "basico" || plan === "pro"
+      ? (Object.entries(cfg.paquetes) as [PaqueteId, (typeof cfg.paquetes)[PaqueteId]][])
+          .filter(([, p]) => p.planes.includes(plan))
+          .map(([id, p]) => ({ id, monto: p.monto, contenido: { ...p.contenido } }))
+      : [],
     esAdmin,
     esDueno,
     precios: { basico: cfg.precios.basico.monto, pro: cfg.precios.pro.monto },
