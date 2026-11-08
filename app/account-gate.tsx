@@ -168,7 +168,7 @@ export default function AccountGate({ children }: { children: React.ReactNode })
     };
   }, [sesion, refrescar]);
 
-  // Al abrir «Mi cuenta» se lee la cuenta con las invitaciones del equipo
+  // Al abrir «Mi cuenta» (dueño con plan) se lee la cuenta con las personas e invitaciones del equipo
   useEffect(() => {
     if (modal === "cuenta" && conEquipo.current) void refrescar();
   }, [modal, refrescar]);
@@ -285,7 +285,8 @@ export default function AccountGate({ children }: { children: React.ReactNode })
 
   let contenido: React.ReactNode;
   const conNegocio = cuenta && cuenta.usuario ? cuenta : null;
-  conEquipo.current = modal === "cuenta" && !!conNegocio?.esDueno && conNegocio.efectivo.plan === "pro";
+  // En Básico también: si quedaron personas o invitaciones de cuando era Pro, el dueño las puede quitar
+  conEquipo.current = modal === "cuenta" && !!conNegocio?.esDueno && conNegocio.efectivo.plan !== null;
 
   if (!fbConLimpieza || sesion === "cargando") {
     contenido = errorCarga ? <ErrorCarga mensaje={errorCarga} onReintentar={() => window.location.reload()} /> : <Cargando />;

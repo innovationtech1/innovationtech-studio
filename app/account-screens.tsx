@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { Check, LogOut, Mail, Shield, X } from "lucide-react";
 import type { CuentaConNegocio } from "./account-context";
-import { mensajeAuth } from "@/lib/auth-mensajes";
+import { mensajeAuth, mensajeReenvio, REENVIO_OK } from "@/lib/auth-mensajes";
 import { textoPaquete } from "@/lib/aviso-uso";
 import { confirmacionCambio, type DatosCambio } from "@/lib/confirmar-plan";
 import type { PaqueteId } from "@/lib/plans";
@@ -294,6 +294,7 @@ export function CrearNegocio({ fb, onListo }: { fb: FB; onListo: () => Promise<v
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState("");
   const [verificar, setVerificar] = useState(false);
+  const [reenvio, setReenvio] = useState<{ ok: boolean; texto: string } | null>(null);
 
   async function crear() {
     setOcupado(true);
@@ -307,16 +308,29 @@ export function CrearNegocio({ fb, onListo }: { fb: FB; onListo: () => Promise<v
     if (r.data.codigo === "VERIFICAR_CORREO") {
       // Primero tiene que confirmar su correo: para empezar su prueba gratis o para unirse al equipo
       // que lo invitó. El texto que se muestra es el del servidor (dice cuál de los dos casos es).
-      if (!verificar) await fb.enviarVerificacion().catch(() => {});
+      // No se manda otro correo solo: al crear la cuenta ya se mandó uno. Si no le llegó, usa «Reenviar correo».
       setVerificar(true);
     }
     setError(errorDe(r));
     setOcupado(false);
   }
 
+  async function reenviar() {
+    setOcupado(true);
+    setReenvio(null);
+    try {
+      await fb.enviarVerificacion();
+      setReenvio({ ok: true, texto: REENVIO_OK });
+    } catch (e) {
+      setReenvio({ ok: false, texto: mensajeReenvio(e) });
+    }
+    setOcupado(false);
+  }
+
   async function yaConfirme() {
     setOcupado(true);
     setError("");
+    setReenvio(null);
     try {
       await fb.recargarUsuario();
     } catch {
@@ -356,9 +370,17 @@ export function CrearNegocio({ fb, onListo }: { fb: FB; onListo: () => Promise<v
         </form>
         {error && <div className="error">{error}</div>}
         {verificar && (
-          <button className="btn ghost acct-ancho" disabled={ocupado} onClick={yaConfirme}>
-            <Check size={16} aria-hidden /> Ya confirmé mi correo
-          </button>
+          <>
+            <div className="acct-acciones col">
+              <button className="btn ghost" disabled={ocupado} onClick={yaConfirme}>
+                <Check size={16} aria-hidden /> Ya confirmé mi correo
+              </button>
+              <button className="btn ghost" disabled={ocupado} onClick={reenviar}>
+                <Mail size={16} aria-hidden /> Reenviar correo
+              </button>
+            </div>
+            {reenvio && <div className={reenvio.ok ? "ok" : "error"}>{reenvio.texto}</div>}
+          </>
         )}
         <div className="acct-links">
           <button className="acct-link" onClick={() => fb.salir()}>
@@ -574,6 +596,9 @@ export function MiCuenta({
   const [errorQuitar, setErrorQuitar] = useState("");
   const { negocio, efectivo, uso, limites, saldo, equipo } = cuenta;
   const planPro = efectivo.plan === "pro";
+  // En Básico, si quedaron personas o invitaciones de cuando era Pro, el dueño todavía puede quitarlas
+  const restosEnBasico =
+    efectivo.plan === "basico" && !!equipo && (equipo.miembros > 1 || (equipo.invitaciones?.length ?? 0) > 0);
 
   async function comprar(id: PaqueteId) {
     setComprando(id);
@@ -715,12 +740,16 @@ export function MiCuenta({
             </>
           )}
 
-          {cuenta.esDueno && equipo && planPro && (
+          {cuenta.esDueno && equipo && (planPro || restosEnBasico) && (
             <>
               <h3 className="acct-sub">Mi equipo</h3>
-              <p className="muted">
-                Personas en tu equipo: <strong data-no-translate>{equipo.miembros}</strong>. El plan Pro permite hasta 3 personas, contando las invitaciones.
-              </p>
+              {planPro ? (
+                <p className="muted">
+                  Personas en tu equipo: <strong data-no-translate>{equipo.miembros}</strong>. El plan Pro permite hasta 3 personas, contando las invitaciones.
+                </p>
+              ) : (
+                <p className="notice">Tu plan Básico es para 1 persona: tu equipo no puede usar Studio hasta que pases a Pro.</p>
+              )}
               {equipo.personas && equipo.personas.length > 0 && (
                 <ul className="acct-invitaciones">
                   {equipo.personas.map((p) => (
@@ -747,19 +776,21 @@ export function MiCuenta({
                   ))}
                 </ul>
               )}
-              <form className="acct-invitar" onSubmit={invitar}>
-                <input
-                  type="email"
-                  required
-                  value={invitado}
-                  onChange={(e) => setInvitado(e.target.value)}
-                  placeholder="correo@ejemplo.com"
-                  aria-label="Correo de la persona"
-                />
-                <button className="btn small" type="submit" disabled={ocupado || !invitado.trim()}>
-                  Invitar
-                </button>
-              </form>
+              {planPro && (
+                <form className="acct-invitar" onSubmit={invitar}>
+                  <input
+                    type="email"
+                    required
+                    value={invitado}
+                    onChange={(e) => setInvitado(e.target.value)}
+                    placeholder="correo@ejemplo.com"
+                    aria-label="Correo de la persona"
+                  />
+                  <button className="btn small" type="submit" disabled={ocupado || !invitado.trim()}>
+                    Invitar
+                  </button>
+                </form>
+              )}
               {equipo.invitaciones && equipo.invitaciones.length > 0 && (
                 <ul className="acct-invitaciones">
                   {equipo.invitaciones.map((e) => (

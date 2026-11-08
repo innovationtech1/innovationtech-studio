@@ -23,3 +23,14 @@ export function mensajeAuth(e: unknown): string {
   if (codigo in MENSAJES) return MENSAJES[codigo];
   return "No se pudo iniciar sesión. Intenta de nuevo.";
 }
+
+// «Reenviar correo» (confirmar el correo): aviso cuando se envió y mensajes de error propios,
+// porque los de inicio de sesión no aplican aquí.
+export const REENVIO_OK = "Te enviamos otro enlace. Revisa también Spam.";
+
+export function mensajeReenvio(e: unknown): string {
+  const codigo = e && typeof e === "object" && "code" in e ? String((e as { code: unknown }).code) : "";
+  if (codigo === "auth/too-many-requests") return "Espera unos minutos antes de pedir otro correo.";
+  if (codigo === "auth/network-request-failed") return MENSAJES[codigo];
+  return "No pudimos enviar el correo. Intenta de nuevo.";
+}

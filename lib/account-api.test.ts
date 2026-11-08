@@ -460,3 +460,21 @@ test("obtenerCuenta sin equipo=1 no trae la lista de personas", async () => {
   const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA });
   assert.equal(r.equipo?.personas, undefined);
 });
+
+test("obtenerCuenta con equipo en Básico: el dueño igual ve personas e invitaciones que quedaron", async () => {
+  const store = memoryStore({
+    usuarios: [dueno, miembro("u2")],
+    negocios: [negocio({ plan: "basico", miembros: ["u1", "u2"] })],
+  });
+  await store.crearInvitacion("a@x.com", { negocioId: "n1", invitadoPor: "u1", creado: AHORA });
+  const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA }, { equipo: true });
+  assert.equal(r.efectivo.plan, "basico");
+  assert.deepEqual(r.equipo, {
+    miembros: 2,
+    invitaciones: ["a@x.com"],
+    personas: [
+      { uid: "u1", email: "dueno@ejemplo.com", esDueno: true },
+      { uid: "u2", email: "u2@x.com", esDueno: false },
+    ],
+  });
+});
