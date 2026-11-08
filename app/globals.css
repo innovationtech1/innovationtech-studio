@@ -819,6 +819,9 @@ body.acct-con-aviso .rail { top: var(--acct-aviso); }
 /* ---------- Panel del administrador (/admin) ---------- */
 .adm { max-width: 1100px; margin: 0 auto; padding: max(20px, env(safe-area-inset-top)) 14px calc(48px + env(safe-area-inset-bottom)); }
 .adm h1 { font: 750 26px var(--display); letter-spacing: -0.03em; margin: 0 0 14px; }
+.adm-encabezado { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.adm-encabezado h1 { margin: 0; }
+.adm-encabezado .btn { margin-top: 0; }
 .adm-barra { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
 .adm-barra input { flex: 1; min-width: 160px; }
 .adm-barra p { flex-basis: 100%; margin: 0; overflow-wrap: anywhere; }

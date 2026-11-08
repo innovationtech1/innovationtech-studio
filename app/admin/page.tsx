@@ -98,7 +98,10 @@ function Lista() {
 
   return (
     <main className="adm">
-      <h1>Panel de administrador</h1>
+      <div className="adm-encabezado">
+        <h1>Panel de administrador</h1>
+        <a className="btn small ghost" href="/">← Volver a Studio</a>
+      </div>
       <div className="adm-barra">
         <input
           type="search"
