@@ -339,7 +339,7 @@ const INCLUYE_BASICO = [
   "Calendario de contenido",
   "Carrusel y todos los tamaños",
   "Música",
-  "60 mensajes y textos y 20 imágenes al día",
+  "1,000 mensajes y textos y 300 imágenes al mes",
 ];
 const INCLUYE_PRO = [
   "Todo lo de Básico",
@@ -347,7 +347,7 @@ const INCLUYE_PRO = [
   "Editor de video",
   "Voz en off y subtítulos",
   "Hasta 3 personas",
-  "200 mensajes y textos, 60 imágenes, 30 voces y 30 subtítulos al día",
+  "3,000 mensajes y textos, 1,000 imágenes, 250 voces y 250 subtítulos al mes",
 ];
 
 export function ElegirPlan({
@@ -581,10 +581,8 @@ export function MiCuenta({
                 <span>{nombre}</span>
                 {tope > 0 ? (
                   <>
-                    <span>
-                      Te quedan <span data-no-translate>{Math.max(0, tope - usado)}</span> de{" "}
-                      <span data-no-translate>{tope}</span> este mes
-                    </span>
+                    {/* Un solo texto, para que el traductor lo reconozca completo (lib/locales/en.ts) */}
+                    <span>{`Te quedan ${Math.max(0, tope - usado)} de ${tope} este mes`}</span>
                     <div className="bar">
                       <div style={{ width: `${Math.min(100, (usado / tope) * 100)}%` }} />
                     </div>
@@ -593,9 +591,7 @@ export function MiCuenta({
                   <span className="muted">No incluido</span>
                 )}
                 {extra > 0 && (
-                  <span className="acct-saldo">
-                    <span data-no-translate>+{extra}</span> de paquete
-                  </span>
+                  <span className="acct-saldo">{`+${extra} de paquete`}</span>
                 )}
               </li>
             );

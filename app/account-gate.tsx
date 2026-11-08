@@ -88,9 +88,13 @@ export default function AccountGate({ children }: { children: React.ReactNode })
   const alCodigo = useRef((codigo: string, mensaje: string) => {});
   alCodigo.current = (codigo: string, mensaje: string) => {
     if (codigo === "PAUSADO" || codigo === "SIN_PLAN" || codigo === "LIMITE") void refrescar();
-    // Se acabó lo del mes: el mensaje del servidor con «Ver paquetes» (en la prueba no hay paquetes)
+    // Se acabó lo del mes: el mensaje del servidor con «Ver paquetes». En la prueba no hay paquetes
+    // (se revisa el plan y también el mensaje, por si la cuenta guardada aquí todavía no se actualizó).
     const c = cuenta && cuenta.usuario ? cuenta : null;
-    if (codigo === "LIMITE" && mensaje && c && c.efectivo.plan !== "prueba") setAviso({ texto: mensaje, paquetes: true });
+    const dePrueba = mensaje.startsWith("Llegaste al límite de la prueba");
+    if (codigo === "LIMITE" && mensaje && c && c.efectivo.plan !== "prueba" && !dePrueba) {
+      setAviso({ texto: mensaje, paquetes: true });
+    }
     if (codigo === "PLAN") setAviso({ texto: mensaje || "Esta herramienta es del plan Pro.", pro: true });
   };
 
@@ -195,9 +199,9 @@ export default function AccountGate({ children }: { children: React.ReactNode })
     window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
     if (paquete !== "ok") return;
     setAviso({ texto: "¡Listo! Tu paquete se agregará en unos segundos." });
-    // El aviso de Stripe llega al servidor unos segundos después: entonces se vuelve a leer la cuenta
-    const t = setTimeout(() => void refrescar(), 4000);
-    return () => clearTimeout(t);
+    // El aviso de Stripe llega al servidor unos segundos después: entonces se vuelve a leer la cuenta.
+    // No se cancela al desmontar: en desarrollo React monta dos veces y la segunda ya no ve ?paquete=ok.
+    setTimeout(() => void refrescar(), 4000);
   }, [refrescar]);
 
   // 4) Aviso del 80%: solo para el dueño con un plan activo (no en la prueba), una vez por contador y mes
