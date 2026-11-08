@@ -6,7 +6,7 @@ import { memoryStore } from "./account-store-memory";
 import { DEFAULT_CONFIG, mesChicago, type Negocio } from "./plans";
 
 const AHORA = Date.parse("2026-11-07T18:00:00Z");
-const DIA = mesChicago(AHORA); // el almacén ahora cuenta por mes
+const MES = mesChicago(AHORA); // clave del mes: el almacén cuenta por mes
 const MIN = 60 * 1000;
 
 function negocio(extra: Partial<Negocio> = {}): Negocio {
@@ -125,8 +125,8 @@ test("básico pide voz → 403 PLAN", async () => {
   assert.equal(a.mensaje, "Esta herramienta es del plan Pro. Mejora a Pro para usarla.");
 });
 
-test("básico con 20 imágenes usadas pide 1 → 429 LIMITE", async () => {
-  const store = tienda({}, { [`n1_${DIA}`]: { imagenes: 300 } });
+test("básico con 300 imágenes usadas este mes pide 1 → 429 LIMITE", async () => {
+  const store = tienda({}, { [`n1_${MES}`]: { imagenes: 300 } });
   const a = await requireAccess(req(), { herramienta: "imagenes", contador: "imagenes", clavePropia: false }, { store, verify, now: AHORA });
   assert.ok(!a.ok);
   if (a.ok) return;
@@ -134,21 +134,21 @@ test("básico con 20 imágenes usadas pide 1 → 429 LIMITE", async () => {
   assert.equal(a.codigo, "LIMITE");
   assert.equal(
     a.mensaje,
-    "Llegaste al límite de hoy (300 imágenes). Se reinicia a medianoche. Puedes pasarte a Pro o conectar tu propia cuenta para usarlo sin límite.",
+    "Se acabó lo incluido este mes (300 imágenes). Compra un paquete o espera al 1 de diciembre.",
   );
-  assert.equal(store.uso("n1", DIA).imagenes, 300);
+  assert.equal(store.uso("n1", MES).imagenes, 300);
 });
 
 test("LIMITE de textos usa la palabra 'mensajes y textos'", async () => {
-  const store = tienda({}, { [`n1_${DIA}`]: { textos: 1000 } });
+  const store = tienda({}, { [`n1_${MES}`]: { textos: 1000 } });
   const a = await requireAccess(req(), { herramienta: "textos", contador: "textos", clavePropia: false }, { store, verify, now: AHORA });
-  assert.ok(!a.ok && a.mensaje.startsWith("Llegaste al límite de hoy (1000 mensajes y textos)."));
+  assert.ok(!a.ok && a.mensaje.startsWith("Se acabó lo incluido este mes (1000 mensajes y textos)."));
 });
 
 test("LIMITE en prueba usa el mensaje de la prueba", async () => {
   const store = tienda(
     { estado: "prueba", plan: null, origen: null, pagadoHasta: undefined, pruebaHasta: AHORA + 5 * MIN },
-    { [`n1_${DIA}`]: { imagenes: 3 } },
+    { [`n1_${MES}`]: { imagenes: 3 } },
   );
   const a = await requireAccess(req(), { herramienta: "imagenes", contador: "imagenes", clavePropia: false }, { store, verify, now: AHORA });
   assert.ok(!a.ok);
@@ -159,7 +159,7 @@ test("LIMITE en prueba usa el mensaje de la prueba", async () => {
 });
 
 test("éxito: reserva 1 uso y devuelve negocio y plan", async () => {
-  const store = tienda({}, { [`n1_${DIA}`]: { imagenes: 5 } });
+  const store = tienda({}, { [`n1_${MES}`]: { imagenes: 5 } });
   const a = await requireAccess(req(), { herramienta: "imagenes", contador: "imagenes", clavePropia: false }, { store, verify, now: AHORA });
   assert.ok(a.ok);
   if (!a.ok) return;
@@ -167,29 +167,29 @@ test("éxito: reserva 1 uso y devuelve negocio y plan", async () => {
   assert.equal(a.negocio?.id, "n1");
   assert.equal(a.plan, "basico");
   assert.equal(a.contado, true);
-  assert.equal(store.uso("n1", DIA).imagenes, 6);
+  assert.equal(store.uso("n1", MES).imagenes, 6);
 });
 
 test("unidades > 1 se reservan juntas y respetan el tope", async () => {
-  const store = tienda({}, { [`n1_${DIA}`]: { imagenes: 297 } });
+  const store = tienda({}, { [`n1_${MES}`]: { imagenes: 297 } });
   const o = { herramienta: "imagenes" as const, contador: "imagenes" as const, unidades: 4, clavePropia: false };
   const no = await requireAccess(req(), o, { store, verify, now: AHORA });
   assert.ok(!no.ok && no.codigo === "LIMITE");
-  assert.equal(store.uso("n1", DIA).imagenes, 297);
+  assert.equal(store.uso("n1", MES).imagenes, 297);
   const si = await requireAccess(req(), { ...o, unidades: 3 }, { store, verify, now: AHORA });
   assert.ok(si.ok);
-  assert.equal(store.uso("n1", DIA).imagenes, 300);
+  assert.equal(store.uso("n1", MES).imagenes, 300);
 });
 
 test("con clavePropia:true no cuenta (el contador sigue igual)", async () => {
-  const store = tienda({}, { [`n1_${DIA}`]: { imagenes: 20 } });
+  const store = tienda({}, { [`n1_${MES}`]: { imagenes: 300 } });
   const a = await requireAccess(req(), { herramienta: "imagenes", contador: "imagenes", clavePropia: true }, { store, verify, now: AHORA });
   assert.ok(a.ok);
   if (!a.ok) return;
   assert.equal(a.contado, false);
-  assert.equal(store.uso("n1", DIA).imagenes, 20);
+  assert.equal(store.uso("n1", MES).imagenes, 300);
   await a.devolver(); // no hace nada
-  assert.equal(store.uso("n1", DIA).imagenes, 20);
+  assert.equal(store.uso("n1", MES).imagenes, 300);
 });
 
 test("video_ia en pro sin clave propia → 403 CLAVE_PROPIA", async () => {
@@ -212,25 +212,25 @@ test("video_ia en básico con clave propia → 403 PLAN", async () => {
 });
 
 test("devolver() resta lo reservado, una sola vez", async () => {
-  const store = tienda({}, { [`n1_${DIA}`]: { textos: 10 } });
+  const store = tienda({}, { [`n1_${MES}`]: { textos: 10 } });
   const a = await requireAccess(req(), { herramienta: "textos", contador: "textos", unidades: 2, clavePropia: false }, { store, verify, now: AHORA });
   assert.ok(a.ok);
   if (!a.ok) return;
-  assert.equal(store.uso("n1", DIA).textos, 12);
+  assert.equal(store.uso("n1", MES).textos, 12);
   await a.devolver();
-  assert.equal(store.uso("n1", DIA).textos, 10);
+  assert.equal(store.uso("n1", MES).textos, 10);
   await a.devolver(); // la segunda vez no resta otra vez
-  assert.equal(store.uso("n1", DIA).textos, 10);
+  assert.equal(store.uso("n1", MES).textos, 10);
 });
 
 test("devolverUso nunca deja un contador debajo de 0", async () => {
   const store = tienda();
-  await store.devolverUso("n1", DIA, "voces", { delMes: 5, delSaldo: 0 });
-  assert.equal(store.uso("n1", DIA).voces, 0);
+  await store.devolverUso("n1", MES, "voces", { delMes: 5, delSaldo: 0 });
+  assert.equal(store.uso("n1", MES).voces, 0);
 });
 
-test("dos requireAccess en paralelo con 19 imágenes usadas → exactamente uno ok", async () => {
-  const store = tienda({}, { [`n1_${DIA}`]: { imagenes: 299 } });
+test("dos requireAccess en paralelo con 299 imágenes usadas → exactamente uno ok", async () => {
+  const store = tienda({}, { [`n1_${MES}`]: { imagenes: 299 } });
   const o = { herramienta: "imagenes" as const, contador: "imagenes" as const, clavePropia: false };
   const [a, b] = await Promise.all([
     requireAccess(req(), o, { store, verify, now: AHORA }),
@@ -239,20 +239,67 @@ test("dos requireAccess en paralelo con 19 imágenes usadas → exactamente uno 
   assert.equal([a, b].filter((x) => x.ok).length, 1);
   const malo = [a, b].find((x) => !x.ok);
   assert.ok(malo && !malo.ok && malo.codigo === "LIMITE");
-  assert.equal(store.uso("n1", DIA).imagenes, 300);
+  assert.equal(store.uso("n1", MES).imagenes, 300);
 });
 
 test("reservarUso del store falso es atómico con muchas llamadas en paralelo", async () => {
   const store = tienda();
-  const r = await Promise.all(Array.from({ length: 10 }, () => store.reservarUso("n1", DIA, "imagenes", 1, 3)));
+  const r = await Promise.all(Array.from({ length: 10 }, () => store.reservarUso("n1", MES, "imagenes", 1, 3)));
   assert.equal(r.filter(Boolean).length, 3);
-  assert.equal(store.uso("n1", DIA).imagenes, 3);
+  assert.equal(store.uso("n1", MES).imagenes, 3);
 });
 
-test("los contadores son por día (otro día empieza en 0)", async () => {
-  const store = tienda({}, { [`n1_2026-11-06`]: { imagenes: 20 } });
+test("los contadores son por mes (el uso del mes anterior no cuenta)", async () => {
+  const store = tienda({}, { [`n1_2026-10`]: { imagenes: 300 } });
   const a = await requireAccess(req(), { herramienta: "imagenes", contador: "imagenes", clavePropia: false }, { store, verify, now: AHORA });
   assert.ok(a.ok);
+  assert.equal(store.uso("n1", MES).imagenes, 1);
+});
+
+test("Pro con el mes lleno gasta el saldo; al acabarse → 429 con la fecha de reinicio", async () => {
+  const store = tienda({ plan: "pro", paquetes: { voces: 1 } }, { [`n1_${MES}`]: { voces: 250 } });
+  const o = { herramienta: "voz" as const, contador: "voces" as const, clavePropia: false };
+  const a = await requireAccess(req(), o, { store, verify, now: AHORA });
+  assert.ok(a.ok);
+  assert.equal((await store.getNegocio("n1"))?.paquetes?.voces ?? 0, 0); // el almacén puede quitar la clave en 0
+  assert.equal(store.uso("n1", MES).voces, 250);
+  const b = await requireAccess(req(), o, { store, verify, now: AHORA });
+  assert.ok(!b.ok);
+  if (b.ok) return;
+  assert.equal(b.status, 429);
+  assert.equal(b.codigo, "LIMITE");
+  assert.equal(b.mensaje, "Se acabó lo incluido este mes (250 voces). Compra un paquete o espera al 1 de diciembre.");
+});
+
+test("Básico con saldo de voces pide voz → 403 PLAN y el saldo no se toca", async () => {
+  const store = tienda({ paquetes: { voces: 50 } });
+  const a = await requireAccess(req(), { herramienta: "voz", contador: "voces", clavePropia: false }, { store, verify, now: AHORA });
+  assert.ok(!a.ok && a.status === 403 && a.codigo === "PLAN");
+  assert.equal((await store.getNegocio("n1"))?.paquetes?.voces, 50);
+});
+
+test("clave propia no reserva ni toca el saldo", async () => {
+  const store = tienda({ plan: "pro", paquetes: { voces: 5 } }, { [`n1_${MES}`]: { voces: 250 } });
+  const a = await requireAccess(req(), { herramienta: "voz", contador: "voces", clavePropia: true }, { store, verify, now: AHORA });
+  assert.ok(a.ok);
+  if (!a.ok) return;
+  assert.equal(a.contado, false);
+  await a.devolver();
+  assert.equal((await store.getNegocio("n1"))?.paquetes?.voces, 5);
+  assert.equal(store.uso("n1", MES).voces, 250);
+});
+
+test("devolver() regresa lo reservado al mes y al saldo, una sola vez", async () => {
+  const store = tienda({ plan: "pro", paquetes: { voces: 3 } }, { [`n1_${MES}`]: { voces: 249 } });
+  const a = await requireAccess(req(), { herramienta: "voz", contador: "voces", unidades: 3, clavePropia: false }, { store, verify, now: AHORA });
+  assert.ok(a.ok);
+  if (!a.ok) return;
+  assert.equal(store.uso("n1", MES).voces, 250);
+  assert.equal((await store.getNegocio("n1"))?.paquetes?.voces, 1);
+  await a.devolver();
+  await a.devolver();
+  assert.equal(store.uso("n1", MES).voces, 249);
+  assert.equal((await store.getNegocio("n1"))?.paquetes?.voces, 3);
 });
 
 test("getConfig del store falso mezcla lo guardado sobre DEFAULT_CONFIG", async () => {

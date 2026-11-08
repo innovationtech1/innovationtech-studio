@@ -4,6 +4,7 @@ import { stripeModoLive } from "./stripe-server";
 import { verifyIdToken } from "./verify-token";
 import {
   estadoEfectivo,
+  inicioMesSiguienteChicago,
   limiteMes,
   mesChicago,
   puedeUsar,
@@ -14,7 +15,7 @@ import {
 } from "./plans";
 
 // Guardián del servidor: cada ruta /api de IA lo llama antes de trabajar.
-// Revisa la sesión, el estado del negocio, el plan y el límite diario.
+// Revisa la sesión, el estado del negocio, el plan y el límite del mes (más el saldo de paquetes).
 
 export function cuentasActivas(): boolean {
   return process.env.STUDIO_CUENTAS === "on";
@@ -54,6 +55,13 @@ const NOMBRE_CONTADOR: Record<Contador, string> = {
   voces: "voces",
   subtitulos: "subtítulos",
 };
+
+// «1 de diciembre»: día y mes en español, en la hora de Chicago
+const formatoFecha = new Intl.DateTimeFormat("es-MX", {
+  timeZone: "America/Chicago",
+  day: "numeric",
+  month: "long",
+});
 
 const nada = async () => {};
 
@@ -120,7 +128,7 @@ export async function requireAccess(
     return falla(403, "PLAN", "Esta herramienta es del plan Pro. Mejora a Pro para usarla.");
   }
 
-  // 5) Límite diario (con clave propia no se cuenta)
+  // 5) Límite del mes y saldo (con clave propia no se cuenta)
   if (!o.contador || o.clavePropia) {
     return { ok: true, uid, negocio, plan, contado: false, devolver: nada };
   }
@@ -134,7 +142,7 @@ export async function requireAccess(
     const mensaje =
       plan === "prueba"
         ? "Llegaste al límite de la prueba. Elige un plan para seguir creando."
-        : `Llegaste al límite de hoy (${tope} ${NOMBRE_CONTADOR[contador]}). Se reinicia a medianoche. Puedes pasarte a Pro o conectar tu propia cuenta para usarlo sin límite.`;
+        : `Se acabó lo incluido este mes (${tope} ${NOMBRE_CONTADOR[contador]}). Compra un paquete o espera al ${formatoFecha.format(inicioMesSiguienteChicago(ahora))}.`;
     return falla(429, "LIMITE", mensaje);
   }
 
