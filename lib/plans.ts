@@ -170,11 +170,18 @@ export function repartirReserva(
   return { delMes, delSaldo };
 }
 
+// Una cantidad guardada (p. ej. el saldo en Firestore) como entero seguro: 0 o más.
+// Un texto con número ("100") se acepta; cualquier otra cosa (vacío, NaN, negativo) cuenta como 0.
+export function cantidadSegura(v: unknown): number {
+  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : Number.NaN;
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+}
+
 // Suma (signo 1) o resta (signo -1) un saldo. Nunca baja de 0 y quita los contadores en 0.
 export function sumarSaldo(saldo: Saldo | undefined, mas: Saldo, signo: 1 | -1): Saldo {
   const r: Saldo = { ...saldo };
-  for (const [k, v] of Object.entries(mas) as [Contador, number][]) {
-    const nuevo = Math.max(0, (r[k] ?? 0) + signo * v);
+  for (const [k, v] of Object.entries(mas) as [Contador, unknown][]) {
+    const nuevo = Math.max(0, cantidadSegura(r[k]) + signo * cantidadSegura(v));
     if (nuevo > 0) r[k] = nuevo;
     else delete r[k];
   }

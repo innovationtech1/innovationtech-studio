@@ -181,7 +181,7 @@ Quien conecta su **propia clave de Cloudflare** no gasta nada de esto: ese uso n
 
 ### Paquetes extra
 
-Si alguien se queda sin usos antes de fin de mes, puede comprar un **paquete** (pago único, no es suscripción) desde **Mi cuenta → Comprar paquete**. Solo lo puede comprar el dueño del negocio, con la cuenta activa.
+Si alguien se queda sin usos antes de fin de mes, puede comprar un **paquete** (pago único, no es suscripción) desde **Mi cuenta**, en la sección **Paquetes extra**: hay un botón por paquete (por ejemplo «Creativo · +500 textos y +150 imágenes · $5»). Solo lo puede comprar el dueño del negocio, con la cuenta activa.
 
 | Paquete | Precio | Qué da | Planes |
 | --- | --- | --- | --- |
@@ -190,6 +190,7 @@ Si alguien se queda sin usos antes de fin de mes, puede comprar un **paquete** (
 
 - El saldo de los paquetes **no vence**.
 - Se gasta **primero lo del mes** y después el saldo del paquete.
+- Si alguien pagó un paquete y no ve su saldo, agrégalo a mano en /admin con "Agregar paquete" (método "otro", nota "pago con tarjeta en Stripe").
 
 ### Paso 1: Firebase (inicio de sesión)
 
@@ -290,7 +291,7 @@ Las demás variables (Firebase, Cloudflare, administrador) pueden tener el mismo
 
 **c) Probar.** En la versión de prueba entra a `/admin` y presiona **Preparar Stripe**. Luego prueba: registrarte con Google y con correo, la prueba de 10 minutos, pagar Básico, mejorar a Pro, invitar a un miembro, una tarjeta rechazada (se pausa), pagar para reactivar, cancelar (se pausa) y activar a mano con Cash App.
 
-**Prueba de un paquete:** con la cuenta en Básico o Pro, entra a **Mi cuenta → Comprar paquete**, elige **Creativo** y paga con la tarjeta `4242 4242 4242 4242`. Al volver, revisa que el **saldo** en Mi cuenta muestre +500 textos y +150 imágenes, y que `/admin` muestre ese mismo saldo en el negocio. Si la cuenta es Pro, repite con **Voz** (+100 voces y +100 subtítulos).
+**Prueba de un paquete:** con la cuenta en Básico o Pro, entra a **Mi cuenta**, en **Paquetes extra** presiona el botón **Creativo** y paga con la tarjeta `4242 4242 4242 4242`. Al volver, revisa que el **saldo** en Mi cuenta muestre +500 textos y +150 imágenes, y que `/admin` muestre ese mismo saldo en el negocio. Si la cuenta es Pro, repite con **Voz** (+100 voces y +100 subtítulos).
 
 ### Paso 5: encender las cuentas en el sitio principal (con claves reales)
 
@@ -301,14 +302,14 @@ Todo en **una sola publicación**: el sitio principal nunca debe tener las cuent
 3. **Vuelve a publicar** el sitio (*Deploys → Trigger deploy*). Las variables que empiezan con `NEXT_PUBLIC_` se fijan al construir el sitio; si solo las cambias, no pasa nada hasta la nueva publicación.
 4. Entra a `/admin` del sitio principal y presiona **Preparar Stripe** (los precios reales, paquetes incluidos, son distintos de los de prueba).
 5. Haz una prueba rápida: entra, crea un negocio y revisa `/admin`.
-6. **El día del lanzamiento (no antes):** en Cloudflare activa **Workers Paid** y crea una **alerta de gasto** (*Billing → Notifications*), para enterarte si el uso crece. Antes del lanzamiento no hace falta.
+6. **El día del lanzamiento (no antes):** en Cloudflare activa **Workers Paid** (esto sí tiene costo: lo pagas tú, revisa el precio en Cloudflare antes de activarlo) y crea una **alerta de gasto** (*Billing → Notifications*), para enterarte si el uso crece. Antes del lanzamiento no hace falta.
 7. Para **apagar** todo: pon `STUDIO_CUENTAS` y `NEXT_PUBLIC_STUDIO_CUENTAS` en `off` (o bórralas) y publica de nuevo.
 
 ### Cómo usar `/admin`
 
 - **Activar a mano:** para quien paga en efectivo o con Cash App. Al vencer la fecha, el negocio se pausa solo.
 - **Pausar / Reactivar:** ojo, **Pausar en un negocio que paga con tarjeta no dura**: el próximo aviso de Stripe lo vuelve a activar. A esos clientes pausa o cancélalos desde el panel de Stripe.
-- **Agregar paquete:** le suma a un negocio el saldo de un paquete (por ejemplo, si pagó en efectivo).
+- **Agregar paquete:** le suma a un negocio el saldo de un paquete (por ejemplo, si pagó en efectivo). Solo deja elegir los paquetes de su plan (Voz es solo para Pro).
 - **Quitar saldo:** resta saldo a un negocio. Úsalo si le devuelves el dinero a alguien: los reembolsos no quitan el saldo solos.
 - No se puede activar a mano un negocio cuya suscripción de tarjeta todavía puede cobrar (activa, con pago pendiente o en pausa en Stripe): primero cancélala en Stripe.
 

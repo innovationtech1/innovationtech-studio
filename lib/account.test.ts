@@ -367,6 +367,23 @@ test("guardián: el dueño de un negocio Básico con miembros sigue usando su pl
   assert.equal(a.ok, true);
 });
 
+test("LIMITE para un miembro: le pide al dueño que compre el paquete", async () => {
+  const store = memoryStore({
+    usuarios: [usuario, miembroU2],
+    negocios: [negocio({ plan: "pro", miembros: ["u1", "u2"] })],
+    uso: { [`n1_${MES}`]: { voces: 250 } },
+  });
+  const a = await requireAccess(req(), { herramienta: "voz", contador: "voces", clavePropia: false }, { store, verify: verifyU2, now: AHORA });
+  assert.ok(!a.ok);
+  if (a.ok) return;
+  assert.equal(a.status, 429);
+  assert.equal(a.codigo, "LIMITE");
+  assert.equal(
+    a.mensaje,
+    "Se acabó lo incluido este mes (250 voces). Pídele al dueño de la cuenta que compre un paquete o espera al 1 de diciembre.",
+  );
+});
+
 test("guardián: un miembro en un negocio Pro → ok", async () => {
   const store = memoryStore({ usuarios: [usuario, miembroU2], negocios: [negocio({ plan: "pro", miembros: ["u1", "u2"] })] });
   const a = await requireAccess(req(), { herramienta: "textos", clavePropia: false }, { store, verify: verifyU2, now: AHORA });

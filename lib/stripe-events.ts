@@ -100,18 +100,23 @@ function pagoDePaquete(
   if (!asincrono && ses.payment_status !== "paid") return null;
 
   const paquete = ses.metadata?.paquete;
-  if (!esPaquete(paquete)) {
-    console.warn(`Stripe: el pago ${ses.id} no trae un paquete válido; no se acredita nada.`);
+  // Sin paquete en metadata no es nuestro (p. ej. otra app con la misma cuenta de Stripe): nada que anotar
+  if (paquete === undefined) return null;
+  // Desde aquí alguien pagó un paquete y no se acredita: queda como error para agregarlo a mano
+  const noSeAcredita = (motivo: string) => {
+    console.error(
+      `Stripe: el pago ${ses.id} (negocio ${negocio.id}) ${motivo}; no se acredita. ` +
+        "Si se cobró, agrégalo a mano en /admin (Agregar paquete).",
+    );
     return null;
-  }
+  };
+  if (!esPaquete(paquete)) return noSeAcredita(`no trae un paquete válido («${paquete.slice(0, 40)}»)`);
   if (ses.metadata?.negocioId !== negocio.id) {
-    console.warn(`Stripe: el pago ${ses.id} es de otro negocio; no se acredita el paquete ${paquete}.`);
-    return null;
+    return noSeAcredita(`dice ser del negocio ${String(ses.metadata?.negocioId ?? "ninguno").slice(0, 60)}, no de este (paquete ${paquete})`);
   }
   const config = cfg.paquetes[paquete];
   if (ses.amount_total !== Math.round(config.monto * 100) || ses.currency !== "usd") {
-    console.warn(`Stripe: el pago ${ses.id} no coincide con el precio del paquete ${paquete}; no se acredita.`);
-    return null;
+    return noSeAcredita(`no coincide con el precio del paquete ${paquete}`);
   }
   return { paquetes: sumarSaldo(negocio.paquetes, config.contenido, 1) };
 }

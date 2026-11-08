@@ -255,7 +255,7 @@ test("admin: listar y obtenerNegocio usan el modo de Stripe actual", async () =>
 });
 
 test("agregarPaquete suma el contenido al saldo y registra el movimiento", async () => {
-  const store = nuevo();
+  const store = nuevo({ plan: "pro" });
   const r = await agregarPaquete(ADMIN, true, "n1", { paquete: "voz", metodo: "zelle", nota: "Pagó" }, { store, now: AHORA });
   assert.deepEqual(r, { ok: true });
   assert.deepEqual((await store.getNegocio("n1"))?.paquetes, { voces: 100, subtitulos: 100 });
@@ -271,6 +271,22 @@ test("agregarPaquete suma el contenido al saldo y registra el movimiento", async
   // acumula
   await agregarPaquete(ADMIN, true, "n1", { paquete: "voz", metodo: "zelle" }, { store, now: AHORA });
   assert.deepEqual((await store.getNegocio("n1"))?.paquetes, { voces: 200, subtitulos: 200 });
+});
+
+test("agregarPaquete: un paquete que no es del plan guardado del negocio → 400 y no suma", async () => {
+  const deps = (store: ReturnType<typeof nuevo>) => ({ store, now: AHORA });
+  const basico = nuevo({ plan: "basico" });
+  const r = await agregarPaquete(ADMIN, true, "n1", { paquete: "voz", metodo: "zelle" }, deps(basico));
+  assert.deepEqual(r, { ok: false, status: 400, error: "El paquete Voz es del plan Pro." });
+  assert.equal((await basico.getNegocio("n1"))?.paquetes, undefined);
+  assert.equal((await basico.listarMovimientos("n1")).length, 0);
+  // Creativo sí es del plan Básico
+  assert.deepEqual(await agregarPaquete(ADMIN, true, "n1", { paquete: "creativo", metodo: "zelle" }, deps(basico)), { ok: true });
+  // Sin plan guardado no se agrega ninguno
+  const sinPlan = nuevo({ plan: null });
+  const c = await agregarPaquete(ADMIN, true, "n1", { paquete: "creativo", metodo: "zelle" }, deps(sinPlan));
+  assert.deepEqual(c, { ok: false, status: 400, error: "Este paquete no es del plan de este negocio." });
+  assert.equal((await sinPlan.listarMovimientos("n1")).length, 0);
 });
 
 test("agregarPaquete: validaciones, 403 y 404", async () => {
@@ -321,7 +337,7 @@ test("quitarSaldo: cantidades no válidas, 403 y 404", async () => {
 });
 
 test("obtenerNegocio incluye los movimientos", async () => {
-  const store = nuevo();
+  const store = nuevo({ plan: "basico" });
   await agregarPaquete(ADMIN, true, "n1", { paquete: "creativo", metodo: "efectivo" }, { store, now: AHORA });
   const r = await obtenerNegocio(ADMIN, true, "n1", { store, now: AHORA });
   assert.ok(r.ok);

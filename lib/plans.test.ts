@@ -9,6 +9,7 @@ import {
   inicioMesSiguienteChicago,
   repartirReserva,
   sumarSaldo,
+  cantidadSegura,
   esPaquete,
   mezclarConfig,
   puedeUsar,
@@ -173,6 +174,17 @@ test("repartirReserva", () => {
 test("sumarSaldo nunca baja de 0", () => {
   assert.deepEqual(sumarSaldo({ voces: 3 }, { voces: 10 }, -1), {});
   assert.deepEqual(sumarSaldo(undefined, { textos: 500, imagenes: 150 }, 1), { textos: 500, imagenes: 150 });
+});
+test("sumarSaldo: lo guardado como texto o vacío se lee como número seguro (nunca NaN)", () => {
+  assert.deepEqual(sumarSaldo({ voces: "100" } as never, { voces: 1 }, -1), { voces: 99 });
+  assert.deepEqual(sumarSaldo({ textos: 5 }, { textos: undefined } as never, 1), { textos: 5 });
+  assert.deepEqual(sumarSaldo({ textos: Number.NaN, imagenes: -3 } as never, { textos: 2, imagenes: 1 }, 1), { textos: 2, imagenes: 1 });
+});
+test("cantidadSegura", () => {
+  assert.equal(cantidadSegura(7), 7);
+  assert.equal(cantidadSegura("100"), 100);
+  assert.equal(cantidadSegura(2.7), 2);
+  for (const x of [undefined, null, "", "abc", -1, Number.NaN, Infinity, {}]) assert.equal(cantidadSegura(x), 0);
 });
 test("esPaquete", () => {
   assert.equal(esPaquete("creativo"), true);

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { CUENTAS_ON, useCuenta } from "../account-context";
 import type { FilaNegocio } from "@/lib/admin-api";
 import type { MovimientoPaquete, PagoManual } from "@/lib/account-store";
-import { diaChicago, type Contador, type PaqueteId, type Saldo } from "@/lib/plans";
+import { DEFAULT_CONFIG, diaChicago, type Contador, type Negocio, type PaqueteId, type Saldo } from "@/lib/plans";
 
 // Panel mínimo del administrador: activar planes pagados a mano, pausar y reactivar negocios.
 // El permiso se vuelve a revisar en el servidor en cada /api/admin/*; aquí solo se oculta la pantalla.
@@ -236,6 +236,7 @@ function Fila({ fila, onCambio }: { fila: FilaNegocio; onCambio: () => Promise<v
       )}
       {abierto === "paquete" && (
         <FormPaquete
+          plan={negocio.plan}
           ocupado={ocupado}
           onCancelar={() => setAbierto("")}
           onEnviar={async (c) => {
@@ -319,16 +320,24 @@ function FormActivar({
 }
 
 // Suma a mano un paquete pagado en efectivo, Zelle, Cash App u otro (queda en el Historial).
+// Solo se pueden elegir los paquetes del plan guardado del negocio (el servidor también lo revisa).
+const PAQUETE_TEXTO: Record<PaqueteId, string> = { creativo: "Creativo (textos e imágenes)", voz: "Voz (voces y subtítulos)" };
+const paquetesDelPlan = (plan: Negocio["plan"]) =>
+  (Object.keys(PAQUETE_TEXTO) as PaqueteId[]).filter((p) => !!plan && DEFAULT_CONFIG.paquetes[p].planes.includes(plan));
+
 function FormPaquete({
+  plan,
   ocupado,
   onCancelar,
   onEnviar,
 }: {
+  plan: Negocio["plan"];
   ocupado: boolean;
   onCancelar: () => void;
   onEnviar: (c: Record<string, unknown>) => Promise<void>;
 }) {
-  const [paquete, setPaquete] = useState<PaqueteId>("creativo");
+  const permitidos = paquetesDelPlan(plan);
+  const [paquete, setPaquete] = useState<PaqueteId | undefined>(permitidos[0]);
   const [metodo, setMetodo] = useState<PagoManual["metodo"]>("efectivo");
   const [nota, setNota] = useState("");
 
@@ -337,15 +346,21 @@ function FormPaquete({
       className="adm-form adm-ancho"
       onSubmit={(e) => {
         e.preventDefault();
-        void onEnviar({ paquete, metodo, nota });
+        if (paquete) void onEnviar({ paquete, metodo, nota });
       }}
     >
       <label>Paquete
-        <select value={paquete} onChange={(e) => setPaquete(e.target.value as PaqueteId)}>
-          <option value="creativo">Creativo (textos e imágenes)</option>
-          <option value="voz">Voz (voces y subtítulos)</option>
+        <select value={paquete ?? ""} onChange={(e) => setPaquete(e.target.value as PaqueteId)} disabled={permitidos.length === 0}>
+          {(Object.keys(PAQUETE_TEXTO) as PaqueteId[]).map((p) => (
+            <option key={p} value={p} disabled={!permitidos.includes(p)}>
+              {PAQUETE_TEXTO[p]}{permitidos.includes(p) ? "" : " (no es de su plan)"}
+            </option>
+          ))}
         </select>
       </label>
+      {permitidos.length === 0 && (
+        <p className="muted adm-ancho">Este negocio no tiene un plan pagado guardado. Activa un plan primero.</p>
+      )}
       <label>Forma de pago
         <select value={metodo} onChange={(e) => setMetodo(e.target.value as PagoManual["metodo"])}>
           {Object.entries(METODOS).map(([k, v]) => (
@@ -357,7 +372,7 @@ function FormPaquete({
         <input type="text" maxLength={300} value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Opcional" />
       </label>
       <div className="adm-acciones">
-        <button className="btn small" type="submit" disabled={ocupado}>Agregar paquete</button>
+        <button className="btn small" type="submit" disabled={ocupado || !paquete}>Agregar paquete</button>
         <button className="btn small ghost" type="button" onClick={onCancelar}>Cancelar</button>
       </div>
     </form>

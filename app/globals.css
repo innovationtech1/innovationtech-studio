@@ -769,11 +769,12 @@ h3.step { font-size: 18px; margin: 28px 0 8px; }
 .acct-aviso svg { color: var(--signal); flex: none; }
 .acct-aviso.pausa { background: #2a1a10; border-bottom-color: var(--amber); }
 .acct-aviso.pausa svg { color: var(--amber); }
-.acct-aviso.uso { background: var(--deck); border-bottom-color: var(--line); }
+/* El aviso del 80% puede ocupar 2 o más renglones: crece y la app baja lo que mida (--acct-espacio) */
+.acct-aviso.uso { height: auto; min-height: var(--acct-aviso); padding-bottom: 6px; padding-top: calc(env(safe-area-inset-top) + 6px); background: var(--deck); border-bottom-color: var(--line); }
 .acct-aviso.uso > span { white-space: normal; line-height: 1.25; min-width: 0; }
 .acct-aviso .btn { margin-top: 0; min-height: 32px; white-space: nowrap; }
-body.acct-con-aviso .app { padding-top: var(--acct-aviso); }
-body.acct-con-aviso .rail { top: var(--acct-aviso); }
+body.acct-con-aviso .app { padding-top: var(--acct-espacio, var(--acct-aviso)); }
+body.acct-con-aviso .rail { top: var(--acct-espacio, var(--acct-aviso)); }
 @media (max-width: 760px) {
   .acct-aviso { font-size: 13px; gap: 8px; }
 }

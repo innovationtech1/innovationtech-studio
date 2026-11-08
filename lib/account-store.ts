@@ -3,6 +3,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { colecciones } from "./colecciones";
 import { db } from "./firebase-server";
 import {
+  cantidadSegura,
   mezclarConfig,
   repartirReserva,
   sumarSaldo,
@@ -193,17 +194,22 @@ export function firestoreStore(): AccountStore {
       const refNegocio = db().collection(COL_NEGOCIOS).doc(negocioId);
       // Transacción: se leen el contador y el saldo, y se guardan juntos o no se guarda nada
       return db().runTransaction(async (t): Promise<Reserva | null> => {
-        // En una transacción se lee todo antes de escribir
-        const [u, n] = await Promise.all([t.get(refUso), t.get(refNegocio)]);
-        if (!n.exists) return null;
-        const saldo = ((n.data() as Negocio).paquetes ?? {})[c] ?? 0;
+        // En una transacción se lee todo antes de escribir.
+        // Para cuidar las lecturas gratis, el negocio (su saldo) solo se lee si lo del mes no alcanza.
+        const u = await t.get(refUso);
         const usado = numero(u.data()?.[c]);
-        const r = repartirReserva(usado, tope, saldo, unidades);
+        const soloMes = repartirReserva(usado, tope, 0, unidades);
+        if (soloMes) {
+          t.set(refUso, { [c]: usado + soloMes.delMes }, { merge: true });
+          return soloMes;
+        }
+        const n = await t.get(refNegocio);
+        if (!n.exists) return null;
+        const paquetes = (n.data() as Negocio).paquetes;
+        const r = repartirReserva(usado, tope, cantidadSegura(paquetes?.[c]), unidades);
         if (!r) return null;
         if (r.delMes > 0) t.set(refUso, { [c]: usado + r.delMes }, { merge: true });
-        if (r.delSaldo > 0) {
-          t.update(refNegocio, { paquetes: sumarSaldo((n.data() as Negocio).paquetes, { [c]: r.delSaldo }, -1) });
-        }
+        if (r.delSaldo > 0) t.update(refNegocio, { paquetes: sumarSaldo(paquetes, { [c]: r.delSaldo }, -1) });
         return r;
       });
     },
@@ -212,11 +218,12 @@ export function firestoreStore(): AccountStore {
       const refUso = db().collection(COL_USO).doc(idUso(negocioId, mes));
       const refNegocio = db().collection(COL_NEGOCIOS).doc(negocioId);
       await db().runTransaction(async (t) => {
-        const [u, n] = await Promise.all([t.get(refUso), t.get(refNegocio)]);
-        if (r.delMes > 0 && u.exists) {
+        // Se lee todo antes de escribir, y solo lo que hay que regresar (mes, saldo o los dos)
+        const [u, n] = await Promise.all([r.delMes > 0 ? t.get(refUso) : null, r.delSaldo > 0 ? t.get(refNegocio) : null]);
+        if (u?.exists) {
           t.update(refUso, { [c]: Math.max(0, numero(u.data()?.[c]) - r.delMes) }); // nunca debajo de 0
         }
-        if (r.delSaldo > 0 && n.exists) {
+        if (n?.exists) {
           t.update(refNegocio, { paquetes: sumarSaldo((n.data() as Negocio).paquetes, { [c]: r.delSaldo }, 1) });
         }
       });

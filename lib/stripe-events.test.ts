@@ -109,8 +109,9 @@ test("checkout completado quita la sesión pendiente", () => {
 });
 
 test("checkout de un pago único sin paquete se ignora", () => {
-  const { r } = conAvisos(() => aplicarEvento(evento("checkout.session.completed", sesion({ mode: "payment" })), negocio(), cfg));
+  const { r, avisos, errores } = conAvisos(() => aplicarEvento(evento("checkout.session.completed", sesion({ mode: "payment" })), negocio(), cfg));
   assert.equal(r, null);
+  assert.deepEqual([...avisos, ...errores], []);
 });
 
 test("suscripción activa con el precio de Pro → plan pro y activo", () => {
@@ -281,16 +282,27 @@ const pago = (extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
-// Captura los console.warn mientras corre `f`
-function conAvisos<T>(f: () => T): { r: T; avisos: string[] } {
+// Captura los console.warn y console.error mientras corre `f` (por separado)
+function conAvisos<T>(f: () => T): { r: T; avisos: string[]; errores: string[] } {
   const avisos: string[] = [];
-  const original = console.warn;
+  const errores: string[] = [];
+  const [w, e] = [console.warn, console.error];
   console.warn = (...a: unknown[]) => void avisos.push(a.join(" "));
+  console.error = (...a: unknown[]) => void errores.push(a.join(" "));
   try {
-    return { r: f(), avisos };
+    return { r: f(), avisos, errores };
   } finally {
-    console.warn = original;
+    console.warn = w;
+    console.error = e;
   }
+}
+
+// Un pago que no se acredita se anota como error con lo necesario para agregarlo a mano
+function esErrorDeAcreditar(errores: string[], sesion = "cs_pago", negocioId = "n1") {
+  assert.equal(errores.length, 1);
+  assert.ok(errores[0].includes(sesion), errores[0]);
+  assert.ok(errores[0].includes(negocioId), errores[0]);
+  assert.ok(errores[0].includes("agrégalo a mano en /admin (Agregar paquete)"), errores[0]);
 }
 
 test("paquete pagado (completed + paid) suma al saldo existente", () => {
@@ -315,37 +327,53 @@ test("paquete: un aviso viejo (anterior al reloj de la suscripción) igual acred
   assert.deepEqual(c, { paquetes: { textos: 500, imagenes: 150 } });
 });
 
-test("paquete: monto distinto → null con aviso", () => {
-  const { r, avisos } = conAvisos(() => aplicarEvento(evento("checkout.session.completed", pago({ amount_total: 100 })), negocio(), cfg));
+test("paquete: monto distinto → null con error para agregarlo a mano", () => {
+  const { r, avisos, errores } = conAvisos(() => aplicarEvento(evento("checkout.session.completed", pago({ amount_total: 100 })), negocio(), cfg));
   assert.equal(r, null);
-  assert.equal(avisos.length, 1);
+  assert.deepEqual(avisos, []);
+  esErrorDeAcreditar(errores);
 });
 
-test("paquete: moneda distinta → null con aviso", () => {
-  const { r, avisos } = conAvisos(() => aplicarEvento(evento("checkout.session.completed", pago({ currency: "mxn" })), negocio(), cfg));
+test("paquete: moneda distinta → null con error para agregarlo a mano", () => {
+  const { r, avisos, errores } = conAvisos(() => aplicarEvento(evento("checkout.session.completed", pago({ currency: "mxn" })), negocio(), cfg));
   assert.equal(r, null);
-  assert.equal(avisos.length, 1);
+  assert.deepEqual(avisos, []);
+  esErrorDeAcreditar(errores);
 });
 
-test("paquete: id de paquete inválido → null con aviso", () => {
-  const { r, avisos } = conAvisos(() =>
+test("paquete: id de paquete inválido → null con error para agregarlo a mano", () => {
+  const { r, avisos, errores } = conAvisos(() =>
     aplicarEvento(evento("checkout.session.completed", pago({ metadata: { negocioId: "n1", paquete: "gratis" } })), negocio(), cfg),
   );
   assert.equal(r, null);
-  assert.equal(avisos.length, 1);
+  assert.deepEqual(avisos, []);
+  esErrorDeAcreditar(errores);
 });
 
-test("paquete: de otro negocio → null con aviso", () => {
-  const { r, avisos } = conAvisos(() =>
+test("paquete: de otro negocio → null con error para agregarlo a mano", () => {
+  const { r, avisos, errores } = conAvisos(() =>
     aplicarEvento(evento("checkout.session.completed", pago({ metadata: { negocioId: "n2", paquete: "creativo" } })), negocio(), cfg),
   );
   assert.equal(r, null);
-  assert.equal(avisos.length, 1);
+  assert.deepEqual(avisos, []);
+  esErrorDeAcreditar(errores);
 });
 
-test("paquete: el aviso no menciona secretos ni datos de pago", () => {
-  const { avisos } = conAvisos(() => aplicarEvento(evento("checkout.session.completed", pago({ amount_total: 1 })), negocio(), cfg));
-  assert.ok(!/cus_|whsec|sk_/.test(avisos.join(" ")));
+test("paquete: el error no menciona secretos ni datos de pago", () => {
+  const { errores } = conAvisos(() => aplicarEvento(evento("checkout.session.completed", pago({ amount_total: 1 })), negocio(), cfg));
+  assert.equal(errores.length, 1);
+  assert.ok(!/cus_|whsec|sk_/.test(errores.join(" ")));
+});
+
+test("paquete: un pago único sin paquete en metadata (p. ej. de otra app) se ignora sin anotar nada", () => {
+  for (const metadata of [{}, { negocioId: "n1" }, undefined]) {
+    const { r, avisos, errores } = conAvisos(() =>
+      aplicarEvento(evento("checkout.session.completed", pago({ metadata })), negocio(), cfg),
+    );
+    assert.equal(r, null);
+    assert.deepEqual(avisos, []);
+    assert.deepEqual(errores, []);
+  }
 });
 
 test("paquete: una suscripción sigue igual (regresión)", () => {
@@ -1218,6 +1246,19 @@ test("comprarPaquete: sin precio del paquete en la configuración responde 503",
   assert.equal(r.ok, false);
   if (!r.ok) assert.equal(r.status, 503);
   assert.equal(f.llamadas.length, 0);
+});
+
+test("comprarPaquete: si el monto guardado no es el del precio de Stripe responde 503 (no cobra)", async () => {
+  const f = stripeFalso();
+  const config: Partial<PlanesConfig> = {
+    ...CONFIG_PAQ,
+    paquetes: { ...CONFIG_PAQ.paquetes!, creativo: { ...CONFIG_PAQ.paquetes!.creativo, monto: 6 } },
+  };
+  const r = await comprar(storePaq(proActivo(), config), "creativo", f);
+  assert.deepEqual(r, { ok: false, status: 503, error: "Este paquete no está disponible por ahora. Avísale a InnovationTECH." });
+  assert.equal(f.llamadas.length, 0);
+  // El otro paquete (monto correcto) sí se puede comprar
+  assert.equal((await comprar(storePaq(proActivo(), config), "voz", f)).ok, true);
 });
 
 test("comprarPaquete: si Stripe falla responde 502", async () => {

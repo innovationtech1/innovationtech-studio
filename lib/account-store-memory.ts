@@ -10,7 +10,7 @@ import type {
   Uso,
 } from "./account-store";
 import type { Contador, Negocio, PlanesConfig } from "./plans";
-import { mezclarConfig, repartirReserva, sumarSaldo } from "./plans";
+import { cantidadSegura, mezclarConfig, repartirReserva, sumarSaldo } from "./plans";
 
 export type SemillaMemoria = {
   usuarios?: Usuario[];
@@ -78,7 +78,7 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
         const n = negocios.get(negocioId);
         if (!n) return null;
         const actual = fila(negocioId, mes)[c];
-        const saldo = n.paquetes?.[c] ?? 0;
+        const saldo = cantidadSegura(n.paquetes?.[c]);
         await pausa(); // simula la ida y vuelta a la base entre leer y escribir
         const r = repartirReserva(actual, tope, saldo, unidades);
         if (!r) return null;

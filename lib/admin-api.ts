@@ -194,7 +194,8 @@ export async function reactivar(
 const CONTADORES: Contador[] = ["textos", "imagenes", "voces", "subtitulos"];
 const notaLimpia = (n: unknown) => (typeof n === "string" ? n.trim().slice(0, 300) : "");
 
-// Suma a mano el contenido de un paquete al saldo (el admin decide, sin importar el plan del negocio).
+// Suma a mano el contenido de un paquete al saldo. Solo paquetes del plan guardado del negocio
+// (p. ej. Voz solo a un negocio Pro), aunque el plan esté en pausa o vencido.
 export async function agregarPaquete(
   adminEmail: string,
   emailVerified: boolean,
@@ -209,12 +210,19 @@ export async function agregarPaquete(
   if (!esPaquete(d.paquete)) return falla(400, "Elige un paquete.");
   if (!METODOS.includes(d.metodo)) return falla(400, "Método de pago no válido.");
 
-  const contenido = (await store.getConfig()).paquetes[d.paquete].contenido;
-  const r = await store.modificarNegocio(negocioId, (n) => ({
-    paquetes: sumarSaldo(n.paquetes, contenido, 1),
-    actualizado: ahora,
-  }));
+  const { contenido, planes } = (await store.getConfig()).paquetes[d.paquete];
+  let deOtroPlan = false;
+  const r = await store.modificarNegocio(negocioId, (n) => {
+    // Se revisa con el negocio leído aquí mismo (no con una copia vieja).
+    // Se asigna en cada vuelta: Firestore puede repetir la transacción.
+    deOtroPlan = !n.plan || !planes.includes(n.plan);
+    if (deOtroPlan) return null;
+    return { paquetes: sumarSaldo(n.paquetes, contenido, 1), actualizado: ahora };
+  });
   if (r === "no_existe") return NO_NEGOCIO();
+  if (deOtroPlan) {
+    return falla(400, d.paquete === "voz" ? "El paquete Voz es del plan Pro." : "Este paquete no es del plan de este negocio.");
+  }
 
   const nota = notaLimpia(d.nota);
   await store.registrarMovimiento({

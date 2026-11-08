@@ -398,6 +398,11 @@ export async function comprarPaquete(
     return falla(400, paquete === "voz" ? "El paquete Voz es del plan Pro." : "Este paquete no está disponible en tu plan.");
   }
   if (!conf.stripePriceId) return NO_CONFIGURADO();
+  // El aviso de Stripe solo acredita si el pago es igual al monto guardado: si alguien cambió
+  // el monto (y no el precio de Stripe), se cobraría sin acreditar. Mejor no cobrar.
+  if (Math.round(conf.monto * 100) !== CENTAVOS_PAQUETE[paquete]) {
+    return falla(503, "Este paquete no está disponible por ahora. Avísale a InnovationTECH.");
+  }
 
   try {
     const customer = negocio.stripe?.customerId;

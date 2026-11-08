@@ -1017,6 +1017,7 @@ export const EN: Record<string, string> = {
 export const EN_PATTERNS: [RegExp, string][] = [
   [/^Invitación lista\. Pídele a (.+) que entre a Studio con ese correo\.$/, "Invitation ready. Ask $1 to sign in to Studio with that email."],
   [/^Se acabó lo incluido este mes \((\d+) (.+)\)\. Compra un paquete o espera al (.+)\.$/, "You've used everything included this month ($1 $2). Buy a pack or wait until $3."],
+  [/^Se acabó lo incluido este mes \((\d+) (.+)\)\. Pídele al dueño de la cuenta que compre un paquete o espera al (.+)\.$/, "You've used everything included this month ($1 $2). Ask the account owner to buy a pack or wait until $3."],
   [/^Te quedan (\d+) de (\d+) este mes$/, "$1 of $2 left this month"],
   [/^\+(\d+) de paquete$/, "+$1 from packs"],
   [/^Creativo · \+(\d+) textos y \+(\d+) imágenes · \$(\d+)$/, "Creative · +$1 copies and +$2 images · $$$3"],

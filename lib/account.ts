@@ -139,10 +139,14 @@ export async function requireAccess(
   const mes = mesChicago(ahora);
   const reserva = await store.reservarUso(negocio.id, mes, contador, unidades, tope);
   if (!reserva) {
+    const fecha = formatoFecha.format(inicioMesSiguienteChicago(ahora));
     const mensaje =
       plan === "prueba"
         ? "Llegaste al límite de la prueba. Elige un plan para seguir creando."
-        : `Se acabó lo incluido este mes (${tope} ${NOMBRE_CONTADOR[contador]}). Compra un paquete o espera al ${formatoFecha.format(inicioMesSiguienteChicago(ahora))}.`;
+        : negocio.duenoUid === uid
+          ? `Se acabó lo incluido este mes (${tope} ${NOMBRE_CONTADOR[contador]}). Compra un paquete o espera al ${fecha}.`
+          : // Un miembro no puede comprar: solo el dueño paga
+            `Se acabó lo incluido este mes (${tope} ${NOMBRE_CONTADOR[contador]}). Pídele al dueño de la cuenta que compre un paquete o espera al ${fecha}.`;
     return falla(429, "LIMITE", mensaje);
   }
 

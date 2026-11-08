@@ -103,3 +103,12 @@ test("listarMovimientos: solo los del negocio, del más nuevo al más viejo", as
   await store.registrarMovimiento(m("c", "n1", 30));
   assert.deepEqual((await store.listarMovimientos("n1")).map((x) => x.id), ["c", "a"]);
 });
+
+test("reservarUso y devolverUso: un saldo guardado como texto se lee como número", async () => {
+  const store = memoryStore({ negocios: [neg({ voces: "100" } as never)] });
+  const r = await store.reservarUso("n1", MES, "voces", 1, 0);
+  assert.deepEqual(r, { delMes: 0, delSaldo: 1 });
+  assert.deepEqual((await store.getNegocio("n1"))?.paquetes, { voces: 99 });
+  await store.devolverUso("n1", MES, "voces", r!);
+  assert.deepEqual((await store.getNegocio("n1"))?.paquetes, { voces: 100 });
+});
