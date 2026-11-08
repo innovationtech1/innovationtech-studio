@@ -1,7 +1,7 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import Stripe from "stripe";
-import { aplicarEvento } from "./stripe-events";
+import { aplicarEvento, EVENTOS_STRIPE } from "./stripe-events";
 import { abrirPortal, pagarPlan, prepararStripe, procesarWebhook, type ClienteStripe } from "./stripe-api";
 import type { Usuario } from "./account-store";
 import { memoryStore, type MemoryStore } from "./account-store-memory";
@@ -108,8 +108,9 @@ test("checkout completado quita la sesión pendiente", () => {
   assert.equal("checkoutPendiente" in (c?.stripe ?? {}), false);
 });
 
-test("checkout de un pago único (no suscripción) se ignora", () => {
-  assert.equal(aplicarEvento(evento("checkout.session.completed", sesion({ mode: "payment" })), negocio(), cfg), null);
+test("checkout de un pago único sin paquete se ignora", () => {
+  const { r } = conAvisos(() => aplicarEvento(evento("checkout.session.completed", sesion({ mode: "payment" })), negocio(), cfg));
+  assert.equal(r, null);
 });
 
 test("suscripción activa con el precio de Pro → plan pro y activo", () => {
@@ -265,6 +266,95 @@ test("otra suscripción viva no reemplaza a la actual (posible doble cobro)", ()
   assert.equal(aplicarEvento(evento("checkout.session.completed", sesion({ subscription: "sub_2" })), n, cfg), null);
 });
 
+/* ---------- Paquetes (pago único) ---------- */
+
+const pago = (extra: Record<string, unknown> = {}) => ({
+  id: "cs_pago",
+  object: "checkout.session",
+  mode: "payment",
+  payment_status: "paid",
+  amount_total: 500,
+  currency: "usd",
+  customer: "cus_1",
+  client_reference_id: "n1",
+  metadata: { negocioId: "n1", paquete: "creativo" },
+  ...extra,
+});
+
+// Captura los console.warn mientras corre `f`
+function conAvisos<T>(f: () => T): { r: T; avisos: string[] } {
+  const avisos: string[] = [];
+  const original = console.warn;
+  console.warn = (...a: unknown[]) => void avisos.push(a.join(" "));
+  try {
+    return { r: f(), avisos };
+  } finally {
+    console.warn = original;
+  }
+}
+
+test("paquete pagado (completed + paid) suma al saldo existente", () => {
+  const n = negocio({ paquetes: { textos: 10, voces: 3 } });
+  const c = aplicarEvento(evento("checkout.session.completed", pago()), n, cfg);
+  assert.deepEqual(c, { paquetes: { textos: 510, imagenes: 150, voces: 3 } });
+});
+
+test("paquete: completed unpaid → null sin aviso; async_payment_succeeded de la misma sesión acredita", () => {
+  const { r, avisos } = conAvisos(() =>
+    aplicarEvento(evento("checkout.session.completed", pago({ payment_status: "unpaid" })), negocio(), cfg),
+  );
+  assert.equal(r, null);
+  assert.deepEqual(avisos, []);
+  const c = aplicarEvento(evento("checkout.session.async_payment_succeeded", pago({ payment_status: "unpaid" })), negocio(), cfg);
+  assert.deepEqual(c, { paquetes: { textos: 500, imagenes: 150 } });
+});
+
+test("paquete: un aviso viejo (anterior al reloj de la suscripción) igual acredita", () => {
+  const n = conStripe({ subscriptionId: "sub_1", status: "active", ultimoEvento: (T + 1000) * 1000, livemode: false });
+  const c = aplicarEvento(evento("checkout.session.completed", pago()), n, cfg);
+  assert.deepEqual(c, { paquetes: { textos: 500, imagenes: 150 } });
+});
+
+test("paquete: monto distinto → null con aviso", () => {
+  const { r, avisos } = conAvisos(() => aplicarEvento(evento("checkout.session.completed", pago({ amount_total: 100 })), negocio(), cfg));
+  assert.equal(r, null);
+  assert.equal(avisos.length, 1);
+});
+
+test("paquete: moneda distinta → null con aviso", () => {
+  const { r, avisos } = conAvisos(() => aplicarEvento(evento("checkout.session.completed", pago({ currency: "mxn" })), negocio(), cfg));
+  assert.equal(r, null);
+  assert.equal(avisos.length, 1);
+});
+
+test("paquete: id de paquete inválido → null con aviso", () => {
+  const { r, avisos } = conAvisos(() =>
+    aplicarEvento(evento("checkout.session.completed", pago({ metadata: { negocioId: "n1", paquete: "gratis" } })), negocio(), cfg),
+  );
+  assert.equal(r, null);
+  assert.equal(avisos.length, 1);
+});
+
+test("paquete: de otro negocio → null con aviso", () => {
+  const { r, avisos } = conAvisos(() =>
+    aplicarEvento(evento("checkout.session.completed", pago({ metadata: { negocioId: "n2", paquete: "creativo" } })), negocio(), cfg),
+  );
+  assert.equal(r, null);
+  assert.equal(avisos.length, 1);
+});
+
+test("paquete: el aviso no menciona secretos ni datos de pago", () => {
+  const { avisos } = conAvisos(() => aplicarEvento(evento("checkout.session.completed", pago({ amount_total: 1 })), negocio(), cfg));
+  assert.ok(!/cus_|whsec|sk_/.test(avisos.join(" ")));
+});
+
+test("paquete: una suscripción sigue igual (regresión)", () => {
+  const c = aplicarEvento(evento("checkout.session.completed", sesion()), negocio(), cfg);
+  assert.equal(c?.origen, "stripe");
+  assert.equal(c?.stripe?.subscriptionId, "sub_1");
+  assert.equal(c?.paquetes, undefined);
+});
+
 test("un evento de otro tipo no hace nada", () => {
   assert.equal(aplicarEvento(evento("charge.succeeded", { id: "ch_1" }), negocio(), cfg), null);
 });
@@ -323,6 +413,27 @@ test("webhook: el mismo evento dos veces se aplica una sola vez", async () => {
   assert.equal(r.status, 200);
   assert.equal(r.body.duplicado, true);
   assert.equal((await store.getNegocio("n1"))?.estado, "pausado");
+});
+
+test("webhook: paquete entregado dos veces se acredita una sola vez", async () => {
+  const store = nuevoStore(negocio({ paquetes: { textos: 10 } }));
+  const { cuerpo, firma } = firmado(evento("checkout.session.completed", pago(), T, "evt_paquete"));
+  assert.equal((await procesarWebhook(cuerpo, firma, depsW(store))).status, 200);
+  const r = await procesarWebhook(cuerpo, firma, depsW(store));
+  assert.equal(r.body.duplicado, true);
+  assert.deepEqual((await store.getNegocio("n1"))?.paquetes, { textos: 510, imagenes: 150 });
+});
+
+test("webhook: async_payment_succeeded de un paquete se procesa y acredita", async () => {
+  const store = nuevoStore();
+  const { cuerpo, firma } = firmado(evento("checkout.session.async_payment_succeeded", pago({ client_reference_id: undefined })));
+  assert.equal((await procesarWebhook(cuerpo, firma, depsW(store))).status, 200);
+  assert.deepEqual((await store.getNegocio("n1"))?.paquetes, { textos: 500, imagenes: 150 });
+});
+
+test("EVENTOS_STRIPE incluye async_payment_succeeded (7 en total)", () => {
+  assert.equal(EVENTOS_STRIPE.length, 7);
+  assert.ok((EVENTOS_STRIPE as readonly string[]).includes("checkout.session.async_payment_succeeded"));
 });
 
 test("webhook: busca el negocio por customer si no hay metadata", async () => {
