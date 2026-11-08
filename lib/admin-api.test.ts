@@ -1,9 +1,9 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { activarManual, finDelDiaChicago, listar, obtenerNegocio, pausar, reactivar } from "./admin-api";
+import { activarManual, agregarPaquete, finDelDiaChicago, listar, obtenerNegocio, pausar, quitarSaldo, reactivar } from "./admin-api";
 import type { Usuario } from "./account-store";
 import { memoryStore } from "./account-store-memory";
-import { diaChicago, estadoEfectivo, type Negocio } from "./plans";
+import { diaChicago, estadoEfectivo, mesChicago, type Negocio } from "./plans";
 
 const AHORA = Date.parse("2026-11-07T18:00:00Z");
 const DIA = 24 * 60 * 60 * 1000;
@@ -193,11 +193,11 @@ test("pausar / reactivar un negocio que no existe: 404", async () => {
   }
 });
 
-test("listar incluye correo del dueño, estado efectivo y uso de hoy", async () => {
+test("listar incluye correo del dueño, estado efectivo y uso del mes", async () => {
   const store = memoryStore({
-    negocios: [negocio({ id: "n1" }), negocio({ id: "n2", nombre: "Otro", duenoUid: "sinuser", creado: AHORA })],
+    negocios: [negocio({ id: "n1", paquetes: { voces: 4 } }), negocio({ id: "n2", nombre: "Otro", duenoUid: "sinuser", creado: AHORA })],
     usuarios: [dueno],
-    uso: { [`n1_${diaChicago(AHORA)}`]: { textos: 12, imagenes: 3 } },
+    uso: { [`n1_${mesChicago(AHORA)}`]: { textos: 12, imagenes: 3 } },
   });
   const r = await listar(ADMIN, true, { store, now: AHORA });
   assert.ok(r.ok);
@@ -206,7 +206,8 @@ test("listar incluye correo del dueño, estado efectivo y uso de hoy", async () 
   const n1 = r.negocios.find((x) => x.negocio.id === "n1")!;
   assert.equal(n1.dueno, "dueno@ejemplo.com");
   assert.equal(n1.efectivo.estado, "sin_plan");
-  assert.deepEqual(n1.usoHoy, { textos: 12, imagenes: 3, voces: 0, subtitulos: 0 });
+  assert.deepEqual(n1.usoMes, { textos: 12, imagenes: 3, voces: 0, subtitulos: 0 });
+  assert.deepEqual(n1.saldo, { voces: 4 });
   assert.equal(r.negocios.find((x) => x.negocio.id === "n2")!.dueno, "");
 });
 
@@ -251,4 +252,94 @@ test("admin: listar y obtenerNegocio usan el modo de Stripe actual", async () =>
   const o = await obtenerNegocio(ADMIN, true, "n1", { store, now: AHORA, stripeLive: false });
   assert.ok(o.ok);
   if (o.ok) assert.deepEqual(o.efectivo, { estado: "activo", plan: "pro" });
+});
+
+test("agregarPaquete suma el contenido al saldo y registra el movimiento", async () => {
+  const store = nuevo({ plan: "pro" });
+  const r = await agregarPaquete(ADMIN, true, "n1", { paquete: "voz", metodo: "zelle", nota: "Pagó" }, { store, now: AHORA });
+  assert.deepEqual(r, { ok: true });
+  assert.deepEqual((await store.getNegocio("n1"))?.paquetes, { voces: 100, subtitulos: 100 });
+  const mov = await store.listarMovimientos("n1");
+  assert.equal(mov.length, 1);
+  assert.equal(mov[0].tipo, "agregar");
+  assert.equal(mov[0].paquete, "voz");
+  assert.deepEqual(mov[0].cantidades, { voces: 100, subtitulos: 100 });
+  assert.equal(mov[0].metodo, "zelle");
+  assert.equal(mov[0].nota, "Pagó");
+  assert.equal(mov[0].registradoPor, ADMIN);
+  assert.equal(mov[0].fecha, AHORA);
+  // acumula
+  await agregarPaquete(ADMIN, true, "n1", { paquete: "voz", metodo: "zelle" }, { store, now: AHORA });
+  assert.deepEqual((await store.getNegocio("n1"))?.paquetes, { voces: 200, subtitulos: 200 });
+});
+
+test("agregarPaquete: un paquete que no es del plan guardado del negocio → 400 y no suma", async () => {
+  const deps = (store: ReturnType<typeof nuevo>) => ({ store, now: AHORA });
+  const basico = nuevo({ plan: "basico" });
+  const r = await agregarPaquete(ADMIN, true, "n1", { paquete: "voz", metodo: "zelle" }, deps(basico));
+  assert.deepEqual(r, { ok: false, status: 400, error: "El paquete Voz es del plan Pro." });
+  assert.equal((await basico.getNegocio("n1"))?.paquetes, undefined);
+  assert.equal((await basico.listarMovimientos("n1")).length, 0);
+  // Creativo sí es del plan Básico
+  assert.deepEqual(await agregarPaquete(ADMIN, true, "n1", { paquete: "creativo", metodo: "zelle" }, deps(basico)), { ok: true });
+  // Sin plan guardado no se agrega ninguno
+  const sinPlan = nuevo({ plan: null });
+  const c = await agregarPaquete(ADMIN, true, "n1", { paquete: "creativo", metodo: "zelle" }, deps(sinPlan));
+  assert.deepEqual(c, { ok: false, status: 400, error: "Este paquete no es del plan de este negocio." });
+  assert.equal((await sinPlan.listarMovimientos("n1")).length, 0);
+});
+
+test("agregarPaquete: validaciones, 403 y 404", async () => {
+  const store = nuevo();
+  const deps = { store, now: AHORA };
+  const mala = await agregarPaquete(ADMIN, true, "n1", { paquete: "voz", metodo: "bitcoin" as never }, deps);
+  assert.ok(!mala.ok && mala.status === 400);
+  const malo = await agregarPaquete(ADMIN, true, "n1", { paquete: "otro" as never, metodo: "zelle" }, deps);
+  assert.ok(!malo.ok && malo.status === 400);
+  const no = await agregarPaquete("otro@x.com", true, "n1", { paquete: "voz", metodo: "zelle" }, deps);
+  assert.ok(!no.ok && no.status === 403);
+  const nada = await agregarPaquete(ADMIN, true, "zz", { paquete: "voz", metodo: "zelle" }, deps);
+  assert.ok(!nada.ok && nada.status === 404);
+  assert.equal((await store.listarMovimientos("n1")).length, 0);
+});
+
+test("quitarSaldo quita lo que hay y registra lo que de verdad se quitó", async () => {
+  const store = memoryStore({ negocios: [negocio({ paquetes: { voces: 100 } })], usuarios: [dueno] });
+  const r = await quitarSaldo(ADMIN, true, "n1", { cantidades: { voces: 500 }, nota: "Error" }, { store, now: AHORA });
+  assert.deepEqual(r, { ok: true });
+  assert.deepEqual((await store.getNegocio("n1"))?.paquetes, {});
+  const mov = await store.listarMovimientos("n1");
+  assert.equal(mov.length, 1);
+  assert.equal(mov[0].tipo, "quitar");
+  assert.deepEqual(mov[0].cantidades, { voces: 100 });
+  assert.equal(mov[0].nota, "Error");
+});
+
+test("quitarSaldo sin nada que quitar: ok pero sin movimiento", async () => {
+  const store = nuevo();
+  const r = await quitarSaldo(ADMIN, true, "n1", { cantidades: { voces: 5 } }, { store, now: AHORA });
+  assert.deepEqual(r, { ok: true });
+  assert.equal((await store.listarMovimientos("n1")).length, 0);
+});
+
+test("quitarSaldo: cantidades no válidas, 403 y 404", async () => {
+  const store = memoryStore({ negocios: [negocio({ paquetes: { voces: 100 } })], usuarios: [dueno] });
+  const deps = { store, now: AHORA };
+  for (const c of [{ voces: -1 }, { voces: "5" }, { voces: 1.5 }, { voces: NaN }, { otro: 3 }, {}, { voces: 0 }, null, [1], "x"]) {
+    const r = await quitarSaldo(ADMIN, true, "n1", { cantidades: c as never }, deps);
+    assert.ok(!r.ok && r.status === 400, JSON.stringify(c));
+  }
+  const no = await quitarSaldo("otro@x.com", true, "n1", { cantidades: { voces: 1 } }, deps);
+  assert.ok(!no.ok && no.status === 403);
+  const nada = await quitarSaldo(ADMIN, true, "zz", { cantidades: { voces: 1 } }, deps);
+  assert.ok(!nada.ok && nada.status === 404);
+  assert.deepEqual((await store.getNegocio("n1"))?.paquetes, { voces: 100 });
+});
+
+test("obtenerNegocio incluye los movimientos", async () => {
+  const store = nuevo({ plan: "basico" });
+  await agregarPaquete(ADMIN, true, "n1", { paquete: "creativo", metodo: "efectivo" }, { store, now: AHORA });
+  const r = await obtenerNegocio(ADMIN, true, "n1", { store, now: AHORA });
+  assert.ok(r.ok);
+  if (r.ok) assert.equal(r.movimientos.length, 1);
 });

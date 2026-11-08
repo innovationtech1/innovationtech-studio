@@ -19,6 +19,7 @@ test("colecciones: sin prefijo, los nombres de siempre", () => {
     config: "studio_config",
     pagosManuales: "studio_pagos_manuales",
     stripeEventos: "studio_stripe_eventos",
+    movimientosPaquetes: "studio_paquetes_movimientos",
   });
 });
 
@@ -27,6 +28,7 @@ test("colecciones: con prefijo de pruebas, todas cambian", () => {
   const c = colecciones();
   assert.equal(c.negocios, "prueba_studio_negocios");
   assert.equal(c.stripeEventos, "prueba_studio_stripe_eventos");
+  assert.equal(c.movimientosPaquetes, "prueba_studio_paquetes_movimientos");
   for (const nombre of Object.values(c)) assert.ok(nombre.startsWith("prueba_studio_"));
 });
 

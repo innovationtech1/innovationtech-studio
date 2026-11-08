@@ -18,13 +18,16 @@ import {
   PagoPendiente,
   type FB,
 } from "./account-screens";
-import TrialBanner, { PausaBanner } from "./trial-banner";
+import TrialBanner, { AvisoUsoBanner, PausaBanner } from "./trial-banner";
+import { claveAviso80, contadoresEnAviso, textoAviso80 } from "@/lib/aviso-uso";
+import { mesChicago, type Contador } from "@/lib/plans";
 
 // Puerta de las cuentas: solo se usa con NEXT_PUBLIC_STUDIO_CUENTAS=on (ver app/layout.tsx).
 // Carga Firebase, pide la cuenta a /api/cuenta y muestra la pantalla que toca según su estado.
 
 type Sesion = "cargando" | "fuera" | "dentro";
-type Aviso = { texto: string; pro?: boolean };
+// pro: botón «Mejorar a Pro» · paquetes: botón «Ver paquetes» (abre Mi cuenta)
+type Aviso = { texto: string; pro?: boolean; paquetes?: boolean };
 
 // Se vuelve a leer la cuenta cada 5 minutos, solo con la pestaña a la vista (cuida las lecturas
 // gratis de Firestore, compartidas con NOVA). También al volver a la pestaña y después de cada acción.
@@ -49,6 +52,7 @@ export default function AccountGate({ children }: { children: React.ReactNode })
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [pagando, setPagando] = useState(false);
   const [mensajePago, setMensajePago] = useState<string | undefined>(undefined);
+  const [aviso80, setAviso80] = useState<Contador | null>(null); // contador del aviso del 80% a la vista
   const pathname = usePathname();
 
   // Cada cambio de sesión invalida las respuestas que vengan en camino de la sesión anterior
@@ -84,6 +88,13 @@ export default function AccountGate({ children }: { children: React.ReactNode })
   const alCodigo = useRef((codigo: string, mensaje: string) => {});
   alCodigo.current = (codigo: string, mensaje: string) => {
     if (codigo === "PAUSADO" || codigo === "SIN_PLAN" || codigo === "LIMITE") void refrescar();
+    // Se acabó lo del mes: el mensaje del servidor con «Ver paquetes». En la prueba no hay paquetes
+    // (se revisa el plan y también el mensaje, por si la cuenta guardada aquí todavía no se actualizó).
+    const c = cuenta && cuenta.usuario ? cuenta : null;
+    const dePrueba = mensaje.startsWith("Llegaste al límite de la prueba");
+    if (codigo === "LIMITE" && mensaje && c && c.efectivo.plan !== "prueba" && !dePrueba) {
+      setAviso({ texto: mensaje, paquetes: true });
+    }
     if (codigo === "PLAN") setAviso({ texto: mensaje || "Esta herramienta es del plan Pro.", pro: true });
   };
 
@@ -108,6 +119,7 @@ export default function AccountGate({ children }: { children: React.ReactNode })
           setCuenta(null);
           setErrorCarga("");
           setModal(null);
+          setAviso80(null);
           setSesion(u ? "dentro" : "fuera");
           if (!u) return;
           // Otra persona entra en este dispositivo: se borran las claves propias de la anterior
@@ -178,10 +190,51 @@ export default function AccountGate({ children }: { children: React.ReactNode })
     if (pago === "cancelado") setAviso({ texto: "El pago se canceló. Puedes intentarlo cuando quieras." });
   }, [refrescar]);
 
+  // 3b) Regreso de Stripe al comprar un paquete: ?paquete=ok o ?paquete=cancelado
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const paquete = url.searchParams.get("paquete");
+    if (!paquete) return;
+    url.searchParams.delete("paquete");
+    window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+    if (paquete !== "ok") return;
+    setAviso({ texto: "¡Listo! Tu paquete se agregará en unos segundos." });
+    // El aviso de Stripe llega al servidor unos segundos después: entonces se vuelve a leer la cuenta.
+    // No se cancela al desmontar: en desarrollo React monta dos veces y la segunda ya no ve ?paquete=ok.
+    setTimeout(() => void refrescar(), 4000);
+  }, [refrescar]);
+
+  // 4) Aviso del 80%: solo para el dueño con un plan activo (no en la prueba), una vez por contador y mes
+  // en este navegador. Se muestra uno a la vez; el siguiente sale al cerrar el anterior.
+  const vistos = useRef(new Set<string>()); // por si localStorage no está disponible
+  useEffect(() => {
+    if (aviso80 || !cuenta || !cuenta.usuario) return;
+    if (!cuenta.esDueno || cuenta.efectivo.estado !== "activo") return; // «activo» nunca es la prueba
+    const mes = mesChicago(Date.now());
+    const siguiente = contadoresEnAviso(cuenta.uso, cuenta.limites).find((c) => {
+      const clave = claveAviso80(mes, c);
+      if (vistos.current.has(clave)) return false;
+      try {
+        return !localStorage.getItem(clave);
+      } catch {
+        return true;
+      }
+    });
+    if (!siguiente) return;
+    const clave = claveAviso80(mes, siguiente);
+    vistos.current.add(clave);
+    try {
+      localStorage.setItem(clave, "1");
+    } catch {
+      /* sin almacenamiento: se recuerda solo mientras la página esté abierta */
+    }
+    setAviso80(siguiente);
+  }, [cuenta, aviso80]);
+
   // Los avisos se quitan solos
   useEffect(() => {
     if (!aviso) return;
-    const t = setTimeout(() => setAviso(null), aviso.pro ? 10_000 : 6_000);
+    const t = setTimeout(() => setAviso(null), aviso.pro || aviso.paquetes ? 10_000 : 6_000);
     return () => clearTimeout(t);
   }, [aviso]);
 
@@ -257,6 +310,13 @@ export default function AccountGate({ children }: { children: React.ReactNode })
           <TrialBanner hasta={conNegocio.negocio.pruebaHasta} onElegir={() => setModal("planes")} onFin={() => void refrescar()} />
         )}
         {estado === "pausado" && <PausaBanner onPagar={pagarReactivar} ocupado={pagando} />}
+        {aviso80 && estado === "activo" && (
+          <AvisoUsoBanner
+            texto={textoAviso80(aviso80)}
+            onVer={() => (setAviso80(null), setModal("cuenta"))}
+            onCerrar={() => setAviso80(null)}
+          />
+        )}
         {children}
         {/* Sin plan: la app sigue abierta detrás (no se pierde lo que estaba haciendo), pero hay que elegir plan */}
         {estado === "sin_plan" && <ElegirPlan precios={conNegocio.precios} onSalir={salir} />}
@@ -291,6 +351,11 @@ export default function AccountGate({ children }: { children: React.ReactNode })
           {aviso.pro && conNegocio?.esDueno && (
             <button className="btn small" onClick={() => (setAviso(null), setModal("planes"))}>
               Mejorar a Pro
+            </button>
+          )}
+          {aviso.paquetes && conNegocio?.esDueno && (
+            <button className="btn small" onClick={() => (setAviso(null), setModal("cuenta"))}>
+              Ver paquetes
             </button>
           )}
           <button className="acct-cerrar-toast" onClick={() => setAviso(null)} title="Cerrar">

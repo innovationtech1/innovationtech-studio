@@ -9,5 +9,5 @@ export async function POST(req: Request) {
   const s = await sesionDe(req);
   if (!s) return sinSesion();
   const r = await prepararStripe(s.email, s.emailVerified);
-  return r.ok ? json({ precios: r.precios }) : errorJson(r);
+  return r.ok ? json({ precios: r.precios, paquetes: r.paquetes }) : errorJson(r);
 }

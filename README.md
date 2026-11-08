@@ -160,11 +160,37 @@ El conteo es aproximado (en memoria, por IP y por día). Quien conecta su propia
 
 ## Cuentas y planes de pago
 
-Studio puede funcionar con **cuentas de usuario** (inicio de sesión, un negocio por cuenta, planes Básico y Pro, cobro mensual con Stripe y un panel de administración en `/admin`). Todo está **apagado por defecto**: mientras la variable `STUDIO_CUENTAS` no sea `on`, Studio funciona como siempre, sin cuentas. Puedes preparar todo con calma y encenderlo al final.
+Studio puede funcionar con **cuentas de usuario** (inicio de sesión, un negocio por cuenta, planes Básico y Pro, cobro mensual con Stripe, **paquetes extra** de pago único y un panel de administración en `/admin`). Todo está **apagado por defecto**: mientras la variable `STUDIO_CUENTAS` no sea `on`, Studio funciona como siempre, sin cuentas. Puedes preparar todo con calma y encenderlo al final.
 
 > Haz primero todo en **modo de prueba** de Stripe (dinero de mentira), en una **versión de prueba** del sitio con sus propios datos (Paso 4). El sitio principal pasa a claves reales **en la misma publicación** en que se encienden las cuentas (Paso 5).
 >
 > **Importante:** los dos modos de Stripe no se mezclan. Studio guarda de qué modo es cada pago y solo acepta los avisos del modo de sus claves: una suscripción pagada con tarjeta de prueba **no da plan** cuando el sitio usa claves reales (la persona tiene que pagar de nuevo), y al revés.
+
+### Lo incluido al mes
+
+Cada plan trae una cantidad de usos **al mes** (no por día). Se reinicia el **día 1 de cada mes a la medianoche**, hora de Texas (America/Chicago).
+
+| Uso | Prueba (10 min) | Básico | Pro |
+| --- | --- | --- | --- |
+| Textos | 10 | 1,000 | 3,000 |
+| Imágenes | 3 | 300 | 1,000 |
+| Voces | 2 | 0 | 250 |
+| Subtítulos | 2 | 0 | 250 |
+
+Quien conecta su **propia clave de Cloudflare** no gasta nada de esto: ese uso no se cuenta.
+
+### Paquetes extra
+
+Si alguien se queda sin usos antes de fin de mes, puede comprar un **paquete** (pago único, no es suscripción) desde **Mi cuenta**, en la sección **Paquetes extra**: hay un botón por paquete (por ejemplo «Creativo · +500 textos y +150 imágenes · $5»). Solo lo puede comprar el dueño del negocio, con la cuenta activa.
+
+| Paquete | Precio | Qué da | Planes |
+| --- | --- | --- | --- |
+| Creativo | $5 | +500 textos y +150 imágenes | Básico y Pro |
+| Voz | $9 | +100 voces y +100 subtítulos | Solo Pro |
+
+- El saldo de los paquetes **no vence**.
+- Se gasta **primero lo del mes** y después el saldo del paquete.
+- Si alguien pagó un paquete y no ve su saldo, agrégalo a mano en /admin con "Agregar paquete" (método "otro", nota "pago con tarjeta en Stripe").
 
 ### Paso 1: Firebase (inicio de sesión)
 
@@ -226,15 +252,16 @@ Nunca pongas una clave secreta en una variable que empiece con `NEXT_PUBLIC_`.
 5. **Webhook:** *Developers → Webhooks → Add endpoint*.
    - URL en modo de prueba: la de tu versión de prueba, por ejemplo `https://pruebas--innovationtech-studio.netlify.app/api/stripe/webhook` (Paso 4). En modo real (Paso 5): `https://innovationtech-studio.netlify.app/api/stripe/webhook`.
    - Versión de la API: **`2026-10-28.endive`**
-   - Eventos (exactamente estos seis):
+   - Eventos (exactamente estos siete):
      - `checkout.session.completed`
      - `customer.subscription.created`
      - `customer.subscription.updated`
      - `customer.subscription.deleted`
      - `invoice.paid`
      - `invoice.payment_failed`
+     - `checkout.session.async_payment_succeeded` (acredita los paquetes pagados con banco, que tardan días)
 6. Al crear el webhook, copia el **Signing secret** (`whsec_...`) en `STRIPE_WEBHOOK_SECRET` (Netlify, en el mismo contexto que su clave: el de prueba para las versiones de prueba).
-7. **Preparar Stripe, antes de usar las cuentas:** entra a `/admin` con tu correo de administrador y presiona **Preparar Stripe**. Crea los precios (Básico $19 y Pro $39 al mes). Hay que hacerlo una vez en cada lugar: en la versión de prueba (con la clave de prueba) y en el sitio principal (con la clave real). Si lo olvidas y alguien paga antes, Studio reconoce igual los precios por su nombre interno (`studio_basico_mensual` / `studio_pro_mensual`); un precio desconocido se toma como Básico.
+7. **Preparar Stripe, antes de usar las cuentas:** entra a `/admin` con tu correo de administrador y presiona **Preparar Stripe**. Crea los precios (Básico $19 y Pro $39 al mes) y también los dos precios de los paquetes (Creativo $5 y Voz $9). Si ya lo habías hecho antes de esta actualización, **presiónalo otra vez** para que cree los paquetes. Hay que hacerlo una vez en cada lugar: en la versión de prueba (con la clave de prueba) y en el sitio principal (con la clave real). Si lo olvidas y alguien paga antes, Studio reconoce igual los precios por su nombre interno (`studio_basico_mensual` / `studio_pro_mensual`; los paquetes son `studio_paquete_creativo` / `studio_paquete_voz`); un precio desconocido se toma como Básico.
 
 Tarjetas de prueba (cualquier fecha futura y cualquier CVC):
 
@@ -264,21 +291,26 @@ Las demás variables (Firebase, Cloudflare, administrador) pueden tener el mismo
 
 **c) Probar.** En la versión de prueba entra a `/admin` y presiona **Preparar Stripe**. Luego prueba: registrarte con Google y con correo, la prueba de 10 minutos, pagar Básico, mejorar a Pro, invitar a un miembro, una tarjeta rechazada (se pausa), pagar para reactivar, cancelar (se pausa) y activar a mano con Cash App.
 
+**Prueba de un paquete:** con la cuenta en Básico o Pro, entra a **Mi cuenta**, en **Paquetes extra** presiona el botón **Creativo** y paga con la tarjeta `4242 4242 4242 4242`. Al volver, revisa que el **saldo** en Mi cuenta muestre +500 textos y +150 imágenes, y que `/admin` muestre ese mismo saldo en el negocio. Si la cuenta es Pro, repite con **Voz** (+100 voces y +100 subtítulos).
+
 ### Paso 5: encender las cuentas en el sitio principal (con claves reales)
 
 Todo en **una sola publicación**: el sitio principal nunca debe tener las cuentas encendidas con claves de prueba (un pago con tarjeta de prueba no debe convertirse en un plan gratis).
 
-1. En Stripe, cambia a **modo real** y crea el webhook real (mismos seis eventos, misma versión de la API) con la URL `https://innovationtech-studio.netlify.app/api/stripe/webhook`. Si antes creaste un webhook de prueba con esa misma URL, bórralo.
+1. En Stripe, cambia a **modo real** y crea el webhook real (mismos siete eventos, incluido `checkout.session.async_payment_succeeded`, misma versión de la API) con la URL `https://innovationtech-studio.netlify.app/api/stripe/webhook`. Si antes creaste un webhook de prueba con esa misma URL, bórralo.
 2. En Netlify, en el contexto **Production**, pon a la vez: `STRIPE_SECRET_KEY` = `sk_live_...`, `STRIPE_WEBHOOK_SECRET` = el *Signing secret* del webhook real, `STUDIO_CUENTAS=on` y `NEXT_PUBLIC_STUDIO_CUENTAS=on`. No pongas `STUDIO_COLECCION_PREFIJO` en Production.
 3. **Vuelve a publicar** el sitio (*Deploys → Trigger deploy*). Las variables que empiezan con `NEXT_PUBLIC_` se fijan al construir el sitio; si solo las cambias, no pasa nada hasta la nueva publicación.
-4. Entra a `/admin` del sitio principal y presiona **Preparar Stripe** (los precios reales son distintos de los de prueba).
+4. Entra a `/admin` del sitio principal y presiona **Preparar Stripe** (los precios reales, paquetes incluidos, son distintos de los de prueba).
 5. Haz una prueba rápida: entra, crea un negocio y revisa `/admin`.
-6. Para **apagar** todo: pon `STUDIO_CUENTAS` y `NEXT_PUBLIC_STUDIO_CUENTAS` en `off` (o bórralas) y publica de nuevo.
+6. **El día del lanzamiento (no antes):** en Cloudflare activa **Workers Paid** (esto sí tiene costo: lo pagas tú, revisa el precio en Cloudflare antes de activarlo) y crea una **alerta de gasto** (*Billing → Notifications*), para enterarte si el uso crece. Antes del lanzamiento no hace falta.
+7. Para **apagar** todo: pon `STUDIO_CUENTAS` y `NEXT_PUBLIC_STUDIO_CUENTAS` en `off` (o bórralas) y publica de nuevo.
 
 ### Cómo usar `/admin`
 
 - **Activar a mano:** para quien paga en efectivo o con Cash App. Al vencer la fecha, el negocio se pausa solo.
 - **Pausar / Reactivar:** ojo, **Pausar en un negocio que paga con tarjeta no dura**: el próximo aviso de Stripe lo vuelve a activar. A esos clientes pausa o cancélalos desde el panel de Stripe.
+- **Agregar paquete:** le suma a un negocio el saldo de un paquete (por ejemplo, si pagó en efectivo). Solo deja elegir los paquetes de su plan (Voz es solo para Pro).
+- **Quitar saldo:** resta saldo a un negocio. Úsalo si le devuelves el dinero a alguien: los reembolsos no quitan el saldo solos.
 - No se puede activar a mano un negocio cuya suscripción de tarjeta todavía puede cobrar (activa, con pago pendiente o en pausa en Stripe): primero cancélala en Stripe.
 
 ### Limitaciones conocidas
@@ -287,5 +319,6 @@ Todo en **una sola publicación**: el sitio principal nunca debe tener las cuent
 - Para cuidar las lecturas gratis de Firestore (compartidas con NOVA), la cuenta se vuelve a leer cada 5 minutos solo con la pestaña a la vista, al volver a ella y después de cada acción.
 - El inicio de sesión con Google por redirección, en la app instalada del iPhone, a veces vuelve sin sesión. En ese caso usa correo y contraseña.
 - El dictado con subtítulos (respaldo cuando el navegador no dicta) es solo del plan Pro.
-- La cuota gratuita diaria de Cloudflare puede acabarse con muchos clientes; habrá que pasar al plan de pago de Workers.
+- La cuota gratuita diaria de Cloudflare puede acabarse con muchos clientes; por eso, el día del lanzamiento hay que pasar al plan de pago de Workers (ver Paso 5).
+- En el pago de los **paquetes** no actives el **impuesto automático** ni los **códigos de promoción** de Stripe: el sistema solo acredita el saldo si el monto pagado es exactamente el del paquete ($5 o $9).
 - Antes del primer cliente: Netlify plan Personal ($9) y consultar a un contador sobre el impuesto de ventas de Texas.

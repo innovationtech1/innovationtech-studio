@@ -4,6 +4,8 @@ import { useState, type FormEvent } from "react";
 import { Check, LogOut, Mail, Shield, X } from "lucide-react";
 import type { CuentaConNegocio } from "./account-context";
 import { mensajeAuth } from "@/lib/auth-mensajes";
+import { textoPaquete } from "@/lib/aviso-uso";
+import type { PaqueteId } from "@/lib/plans";
 
 // Pantallas de la cuenta: bienvenida, crear negocio, elegir plan, pago manual y Mi cuenta.
 // No importan Firebase: reciben sus funciones (fb) desde AccountGate, que lo carga solo con las cuentas encendidas.
@@ -337,7 +339,7 @@ const INCLUYE_BASICO = [
   "Calendario de contenido",
   "Carrusel y todos los tamaños",
   "Música",
-  "60 mensajes y textos y 20 imágenes al día",
+  "1,000 mensajes y textos y 300 imágenes al mes",
 ];
 const INCLUYE_PRO = [
   "Todo lo de Básico",
@@ -345,7 +347,7 @@ const INCLUYE_PRO = [
   "Editor de video",
   "Voz en off y subtítulos",
   "Hasta 3 personas",
-  "200 mensajes y textos, 60 imágenes, 30 voces y 30 subtítulos al día",
+  "3,000 mensajes y textos, 1,000 imágenes, 250 voces y 250 subtítulos al mes",
 ];
 
 export function ElegirPlan({
@@ -473,6 +475,8 @@ const NOMBRE_ESTADO: Record<string, string> = {
   pausado: "En pausa",
   sin_plan: "Sin plan",
 };
+// «Se reinicia el 1 de diciembre»: el día 1 del mes siguiente, en la hora de Chicago
+const fechaReinicio = new Intl.DateTimeFormat("es-MX", { timeZone: "America/Chicago", day: "numeric", month: "long" });
 const CONTADORES: [keyof CuentaConNegocio["uso"], string][] = [
   ["textos", "Mensajes y textos"],
   ["imagenes", "Imágenes"],
@@ -498,8 +502,20 @@ export function MiCuenta({
   const [invitado, setInvitado] = useState("");
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
-  const { negocio, efectivo, uso, limites, equipo } = cuenta;
+  const [comprando, setComprando] = useState<"" | PaqueteId>("");
+  const [errorPaquete, setErrorPaquete] = useState("");
+  const { negocio, efectivo, uso, limites, saldo, equipo } = cuenta;
   const planPro = efectivo.plan === "pro";
+
+  async function comprar(id: PaqueteId) {
+    setComprando(id);
+    setErrorPaquete("");
+    const fue = await irAStripe("/api/stripe/paquete", { paquete: id });
+    if (fue !== true) {
+      setErrorPaquete(fue);
+      setComprando("");
+    }
+  }
 
   async function portal() {
     setOcupado(true);
@@ -554,19 +570,19 @@ export function MiCuenta({
           <span className={`acct-estado ${efectivo.estado}`}>{NOMBRE_ESTADO[efectivo.estado]}</span>
         </div>
 
-        <h3 className="acct-sub">Uso de hoy</h3>
+        <h3 className="acct-sub">Uso del mes</h3>
         <ul className="acct-uso">
           {CONTADORES.map(([c, nombre]) => {
             const tope = limites[c];
             const usado = uso[c] ?? 0;
+            const extra = saldo[c] ?? 0;
             return (
               <li key={c}>
                 <span>{nombre}</span>
                 {tope > 0 ? (
                   <>
-                    <span data-no-translate>
-                      {usado} / {tope}
-                    </span>
+                    {/* Un solo texto, para que el traductor lo reconozca completo (lib/locales/en.ts) */}
+                    <span>{`Te quedan ${Math.max(0, tope - usado)} de ${tope} este mes`}</span>
                     <div className="bar">
                       <div style={{ width: `${Math.min(100, (usado / tope) * 100)}%` }} />
                     </div>
@@ -574,11 +590,16 @@ export function MiCuenta({
                 ) : (
                   <span className="muted">No incluido</span>
                 )}
+                {extra > 0 && (
+                  <span className="acct-saldo">{`+${extra} de paquete`}</span>
+                )}
               </li>
             );
           })}
         </ul>
-        <p className="muted">Los contadores se reinician a medianoche.</p>
+        <p className="muted">
+          Se reinicia el <span data-no-translate>{fechaReinicio.format(cuenta.reinicio)}</span>
+        </p>
 
         <div className="acct-acciones">
           {efectivo.plan !== "pro" && (
@@ -596,6 +617,21 @@ export function MiCuenta({
           <>
             <div className="notice">{manual}</div>
             <PagoManual />
+          </>
+        )}
+
+        {cuenta.esDueno && cuenta.paquetes.length > 0 && (
+          <>
+            <h3 className="acct-sub">Paquetes extra</h3>
+            <p className="muted">Se pagan una sola vez y no vencen. Se usan cuando se acaba lo incluido en el mes.</p>
+            <div className="acct-acciones col acct-paquetes">
+              {cuenta.paquetes.map((p) => (
+                <button key={p.id} className="btn ghost" disabled={!!comprando} onClick={() => void comprar(p.id)}>
+                  {comprando === p.id ? "Abriendo…" : textoPaquete(p.id, p.monto, p.contenido)}
+                </button>
+              ))}
+            </div>
+            {errorPaquete && <div className="error">{errorPaquete}</div>}
           </>
         )}
 

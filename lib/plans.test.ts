@@ -4,7 +4,14 @@ import {
   DEFAULT_CONFIG,
   diaChicago,
   estadoEfectivo,
-  limite,
+  limiteMes,
+  mesChicago,
+  inicioMesSiguienteChicago,
+  repartirReserva,
+  sumarSaldo,
+  cantidadSegura,
+  esPaquete,
+  mezclarConfig,
   puedeUsar,
   type Negocio,
 } from "./plans";
@@ -99,11 +106,11 @@ test("puedeUsar: herramientas por plan", () => {
   assert.equal(puedeUsar(DEFAULT_CONFIG, "basico", "musica"), true);
 });
 
-test("limite: contadores por plan", () => {
-  assert.equal(limite(DEFAULT_CONFIG, "basico", "imagenes"), 20);
-  assert.equal(limite(DEFAULT_CONFIG, "pro", "subtitulos"), 30);
-  assert.equal(limite(DEFAULT_CONFIG, "prueba", "textos"), 10);
-  assert.equal(limite(DEFAULT_CONFIG, "basico", "voces"), 0);
+test("limiteMes: contadores por plan", () => {
+  assert.equal(limiteMes(DEFAULT_CONFIG, "basico", "imagenes"), 300);
+  assert.equal(limiteMes(DEFAULT_CONFIG, "pro", "subtitulos"), 250);
+  assert.equal(limiteMes(DEFAULT_CONFIG, "prueba", "textos"), 10);
+  assert.equal(limiteMes(DEFAULT_CONFIG, "basico", "voces"), 0);
 });
 
 test("diaChicago: cambio de día y de horario", () => {
@@ -140,4 +147,61 @@ test("estadoEfectivo: sin modo guardado (datos viejos) se queda como antes", () 
 test("estadoEfectivo: el modo solo importa si el origen es Stripe", () => {
   const n = negocio({ estado: "activo", plan: "basico", origen: "manual", pagadoHasta: AHORA + DIA, stripe: { status: "canceled", livemode: false } });
   assert.deepEqual(estadoEfectivo(n, AHORA, { stripeLive: true }), { estado: "activo", plan: "basico" });
+});
+
+test("mesChicago: 30 nov 7pm Chicago (1 dic UTC) sigue en noviembre", () => {
+  assert.equal(mesChicago(Date.parse("2026-12-01T01:00:00Z")), "2026-11");
+  assert.equal(mesChicago(Date.parse("2026-12-01T06:00:00Z")), "2026-12");
+});
+test("mesChicago: en horario de verano (31 oct 11:59pm CDT)", () => {
+  assert.equal(mesChicago(Date.parse("2026-11-01T04:59:00Z")), "2026-10");
+  assert.equal(mesChicago(Date.parse("2026-11-01T05:00:00Z")), "2026-11");
+});
+test("inicioMesSiguienteChicago: 8 nov → 1 dic 00:00 CST", () => {
+  assert.equal(inicioMesSiguienteChicago(Date.parse("2026-11-08T18:00:00Z")), Date.parse("2026-12-01T06:00:00Z"));
+});
+test("inicioMesSiguienteChicago: diciembre pasa a enero y octubre a noviembre (horario de verano)", () => {
+  assert.equal(inicioMesSiguienteChicago(Date.parse("2026-12-15T12:00:00Z")), Date.parse("2027-01-01T06:00:00Z"));
+  assert.equal(inicioMesSiguienteChicago(Date.parse("2026-10-15T12:00:00Z")), Date.parse("2026-11-01T05:00:00Z"));
+});
+test("repartirReserva", () => {
+  assert.deepEqual(repartirReserva(0, 10, 0, 1), { delMes: 1, delSaldo: 0 });
+  assert.deepEqual(repartirReserva(9, 10, 5, 3), { delMes: 1, delSaldo: 2 });
+  assert.deepEqual(repartirReserva(10, 10, 5, 2), { delMes: 0, delSaldo: 2 });
+  assert.equal(repartirReserva(10, 10, 1, 2), null);
+  assert.equal(repartirReserva(12, 10, 0, 1), null); // tope bajado por el admin
+});
+test("sumarSaldo nunca baja de 0", () => {
+  assert.deepEqual(sumarSaldo({ voces: 3 }, { voces: 10 }, -1), {});
+  assert.deepEqual(sumarSaldo(undefined, { textos: 500, imagenes: 150 }, 1), { textos: 500, imagenes: 150 });
+});
+test("sumarSaldo: lo guardado como texto o vacío se lee como número seguro (nunca NaN)", () => {
+  assert.deepEqual(sumarSaldo({ voces: "100" } as never, { voces: 1 }, -1), { voces: 99 });
+  assert.deepEqual(sumarSaldo({ textos: 5 }, { textos: undefined } as never, 1), { textos: 5 });
+  assert.deepEqual(sumarSaldo({ textos: Number.NaN, imagenes: -3 } as never, { textos: 2, imagenes: 1 }, 1), { textos: 2, imagenes: 1 });
+});
+test("cantidadSegura", () => {
+  assert.equal(cantidadSegura(7), 7);
+  assert.equal(cantidadSegura("100"), 100);
+  assert.equal(cantidadSegura(2.7), 2);
+  for (const x of [undefined, null, "", "abc", -1, Number.NaN, Infinity, {}]) assert.equal(cantidadSegura(x), 0);
+});
+test("esPaquete", () => {
+  assert.equal(esPaquete("creativo"), true);
+  assert.equal(esPaquete("voz"), true);
+  assert.equal(esPaquete("otro"), false);
+  assert.equal(esPaquete(undefined), false);
+});
+test("DEFAULT_CONFIG: topes mensuales y paquetes", () => {
+  assert.deepEqual(DEFAULT_CONFIG.limitesMes.pro, { textos: 3000, imagenes: 1000, voces: 250, subtitulos: 250 });
+  assert.deepEqual(DEFAULT_CONFIG.paquetes.creativo.contenido, { textos: 500, imagenes: 150 });
+  assert.equal(DEFAULT_CONFIG.paquetes.creativo.monto, 5);
+  assert.deepEqual(DEFAULT_CONFIG.paquetes.creativo.planes, ["basico", "pro"]);
+  assert.deepEqual(DEFAULT_CONFIG.paquetes.voz.contenido, { voces: 100, subtitulos: 100 });
+});
+test("mezclarConfig ignora los límites diarios viejos", () => {
+  const cfg = mezclarConfig({ limites: { basico: { textos: 60 } } } as never);
+  assert.equal(cfg.limitesMes.basico.textos, 1000);
+  assert.equal(cfg.paquetes.voz.monto, 9);
+  assert.deepEqual(cfg.paquetes.voz.planes, ["pro"]);
 });

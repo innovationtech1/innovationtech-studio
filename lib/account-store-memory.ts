@@ -1,19 +1,28 @@
 // Versión falsa del AccountStore, guardada en memoria. Solo para pruebas.
-import type { AccountStore, ConfigParcial, Invitacion, PagoManual, Usuario, Uso } from "./account-store";
+import type {
+  AccountStore,
+  ConfigParcial,
+  Invitacion,
+  MovimientoPaquete,
+  PagoManual,
+  Reserva,
+  Usuario,
+  Uso,
+} from "./account-store";
 import type { Contador, Negocio, PlanesConfig } from "./plans";
-import { mezclarConfig } from "./plans";
+import { cantidadSegura, mezclarConfig, repartirReserva, sumarSaldo } from "./plans";
 
 export type SemillaMemoria = {
   usuarios?: Usuario[];
   negocios?: Negocio[];
-  uso?: Record<string, Partial<Uso>>; // clave: "{negocioId}_{AAAA-MM-DD}"
+  uso?: Record<string, Partial<Uso>>; // clave: "{negocioId}_{AAAA-MM}"
   config?: Partial<PlanesConfig>;
   invitaciones?: Record<string, Invitacion>; // clave: correo en minúsculas
 };
 
 export type MemoryStore = AccountStore & {
   // Para revisar los contadores en las pruebas
-  uso(negocioId: string, dia: string): Uso;
+  uso(negocioId: string, mes: string): Uso;
   cantidadNegocios(): number;
   // Para revisar en las pruebas si un aviso de Stripe quedó marcado
   eventoMarcado(id: string): boolean;
@@ -31,13 +40,14 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
   let config = mezclarConfig(seed.config);
   const eventos = new Set<string>();
   const pagos: PagoManual[] = [];
+  const movimientos: MovimientoPaquete[] = [];
   const invitaciones = new Map<string, Invitacion>(
     Object.entries(seed.invitaciones ?? {}).map(([k, v]) => [k.toLowerCase(), { ...v }]),
   );
   let contador = 0;
 
-  const fila = (negocioId: string, dia: string) => {
-    const k = `${negocioId}_${dia}`;
+  const fila = (negocioId: string, mes: string) => {
+    const k = `${negocioId}_${mes}`;
     if (!uso.has(k)) uso.set(k, vacio());
     return uso.get(k)!;
   };
@@ -63,19 +73,26 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
     async getConfig() {
       return copia(config);
     },
-    reservarUso(negocioId, dia, c: Contador, unidades, tope) {
-      return enCola(async () => {
-        const actual = fila(negocioId, dia)[c];
+    reservarUso(negocioId, mes, c: Contador, unidades, tope) {
+      return enCola(async (): Promise<Reserva | null> => {
+        const n = negocios.get(negocioId);
+        if (!n) return null;
+        const actual = fila(negocioId, mes)[c];
+        const saldo = cantidadSegura(n.paquetes?.[c]);
         await pausa(); // simula la ida y vuelta a la base entre leer y escribir
-        if (actual + unidades > tope) return false;
-        fila(negocioId, dia)[c] = actual + unidades;
-        return true;
+        const r = repartirReserva(actual, tope, saldo, unidades);
+        if (!r) return null;
+        fila(negocioId, mes)[c] = actual + r.delMes;
+        if (r.delSaldo > 0) n.paquetes = sumarSaldo(n.paquetes, { [c]: r.delSaldo }, -1);
+        return r;
       });
     },
-    devolverUso(negocioId, dia, c: Contador, unidades) {
+    devolverUso(negocioId, mes, c: Contador, r) {
       return enCola(async () => {
-        const f = fila(negocioId, dia);
-        f[c] = Math.max(0, f[c] - unidades);
+        const f = fila(negocioId, mes);
+        f[c] = Math.max(0, f[c] - r.delMes);
+        const n = negocios.get(negocioId);
+        if (n && r.delSaldo > 0) n.paquetes = sumarSaldo(n.paquetes, { [c]: r.delSaldo }, 1);
       });
     },
     async crearNegocio(n, id) {
@@ -120,8 +137,8 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
       if (n) n.miembros = n.miembros.filter((m) => m !== uid);
       if (usuarios.get(uid)?.negocioId === negocioId) usuarios.delete(uid);
     },
-    async getUso(negocioId, dia) {
-      return { ...(uso.get(`${negocioId}_${dia}`) ?? vacio()) };
+    async getUso(negocioId, mes) {
+      return { ...(uso.get(`${negocioId}_${mes}`) ?? vacio()) };
     },
     async listarNegocios() {
       return [...negocios.values()].map(copia).sort((a, b) => b.creado - a.creado);
@@ -139,6 +156,12 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
     async listarPagosManuales(negocioId) {
       return pagos.filter((p) => p.negocioId === negocioId).map(copia).sort((a, b) => b.fecha - a.fecha);
     },
+    async registrarMovimiento(m) {
+      movimientos.push(copia(m));
+    },
+    async listarMovimientos(negocioId) {
+      return movimientos.filter((m) => m.negocioId === negocioId).map(copia).sort((a, b) => b.fecha - a.fecha);
+    },
     async guardarConfig(parcial: ConfigParcial) {
       const p = copia(parcial);
       config = mezclarConfig({
@@ -147,6 +170,11 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
         precios: {
           basico: { ...config.precios.basico, ...p.precios?.basico },
           pro: { ...config.precios.pro, ...p.precios?.pro },
+        },
+        // Como merge:true de Firestore: un paquete parcial (p. ej. solo stripePriceId) no borra el resto
+        paquetes: {
+          creativo: { ...config.paquetes.creativo, ...p.paquetes?.creativo },
+          voz: { ...config.paquetes.voz, ...p.paquetes?.voz },
         },
       });
     },
@@ -177,8 +205,8 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
     cantidadNegocios() {
       return negocios.size;
     },
-    uso(negocioId, dia) {
-      return { ...fila(negocioId, dia) };
+    uso(negocioId, mes) {
+      return { ...fila(negocioId, mes) };
     },
   };
 }
