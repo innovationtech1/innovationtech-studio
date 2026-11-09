@@ -427,6 +427,39 @@ test("obtenerCuenta: un negocio pausado no ofrece paquetes", async () => {
   assert.deepEqual(r.paquetes, []);
 });
 
+/* ---------- Pasar de pago a mano a tarjeta ---------- */
+
+test("obtenerCuenta: dueño con pago a mano vigente (≥ 48 h) puede pasar a tarjeta", async () => {
+  const hasta = AHORA + 30 * 24 * 60 * MIN;
+  const store = memoryStore({ usuarios: [dueno], negocios: [negocio({ plan: "basico", pagadoHasta: hasta })] });
+  const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA });
+  assert.deepEqual(r.pasarATarjeta, { fecha: hasta, precio: 19 });
+});
+
+test("obtenerCuenta: un miembro no ve pasar a tarjeta", async () => {
+  const store = memoryStore({
+    usuarios: [dueno, miembro("u2")],
+    negocios: [negocio({ plan: "basico", miembros: ["u1", "u2"] })],
+  });
+  const r = await cuenta("u2", "u2@x.com", true, { store, now: AHORA });
+  assert.equal(r.pasarATarjeta, null);
+});
+
+test("obtenerCuenta: pago a mano que vence en menos de 48 h → sin pasar a tarjeta", async () => {
+  const store = memoryStore({ usuarios: [dueno], negocios: [negocio({ plan: "basico", pagadoHasta: AHORA + 47 * 60 * MIN })] });
+  const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA });
+  assert.equal(r.pasarATarjeta, null);
+});
+
+test("obtenerCuenta: con tarjeta (Stripe) → sin pasar a tarjeta", async () => {
+  const store = memoryStore({
+    usuarios: [dueno],
+    negocios: [negocio({ origen: "stripe", pagadoHasta: undefined, stripe: { status: "active" } })],
+  });
+  const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA });
+  assert.equal(r.pasarATarjeta, null);
+});
+
 /* ---------- Lista del equipo ---------- */
 
 test("obtenerCuenta con equipo: personas con el dueño primero y el resto por correo", async () => {

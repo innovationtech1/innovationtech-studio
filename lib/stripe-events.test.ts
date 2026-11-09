@@ -267,6 +267,18 @@ test("otra suscripción viva no reemplaza a la actual (posible doble cobro)", ()
   assert.equal(aplicarEvento(evento("checkout.session.completed", sesion({ subscription: "sub_2" })), n, cfg), null);
 });
 
+test("pasar a tarjeta: suscripción trialing sobre un pago a mano vigente se adopta", () => {
+  const n = negocio({ estado: "activo", origen: "manual", plan: "basico", pagadoHasta: AHORA + 30 * DIA });
+  const sub = suscripcion({ status: "trialing", trial_end: Math.floor((AHORA + 30 * DIA) / 1000) }, PRECIO_B);
+  const c = aplicarEvento(evento("customer.subscription.created", sub), n, cfg);
+  assert.ok(c);
+  assert.equal(c.origen, "stripe");
+  assert.equal(c.estado, "activo");
+  assert.equal(c.plan, "basico");
+  assert.equal(c.stripe?.status, "trialing");
+  assert.equal(c.stripe?.subscriptionId, "sub_1");
+});
+
 /* ---------- Paquetes (pago único) ---------- */
 
 const pago = (extra: Record<string, unknown> = {}) => ({
@@ -534,6 +546,7 @@ function stripeFalso(op: {
   sesiones?: Record<string, { status: string; subscription?: string; customer?: string }>;
   expirarFalla?: boolean; // simula que la pagaron justo antes de vencerla
   sinCliente?: string[]; // customers que Stripe no conoce (p. ej. de otro modo)
+  registrarSesiones?: boolean; // las sesiones creadas quedan abiertas (cs_nuevo_1, cs_nuevo_2…)
 } = {}) {
   const noHayCliente = (c: unknown) => {
     if (typeof c === "string" && op.sinCliente?.includes(c)) {
@@ -576,7 +589,9 @@ function stripeFalso(op: {
         async create(p: { customer?: string }) {
           anotar("checkout.sessions.create", p);
           noHayCliente(p.customer);
-          return { id: "cs_nuevo", url: "https://checkout.stripe.com/c/pay/cs_nuevo" };
+          const id = op.registrarSesiones ? `cs_nuevo_${++n}` : "cs_nuevo";
+          if (op.registrarSesiones) sesiones[id] = { status: "open" };
+          return { id, url: `https://checkout.stripe.com/c/pay/${id}` };
         },
         async retrieve(id: string) {
           anotar("checkout.sessions.retrieve", id);
@@ -786,16 +801,97 @@ test("checkout: sin precios preparados (503)", async () => {
   }
 });
 
-test("checkout: pagado a mano y vigente → 400 con la fecha", async () => {
+/* ---------- Pasar de pago a mano a tarjeta ---------- */
+
+const HORA = 60 * 60 * 1000;
+// Como el negocio 053: Básico pagado a mano hasta el fin del 7 de diciembre (hora de Chicago)
+const FIN_MANUAL = Date.parse("2026-12-08T05:59:59Z");
+const aMano = (extra: Partial<Negocio> = {}) =>
+  negocio({ estado: "activo", origen: "manual", plan: "basico", pagadoHasta: FIN_MANUAL, ...extra });
+
+test("pago a mano vigente, mismo plan: Checkout de suscripción con prueba hasta que vence lo pagado", async () => {
   const f = stripeFalso();
-  const store = nuevoStore(negocio({ estado: "activo", origen: "manual", plan: "basico", pagadoHasta: Date.parse("2026-12-08T05:59:59Z") }));
+  const store = nuevoStore(aMano());
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r.ok, true);
+  if (r.ok) assert.equal(r.url, "https://checkout.stripe.com/c/pay/cs_nuevo");
+  const p = f.llamadas.find((l) => l.metodo === "checkout.sessions.create")!.args[0] as Record<string, unknown>;
+  assert.equal(p.mode, "subscription");
+  assert.deepEqual(p.line_items, [{ price: PRECIO_B, quantity: 1 }]);
+  assert.deepEqual(p.subscription_data, { metadata: { negocioId: "n1" }, trial_end: Math.floor(FIN_MANUAL / 1000) });
+  assert.deepEqual(p.metadata, { negocioId: "n1" });
+  assert.equal((await store.getNegocio("n1"))?.stripe?.checkoutPendiente, "cs_nuevo");
+});
+
+test("pago a mano vigente, otro plan → 400 «Para cambiar de plan, escríbenos.» sin tocar Stripe", async () => {
+  const f = stripeFalso();
+  const store = nuevoStore(aMano());
   const r = await pagarPlan("u1", "dueno@ejemplo.com", "pro", ORIGEN, depsP(store, f.cliente));
   assert.equal(r.ok, false);
   if (!r.ok) {
     assert.equal(r.status, 400);
-    assert.match(r.error, /^Tu plan está pagado a mano hasta .*7.*dic.*2026.*\. Escríbenos si quieres pasarte a tarjeta\.$/);
+    assert.equal(r.error, "Tu plan está pagado a mano hasta 7 de diciembre de 2026. Para cambiar de plan, escríbenos.");
   }
   assert.equal(f.llamadas.length, 0);
+});
+
+test("pago a mano que vence en menos de 48 h → 400 «Ese día podrás poner tu tarjeta.» sin tocar Stripe", async () => {
+  const f = stripeFalso();
+  const store = nuevoStore(aMano({ pagadoHasta: AHORA + 24 * HORA }));
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r.ok, false);
+  if (!r.ok) {
+    assert.equal(r.status, 400);
+    assert.equal(r.error, "Tu plan está pagado a mano hasta el 8 de noviembre. Ese día podrás poner tu tarjeta.");
+  }
+  assert.equal(f.llamadas.length, 0);
+});
+
+test("pago a mano vigente pero pausado → 400 sin tocar Stripe", async () => {
+  const f = stripeFalso();
+  const store = nuevoStore(aMano({ estado: "pausado" }));
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.equal(r.status, 400);
+  assert.equal(f.llamadas.length, 0);
+});
+
+test("pasar a tarjeta dos veces seguidas: la segunda vence la sesión abierta (nunca dos a la vez)", async () => {
+  const f = stripeFalso({ registrarSesiones: true });
+  const store = nuevoStore(aMano());
+  const r1 = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(store, f.cliente));
+  const r2 = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r1.ok && r2.ok, true);
+  const creadas = f.llamadas.filter((l) => l.metodo === "checkout.sessions.create");
+  assert.equal(creadas.length, 2);
+  for (const c of creadas) {
+    assert.equal((c.args[0] as { subscription_data: { trial_end: number } }).subscription_data.trial_end, Math.floor(FIN_MANUAL / 1000));
+  }
+  const m = f.metodos();
+  assert.deepEqual(f.llamadas.filter((l) => l.metodo === "checkout.sessions.expire").map((l) => l.args[0]), ["cs_nuevo_1"]);
+  assert.ok(m.lastIndexOf("checkout.sessions.expire") < m.lastIndexOf("checkout.sessions.create"));
+  assert.equal((await store.getNegocio("n1"))?.stripe?.checkoutPendiente, "cs_nuevo_2");
+});
+
+test("pasar a tarjeta con la primera sesión ya pagada (sin aviso todavía) → no se crea otra", async () => {
+  const f = stripeFalso({
+    sesiones: { cs_viejo: { status: "complete", subscription: "sub_1", customer: "cus_1" } },
+    suscripciones: [subViva("trialing", PRECIO_B)],
+  });
+  const store = nuevoStore(aMano({ stripe: { checkoutPendiente: "cs_viejo" } }));
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r.ok, true);
+  assert.equal(f.metodos().includes("checkout.sessions.create"), false);
+  if (r.ok) assert.equal(r.url, "https://billing.stripe.com/p/session/bps_1");
+});
+
+test("pago a mano vigente con una suscripción viva en Stripe → se usa esa (no Checkout nuevo)", async () => {
+  const f = stripeFalso({ suscripciones: [subViva("trialing", PRECIO_B)] });
+  const store = nuevoStore(aMano({ stripe: { customerId: "cus_1", subscriptionId: "sub_1" } }));
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r.ok, true);
+  assert.equal(f.metodos().includes("checkout.sessions.create"), false);
+  assert.ok(f.metodos().includes("billingPortal.sessions.create"));
 });
 
 test("checkout nuevo: parámetros correctos (sin payment_method_types)", async () => {

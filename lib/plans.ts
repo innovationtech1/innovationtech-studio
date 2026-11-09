@@ -143,6 +143,19 @@ export function estadoEfectivo(n: Negocio, ahora: number, opts: OpcionesEfectivo
   return { estado: n.estado, plan: n.plan };
 }
 
+// Margen mínimo para pasar de pago a mano a tarjeta: con menos, mejor esperar a que venza.
+export const VENTANA_PASAR_A_TARJETA = 48 * 60 * 60 * 1000;
+
+// ¿Puede el negocio pasar de pago a mano a tarjeta ahora? (el primer cobro sería al vencer lo pagado)
+export function pasarATarjetaDisponible(n: Negocio, ahora: number): boolean {
+  return (
+    n.origen === "manual" &&
+    n.estado !== "pausado" &&
+    n.pagadoHasta !== undefined &&
+    n.pagadoHasta - ahora >= VENTANA_PASAR_A_TARJETA
+  );
+}
+
 export function puedeUsar(cfg: PlanesConfig, plan: Plan, h: Herramienta): boolean {
   return cfg.herramientas[plan].includes(h);
 }

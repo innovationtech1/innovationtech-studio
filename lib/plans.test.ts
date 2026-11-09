@@ -12,6 +12,7 @@ import {
   cantidadSegura,
   esPaquete,
   mezclarConfig,
+  pasarATarjetaDisponible,
   puedeUsar,
   type Negocio,
 } from "./plans";
@@ -204,4 +205,31 @@ test("mezclarConfig ignora los límites diarios viejos", () => {
   assert.equal(cfg.limitesMes.basico.textos, 1000);
   assert.equal(cfg.paquetes.voz.monto, 9);
   assert.deepEqual(cfg.paquetes.voz.planes, ["pro"]);
+});
+
+/* ---------- Pasar de pago a mano a tarjeta ---------- */
+
+const HORA = 60 * 60 * 1000;
+const aMano = (extra: Partial<Negocio> = {}) =>
+  negocio({ estado: "activo", origen: "manual", plan: "basico", pagadoHasta: AHORA + 49 * HORA, ...extra });
+
+test("pasarATarjetaDisponible: pago a mano que vence en 49 h → sí", () => {
+  assert.equal(pasarATarjetaDisponible(aMano(), AHORA), true);
+});
+
+test("pasarATarjetaDisponible: justo 48 h → sí; 47 h → no", () => {
+  assert.equal(pasarATarjetaDisponible(aMano({ pagadoHasta: AHORA + 48 * HORA }), AHORA), true);
+  assert.equal(pasarATarjetaDisponible(aMano({ pagadoHasta: AHORA + 47 * HORA }), AHORA), false);
+});
+
+test("pasarATarjetaDisponible: ya paga con tarjeta → no", () => {
+  assert.equal(pasarATarjetaDisponible(aMano({ origen: "stripe" }), AHORA), false);
+});
+
+test("pasarATarjetaDisponible: pausado → no", () => {
+  assert.equal(pasarATarjetaDisponible(aMano({ estado: "pausado" }), AHORA), false);
+});
+
+test("pasarATarjetaDisponible: sin fecha de pago → no", () => {
+  assert.equal(pasarATarjetaDisponible(aMano({ pagadoHasta: undefined }), AHORA), false);
 });

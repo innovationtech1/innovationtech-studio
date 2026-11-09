@@ -2,7 +2,7 @@ import "server-only";
 import Stripe from "stripe";
 import { firestoreStore, type AccountStore } from "./account-store";
 import { esCorreoAdmin, type Falla } from "./account-api";
-import { estadoEfectivo, esPaquete, type Negocio, type PaqueteId } from "./plans";
+import { estadoEfectivo, esPaquete, pasarATarjetaDisponible, type Negocio, type PaqueteId } from "./plans";
 import { aplicarEvento, EVENTOS_STRIPE, idDe, LOOKUP_PAQUETES, LOOKUP_PLANES, referenciasDeEvento, SUSCRIPCION_VIVA } from "./stripe-events";
 import { SIN_CONFIGURAR, stripe, stripeConfigurado, stripeModoLive } from "./stripe-server";
 
@@ -167,6 +167,9 @@ const esFalla = (v: Negocio | Falla): v is Falla => (v as Falla).ok === false;
 
 const fechaLarga = (ms: number) =>
   new Intl.DateTimeFormat("es-MX", { timeZone: "America/Chicago", day: "numeric", month: "long", year: "numeric" }).format(ms);
+// «8 de diciembre» (sin año)
+const fechaCorta = (ms: number) =>
+  new Intl.DateTimeFormat("es-MX", { timeZone: "America/Chicago", day: "numeric", month: "long" }).format(ms);
 
 const noExiste = (e: unknown) => {
   const x = e as { code?: unknown; statusCode?: unknown };
@@ -276,9 +279,18 @@ function portal(cliente: ClienteStripe, customer: string, origin: string) {
 // Arma la sesión de pago de Stripe (Checkout) para una suscripción nueva.
 // Sin payment_method_types: los métodos salen de la configuración de Stripe (así se puede
 // encender Cash App Pay desde el panel de Stripe sin tocar código).
-export function crearCheckout(cliente: ClienteStripe, negocio: Negocio, email: string, priceId: string, origin: string) {
+// trialEnd (segundos): el primer cobro se hace ese día (al pasar de pago a mano a tarjeta).
+export function crearCheckout(
+  cliente: ClienteStripe,
+  negocio: Negocio,
+  email: string,
+  priceId: string,
+  origin: string,
+  opciones: { trialEnd?: number } = {},
+) {
   const customer = negocio.stripe?.customerId;
   const correo = email.trim();
+  const { trialEnd } = opciones;
   return cliente.checkout.sessions.create({
     mode: "subscription",
     line_items: [{ price: priceId, quantity: 1 }],
@@ -287,7 +299,10 @@ export function crearCheckout(cliente: ClienteStripe, negocio: Negocio, email: s
     success_url: `${origin}/?pago=ok`,
     cancel_url: `${origin}/?pago=cancelado`,
     metadata: { negocioId: negocio.id },
-    subscription_data: { metadata: { negocioId: negocio.id } },
+    subscription_data: {
+      metadata: { negocioId: negocio.id },
+      ...(trialEnd !== undefined ? { trial_end: trialEnd } : {}),
+    },
   });
 }
 
@@ -295,6 +310,8 @@ export function crearCheckout(cliente: ClienteStripe, negocio: Negocio, email: s
 //  - Sin suscripción viva: Checkout nuevo.
 //  - Con suscripción al día y otro plan: se cambia esa misma suscripción (con prorrateo).
 //  - Con el mismo plan o con un pago pendiente: portal de Stripe (actualizar tarjeta o pagar).
+//  - Pagado a mano y vigente: solo el mismo plan, con ≥ 48 h de margen; Checkout con prueba
+//    (trial_end) hasta que vence lo pagado, así hoy no se cobra nada.
 export async function pagarPlan(
   uid: string,
   email: string,
@@ -315,12 +332,22 @@ export async function pagarPlan(
   const cfg = await store.getConfig();
   const priceId = cfg.precios[plan].stripePriceId;
   if (!priceId) return NO_CONFIGURADO();
-  // Pagado a mano y vigente: pagar con tarjeta ahora sería cobrar dos veces
+  // Pagado a mano y vigente: solo se puede pasar a tarjeta con el mismo plan y sin cobrar hoy
+  // (la suscripción empieza en prueba y el primer cobro es cuando vence lo pagado a mano).
+  let trialEnd: number | undefined;
   if (negocio.origen === "manual" && negocio.pagadoHasta !== undefined && negocio.pagadoHasta > ahora) {
-    return falla(
-      400,
-      `Tu plan está pagado a mano hasta ${fechaLarga(negocio.pagadoHasta)}. Escríbenos si quieres pasarte a tarjeta.`,
-    );
+    const hasta = negocio.pagadoHasta;
+    if (negocio.estado === "pausado") {
+      // Pausado a mano: lo decide el equipo, no se cambia desde aquí
+      return falla(400, `Tu plan está pagado a mano hasta ${fechaLarga(hasta)}. Escríbenos si quieres pasarte a tarjeta.`);
+    }
+    if (plan !== negocio.plan) {
+      return falla(400, `Tu plan está pagado a mano hasta ${fechaLarga(hasta)}. Para cambiar de plan, escríbenos.`);
+    }
+    if (!pasarATarjetaDisponible(negocio, ahora)) {
+      return falla(400, `Tu plan está pagado a mano hasta el ${fechaCorta(hasta)}. Ese día podrás poner tu tarjeta.`);
+    }
+    trialEnd = Math.floor(hasta / 1000);
   }
 
   try {
@@ -341,7 +368,7 @@ export async function pagarPlan(
       if (deSesion) return await usarSuscripcion(cliente, deSesion, negocio, priceId, origin);
     }
 
-    const sesion = await crearCheckout(cliente, negocio, email, priceId, origin);
+    const sesion = await crearCheckout(cliente, negocio, email, priceId, origin, { trialEnd });
     if (!sesion.url) return ERROR_STRIPE();
     // Se guarda como pendiente para revisarla si vuelven a pulsar «Elegir»
     let otra: string | undefined;

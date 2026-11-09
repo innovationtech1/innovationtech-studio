@@ -5,6 +5,7 @@ import {
   estadoEfectivo,
   inicioMesSiguienteChicago,
   mesChicago,
+  pasarATarjetaDisponible,
   type Contador,
   type Efectivo,
   type Herramienta,
@@ -53,6 +54,8 @@ export type EstadoCuenta =
       esAdmin: boolean;
       esDueno: boolean;
       precios: { basico: number; pro: number };
+      // Solo el dueño: puede pasar de pago a mano a tarjeta (fecha = primer cobro, en ms; precio en USD).
+      pasarATarjeta: { fecha: number; precio: number } | null;
       // Solo lo ve el dueño. Las invitaciones y la lista de personas solo vienen si se piden
       // (GET /api/cuenta?equipo=1).
       equipo?: { miembros: number; invitaciones?: string[]; personas?: PersonaEquipo[] };
@@ -97,6 +100,10 @@ export async function obtenerCuenta(
     esAdmin,
     esDueno,
     precios: { basico: cfg.precios.basico.monto, pro: cfg.precios.pro.monto },
+    pasarATarjeta:
+      esDueno && negocio.plan && negocio.pagadoHasta !== undefined && pasarATarjetaDisponible(negocio, ahora)
+        ? { fecha: negocio.pagadoHasta, precio: cfg.precios[negocio.plan].monto }
+        : null,
   };
   if (esDueno) {
     // Las invitaciones pendientes y la lista de personas cuestan lecturas de más: solo cuando las pide «Mi cuenta»
