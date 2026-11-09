@@ -35,6 +35,7 @@ export type FilaNegocio = {
   dueno: string; // correo del dueño ("" si no se encuentra)
   usoMes: Record<Contador, number>;
   saldo: Saldo;
+  finTarjeta?: number; // solo con manualSiguiente: cuándo termina el mes pagado con tarjeta (ms)
 };
 
 export type DatosActivar = {
@@ -71,9 +72,11 @@ export async function listar(
   const filas = await Promise.all(
     negocios.map(async (negocio): Promise<FilaNegocio> => {
       const [dueno, usoMes] = await Promise.all([store.getUsuario(negocio.duenoUid), store.getUso(negocio.id, mes)]);
+      const finTarjeta = negocio.manualSiguiente ? negocio.stripe?.finPeriodo : undefined;
       return { negocio, efectivo: estadoEfectivo(negocio, ahora, modo(deps)), dueno: dueno?.email ?? "",
         usoMes,
         saldo: { ...negocio.paquetes },
+        ...(finTarjeta !== undefined ? { finTarjeta } : {}),
       };
     }),
   );
@@ -100,6 +103,20 @@ export async function obtenerNegocio(
   };
 }
 
+// Revisa los datos de un pago a mano (plan, fecha futura, monto y forma de pago). null = están bien.
+// También la usa pasarAManual (lib/stripe-api.ts).
+export function validarDatosActivar(datos: DatosActivar, ahora: number): Falla | null {
+  if (datos.plan !== "basico" && datos.plan !== "pro") return falla(400, "Elige Básico o Pro.");
+  if (typeof datos.hasta !== "number" || !Number.isFinite(datos.hasta) || datos.hasta <= ahora) {
+    return falla(400, "La fecha de pago debe ser futura.");
+  }
+  if (typeof datos.monto !== "number" || !Number.isFinite(datos.monto) || datos.monto < 0) {
+    return falla(400, "Escribe un monto válido.");
+  }
+  if (!METODOS.includes(datos.metodo)) return falla(400, "Elige la forma de pago.");
+  return null;
+}
+
 export async function activarManual(
   adminEmail: string,
   emailVerified: boolean,
@@ -111,14 +128,8 @@ export async function activarManual(
   const store = deps.store ?? firestoreStore();
   const ahora = deps.now ?? Date.now();
 
-  if (datos.plan !== "basico" && datos.plan !== "pro") return falla(400, "Elige Básico o Pro.");
-  if (typeof datos.hasta !== "number" || !Number.isFinite(datos.hasta) || datos.hasta <= ahora) {
-    return falla(400, "La fecha de pago debe ser futura.");
-  }
-  if (typeof datos.monto !== "number" || !Number.isFinite(datos.monto) || datos.monto < 0) {
-    return falla(400, "Escribe un monto válido.");
-  }
-  if (!METODOS.includes(datos.metodo)) return falla(400, "Elige la forma de pago.");
+  const invalido = validarDatosActivar(datos, ahora);
+  if (invalido) return invalido;
 
   const negocio = await store.getNegocio(negocioId);
   if (!negocio) return NO_NEGOCIO();
@@ -188,6 +199,37 @@ export async function reactivar(
     return falla(400, "Este negocio no tiene un plan pagado.");
   }
   await store.actualizarNegocio(negocioId, { estado: "activo", actualizado: ahora });
+  return { ok: true };
+}
+
+// Borra el pago a mano pendiente (manualSiguiente) y el aviso «Revisar» (stripe.renovoConManual).
+// Para cuando el cliente decide seguir con tarjeta o se registró mal la fecha o el monto.
+// No toca Stripe: si la suscripción sigue con la cancelación al final del mes, la cuenta se pausa ese día.
+// No se anota en el historial de pagos (no es un pago: el renglón del pago a mano original se queda);
+// queda en el registro del servidor.
+export async function quitarManualPendiente(
+  adminEmail: string,
+  emailVerified: boolean,
+  negocioId: string,
+  deps: DepsAdmin = {},
+): Promise<{ ok: true } | Falla> {
+  if (!esCorreoAdmin(adminEmail, emailVerified)) return NO_ADMIN();
+  const store = deps.store ?? firestoreStore();
+  const ahora = deps.now ?? Date.now();
+  let quitado: Negocio["manualSiguiente"];
+  const r = await store.modificarNegocio(negocioId, (n) => {
+    quitado = n.manualSiguiente; // se asigna en cada vuelta: Firestore puede repetir la transacción
+    if (!quitado) return null;
+    const { renovoConManual: _r, ...stripe } = n.stripe ?? {};
+    void _r;
+    return { manualSiguiente: null, ...(n.stripe ? { stripe } : {}), actualizado: ahora };
+  });
+  if (r === "no_existe") return NO_NEGOCIO();
+  if (!quitado) return falla(400, "Este negocio no tiene un pago a mano pendiente.");
+  console.info(
+    `Admin ${adminEmail.trim().toLowerCase()} quitó el pago a mano pendiente del negocio ${negocioId} ` +
+      `(plan ${quitado.plan}, hasta ${new Date(quitado.hasta).toISOString()}).`,
+  );
   return { ok: true };
 }
 

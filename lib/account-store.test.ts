@@ -1,7 +1,8 @@
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { CONFIG_DURA, configConCache, olvidarConfig } from "./account-store";
-import { mezclarConfig, type Negocio } from "./plans";
+import { FieldValue } from "firebase-admin/firestore";
+import { CONFIG_DURA, configConCache, datosParaFirestore, olvidarConfig } from "./account-store";
+import { aplicarCambios, mezclarConfig, type Negocio } from "./plans";
 import { memoryStore } from "./account-store-memory";
 import type { MovimientoPaquete } from "./account-store";
 
@@ -111,4 +112,38 @@ test("reservarUso y devolverUso: un saldo guardado como texto se lee como númer
   assert.deepEqual((await store.getNegocio("n1"))?.paquetes, { voces: 99 });
   await store.devolverUso("n1", MES, "voces", r!);
   assert.deepEqual((await store.getNegocio("n1"))?.paquetes, { voces: 100 });
+});
+
+/* ---------- Borrar un campo: null en un campo borrable ---------- */
+
+test("aplicarCambios: manualSiguiente null borra el campo; plan null se guarda como null", () => {
+  const n: Negocio = { ...neg(), manualSiguiente: { plan: "pro", hasta: 5 } };
+  const r = aplicarCambios(n, { manualSiguiente: null, plan: null, estado: "pausado" });
+  assert.equal("manualSiguiente" in r, false);
+  assert.equal(r.plan, null);
+  assert.equal(r.estado, "pausado");
+  assert.deepEqual(n.manualSiguiente, { plan: "pro", hasta: 5 }); // no modifica el original
+});
+
+test("memoryStore.modificarNegocio: manualSiguiente null borra el campo", async () => {
+  const store = memoryStore({ negocios: [{ ...neg(), manualSiguiente: { plan: "pro", hasta: 5 } }] });
+  await store.modificarNegocio("n1", () => ({ manualSiguiente: null, actualizado: 9 }));
+  const n = await store.getNegocio("n1");
+  assert.equal(n !== null && "manualSiguiente" in n, false);
+  assert.equal(n?.actualizado, 9);
+});
+
+test("Firestore (datosParaFirestore): manualSiguiente null → FieldValue.delete(); plan null se queda; undefined se quita", () => {
+  const d = datosParaFirestore({
+    manualSiguiente: null,
+    plan: null,
+    pagadoHasta: undefined,
+    stripe: { status: "canceled", renovoConManual: undefined },
+  });
+  assert.ok(FieldValue.delete().isEqual(d.manualSiguiente as FieldValue));
+  assert.equal(d.plan, null);
+  assert.equal("pagadoHasta" in d, false);
+  assert.deepEqual(d.stripe, { status: "canceled" });
+  // Un manualSiguiente con valor se guarda tal cual
+  assert.deepEqual(datosParaFirestore({ manualSiguiente: { plan: "basico", hasta: 3 } }).manualSiguiente, { plan: "basico", hasta: 3 });
 });

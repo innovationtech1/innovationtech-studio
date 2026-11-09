@@ -94,10 +94,31 @@ export type Negocio = {
     ultimaFactura?: number; // reloj de los avisos de factura (ms)
     checkoutPendiente?: string; // id de la última sesión de pago abierta (para no cobrar dos veces)
     livemode?: boolean; // true = cobro real; false = modo de prueba de Stripe (tarjetas de prueba)
+    finPeriodo?: number; // fin del mes ya pagado con tarjeta (ms), de items.data[0].current_period_end
+    // La suscripción volvió a renovar (cancel_at_period_end: false) con un pago a mano pendiente: revisar
+    renovoConManual?: boolean;
   };
+  // De tarjeta a pago a mano: cuando termine el mes pagado con tarjeta (aviso de suscripción
+  // borrada), el negocio pasa a pago a mano con este plan hasta esta fecha (ms).
+  manualSiguiente?: { plan: "basico" | "pro"; hasta: number };
   creado: number;
   actualizado: number;
 };
+
+// Campos que se pueden borrar del negocio: en los cambios, null quiere decir «borrar el campo».
+// (En los demás campos null es un valor normal, p. ej. plan: null.)
+export const CAMPOS_BORRABLES = ["manualSiguiente"] as const;
+type Borrable = (typeof CAMPOS_BORRABLES)[number];
+
+// Cambios para guardar en un negocio (como Partial<Negocio>, pero null borra los campos borrables).
+export type CambiosNegocio = Omit<Partial<Negocio>, Borrable> & { [K in Borrable]?: Negocio[K] | null };
+
+// Aplica los cambios a una copia del negocio (así lo hace la base en memoria y las pruebas).
+export function aplicarCambios(n: Negocio, c: CambiosNegocio): Negocio {
+  const r = { ...n, ...c } as Record<string, unknown>;
+  for (const k of CAMPOS_BORRABLES) if (r[k] === null) delete r[k];
+  return r as Negocio;
+}
 
 export type Efectivo = {
   estado: "prueba" | "activo" | "pausado" | "sin_plan";
@@ -136,11 +157,48 @@ export function estadoEfectivo(n: Negocio, ahora: number, opts: OpcionesEfectivo
       return { estado: "sin_plan", plan: null };
     }
     const ok = n.stripe?.status === "active" || n.stripe?.status === "trialing";
-    return { estado: ok ? "activo" : "pausado", plan: n.plan };
+    if (ok) return { estado: "activo", plan: n.plan };
+    // Lo pagado a mano sigue cubriendo hasta su fecha aunque ya haya pasado a tarjeta
+    // (p. ej. status todavía sin llegar después del Checkout, o canceló la prueba).
+    if (n.pagadoHasta !== undefined && n.pagadoHasta > ahora) return { estado: "activo", plan: n.plan };
+    return { estado: "pausado", plan: n.plan };
   }
 
   // 5) En cualquier otro caso, el estado guardado.
   return { estado: n.estado, plan: n.plan };
+}
+
+// Margen mínimo para pasar de pago a mano a tarjeta: con menos, mejor esperar a que venza.
+// Stripe exige que trial_end quede al menos 48 h después según su propio reloj y después de
+// nuestras llamadas, así que se piden 10 minutos de más.
+export const VENTANA_PASAR_A_TARJETA = 48 * 60 * 60 * 1000;
+export const MARGEN_RELOJ_STRIPE = 10 * 60 * 1000;
+
+// Suscripciones de Stripe que todavía pueden cobrar: no se debe abrir otra encima.
+export const SUSCRIPCION_VIVA: ReadonlySet<string> = new Set(["active", "trialing", "past_due", "unpaid", "paused"]);
+
+// ¿Queda tiempo para que Stripe acepte la prueba (trial_end) hasta que vence lo pagado en efectivo?
+export function quedaMargenParaTarjeta(pagadoHasta: number, ahora: number): boolean {
+  return pagadoHasta - ahora >= VENTANA_PASAR_A_TARJETA + MARGEN_RELOJ_STRIPE;
+}
+
+// ¿Lo pagado en efectivo sigue cubriendo y no hay una suscripción que cobre?
+// (pago a mano, o ya pasó a tarjeta pero la suscripción no sigue viva, p. ej. canceló la prueba).
+// Con tarjeta se mira el status guardado; pagarPlan además le pregunta a Stripe.
+export function cubiertoPorEfectivo(n: Negocio, ahora: number): boolean {
+  if (n.pagadoHasta === undefined || n.pagadoHasta <= ahora) return false;
+  if (n.origen === "manual") return true;
+  return n.origen === "stripe" && !SUSCRIPCION_VIVA.has(n.stripe?.status ?? "");
+}
+
+// ¿Puede el negocio pasar (o volver) a tarjeta ahora? El primer cobro sería al vencer lo pagado.
+export function pasarATarjetaDisponible(n: Negocio, ahora: number): boolean {
+  return (
+    cubiertoPorEfectivo(n, ahora) &&
+    n.estado !== "pausado" &&
+    n.pagadoHasta !== undefined &&
+    quedaMargenParaTarjeta(n.pagadoHasta, ahora)
+  );
 }
 
 export function puedeUsar(cfg: PlanesConfig, plan: Plan, h: Herramienta): boolean {

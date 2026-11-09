@@ -5,7 +5,7 @@ import { Check, LogOut, Mail, Shield, X } from "lucide-react";
 import type { CuentaConNegocio } from "./account-context";
 import { mensajeAuth, mensajeReenvio, REENVIO_OK } from "@/lib/auth-mensajes";
 import { textoPaquete } from "@/lib/aviso-uso";
-import { confirmacionCambio, type DatosCambio } from "@/lib/confirmar-plan";
+import { confirmacionCambio, confirmacionPasarATarjeta, type DatosCambio } from "@/lib/confirmar-plan";
 import type { PaqueteId } from "@/lib/plans";
 import type { PersonaEquipo } from "@/lib/account-api";
 
@@ -594,7 +594,11 @@ export function MiCuenta({
   const [errorPaquete, setErrorPaquete] = useState("");
   const [quitando, setQuitando] = useState<PersonaEquipo | null>(null); // a quién se pregunta si se quita
   const [errorQuitar, setErrorQuitar] = useState("");
+  const [aTarjeta, setATarjeta] = useState(false); // pregunta «¿pasar a tarjeta?» abierta
+  const [errorTarjeta, setErrorTarjeta] = useState("");
   const { negocio, efectivo, uso, limites, saldo, equipo } = cuenta;
+  // Pagado a mano y con tiempo de sobra: puede poner su tarjeta y el primer cobro es al vencer lo pagado
+  const pasarATarjeta = confirmacionPasarATarjeta(cuenta.pasarATarjeta);
   const planPro = efectivo.plan === "pro";
   // En Básico, si quedaron personas o invitaciones de cuando era Pro, el dueño todavía puede quitarlas
   const restosEnBasico =
@@ -615,6 +619,18 @@ export function MiCuenta({
     const fue = await abrirPortal();
     if (fue !== true) {
       setManual(fue);
+      setOcupado(false);
+    }
+  }
+
+  // Mismo plan que lo pagado a mano: el servidor pone la fecha del primer cobro (trial_end) en Stripe
+  async function irATarjeta() {
+    if (!negocio.plan) return;
+    setOcupado(true);
+    setErrorTarjeta("");
+    const fue = await irAStripe("/api/stripe/checkout", { plan: negocio.plan });
+    if (fue !== true) {
+      setErrorTarjeta(fue);
       setOcupado(false);
     }
   }
@@ -715,6 +731,11 @@ export function MiCuenta({
             {cuenta.esDueno && negocio.stripe?.customerId && (efectivo.estado === "activo" || efectivo.estado === "pausado") && (
               <button className="btn ghost small" disabled={ocupado} onClick={portal}>
                 Administrar suscripción
+              </button>
+            )}
+            {pasarATarjeta && (
+              <button className="btn ghost small" disabled={ocupado} onClick={() => (setErrorTarjeta(""), setATarjeta(true))}>
+                Pasar a tarjeta
               </button>
             )}
           </div>
@@ -821,6 +842,18 @@ export function MiCuenta({
           </div>
         </div>
       </div>
+      {aTarjeta && pasarATarjeta && (
+        <Confirmar
+          etiqueta="Pasar a pago con tarjeta"
+          boton={ocupado ? "Abriendo…" : pasarATarjeta.boton}
+          ocupado={ocupado}
+          error={errorTarjeta}
+          onSi={() => void irATarjeta()}
+          onNo={() => (setATarjeta(false), setErrorTarjeta(""))}
+        >
+          {pasarATarjeta.mensaje}
+        </Confirmar>
+      )}
       {quitando && (
         <Confirmar
           etiqueta="Quitar del equipo"

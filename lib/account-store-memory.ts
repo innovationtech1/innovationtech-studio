@@ -10,7 +10,7 @@ import type {
   Uso,
 } from "./account-store";
 import type { Contador, Negocio, PlanesConfig } from "./plans";
-import { cantidadSegura, mezclarConfig, repartirReserva, sumarSaldo } from "./plans";
+import { aplicarCambios, cantidadSegura, mezclarConfig, repartirReserva, sumarSaldo } from "./plans";
 
 export type SemillaMemoria = {
   usuarios?: Usuario[];
@@ -192,9 +192,10 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
         const cambios = fn(copia(n));
         if (eventoId) eventos.add(eventoId);
         if (cambios) {
+          // Como en Firestore: null en un campo borrable (manualSiguiente) lo borra
           const { id: _id, ...datos } = copia(cambios);
           void _id;
-          Object.assign(n, datos);
+          negocios.set(id, aplicarCambios(n, datos));
         }
         return "ok" as const;
       });
