@@ -16,8 +16,8 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const s = await sesionDe(req);
   if (!s) return sinSesion();
-  const { nombre } = await cuerpoJson(req);
-  const r = await crearCuenta(s.uid, s.email, s.emailVerified, typeof nombre === "string" ? nombre : "");
+  const { nombre, aceptaTerminos } = await cuerpoJson(req);
+  const r = await crearCuenta(s.uid, s.email, s.emailVerified, typeof nombre === "string" ? nombre : "", aceptaTerminos === true);
   if (!r.ok) return errorJson(r);
   return json(await obtenerCuenta(s.uid, s.email, s.emailVerified));
 }

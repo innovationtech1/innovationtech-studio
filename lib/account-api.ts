@@ -3,6 +3,7 @@ import { firestoreStore, type AccountStore, type Usuario } from "./account-store
 import { stripeModoLive } from "./stripe-server";
 import { cifrarClave, descifrarClave, llaveDeEntorno } from "./cifrado";
 import { probarCloudflare, type Check } from "./probar-cloudflare";
+import { VERSION_LEGAL } from "./legal";
 import {
   estadoEfectivo,
   inicioMesSiguienteChicago,
@@ -166,11 +167,17 @@ export async function crearCuenta(
   email: string,
   emailVerified: boolean,
   nombreNegocio: string,
+  aceptaTerminos: boolean,
   deps: DepsCuenta = {},
 ): Promise<{ ok: true; usuario: Usuario } | Falla> {
   const store = deps.store ?? firestoreStore();
   const ahora = deps.now ?? Date.now();
   const correo = email.trim().toLowerCase();
+  // Las cuentas nuevas (negocio propio o equipo) aceptan los Términos y la Política de privacidad
+  // y guardan qué versión aceptaron. Quien ya tenía cuenta no se bloquea.
+  const sinTerminos = () =>
+    falla(400, "Acepta los Términos de servicio y la Política de privacidad para continuar.", "ACEPTAR_TERMINOS");
+  const terminos = { version: VERSION_LEGAL, fecha: ahora };
 
   // Si ya tiene cuenta, se devuelve la que hay (no se crea otro negocio)
   const existente = await store.getUsuario(uid);
@@ -189,12 +196,13 @@ export async function crearCuenta(
         "VERIFICAR_CORREO",
       );
     }
+    if (aceptaTerminos !== true) return sinTerminos();
     // Solo se entra a un equipo de un negocio que hoy es Pro (si bajó a Básico, o está en prueba, no)
     const delEquipo = await store.getNegocio(inv.negocioId);
     const esPro = !!delEquipo && estadoEfectivo(delEquipo, ahora, modo(deps)).plan === "pro";
     const unido = esPro && (await store.unirMiembro(inv.negocioId, uid, cfg.personas.pro));
     if (unido) {
-      const u: Usuario = { uid, email: correo, negocioId: inv.negocioId, rol: "miembro", creado: ahora };
+      const u: Usuario = { uid, email: correo, negocioId: inv.negocioId, rol: "miembro", creado: ahora, terminos };
       const creado = await store.crearUsuario(u);
       if (!creado) {
         const ya = await store.getUsuario(uid);
@@ -221,6 +229,7 @@ export async function crearCuenta(
       "VERIFICAR_CORREO",
     );
   }
+  if (aceptaTerminos !== true) return sinTerminos();
   // Id fijo por persona: un doble clic no puede producir dos negocios
   const idNegocio = `n_${uid}`;
   await store.crearNegocio(
@@ -237,7 +246,7 @@ export async function crearCuenta(
     },
     idNegocio,
   );
-  const u: Usuario = { uid, email: correo, negocioId: idNegocio, rol: "dueno", creado: ahora };
+  const u: Usuario = { uid, email: correo, negocioId: idNegocio, rol: "dueno", creado: ahora, terminos };
   const creado = await store.crearUsuario(u);
   if (!creado) return { ok: true, usuario: (await store.getUsuario(uid)) ?? u };
   return { ok: true, usuario: u };

@@ -18,6 +18,9 @@ async function trim(cache) {
   }
 }
 const SHELL = ["/", "/offline.html", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/favicon.ico"];
+// Términos y Privacidad (lib/rutas-publicas.ts): se guardan con su propia dirección para que nunca
+// reemplacen la copia de la app ("/") ni se abra la app en su lugar sin conexión.
+const LEGALES = ["/terminos", "/privacidad"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -41,14 +44,15 @@ self.addEventListener("fetch", (event) => {
 
   // Páginas: primero la red (siempre la versión más nueva); sin conexión, la copia o el aviso.
   if (req.mode === "navigate") {
+    const legal = LEGALES.find((p) => url.pathname === p || url.pathname === p + "/");
     event.respondWith(
       fetch(req)
         .then((res) => {
           const copy = res.clone();
-          caches.open(VERSION).then((c) => c.put("/", copy));
+          if (!legal || res.ok) caches.open(VERSION).then((c) => c.put(legal || "/", copy));
           return res;
         })
-        .catch(async () => (await caches.match("/")) || caches.match("/offline.html"))
+        .catch(async () => (await caches.match(legal || "/")) || caches.match("/offline.html"))
     );
     return;
   }

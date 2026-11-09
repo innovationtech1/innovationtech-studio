@@ -2,9 +2,11 @@
 
 import { createContext, useContext } from "react";
 import dynamic from "next/dynamic";
+import { usePathname } from "next/navigation";
 import { UserRound } from "lucide-react";
 import type { EstadoCuenta } from "@/lib/account-api";
 import type { Herramienta } from "@/lib/plans";
+import { esRutaPublica } from "@/lib/rutas-publicas";
 
 // Estado de la cuenta que comparte AccountGate con el resto de la app.
 // Este archivo no carga Firebase: page.tsx lo puede importar aunque las cuentas estén apagadas.
@@ -16,7 +18,10 @@ export const CUENTAS_ON = process.env.NEXT_PUBLIC_STUDIO_CUENTAS === "on";
 const AccountGate = dynamic(() => import("./account-gate"), {
   loading: () => <div className="acct-pantalla" />,
 });
+// Los Términos y la Privacidad se muestran sin la puerta: se leen sin iniciar sesión y sin cargar Firebase.
 export function CuentasRaiz({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  if (esRutaPublica(pathname)) return <>{children}</>;
   return <AccountGate>{children}</AccountGate>;
 }
 
