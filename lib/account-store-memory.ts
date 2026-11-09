@@ -1,4 +1,5 @@
 // Versión falsa del AccountStore, guardada en memoria. Solo para pruebas.
+import type { Cifrado } from "./cifrado";
 import type {
   AccountStore,
   ConfigParcial,
@@ -44,6 +45,7 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
   const invitaciones = new Map<string, Invitacion>(
     Object.entries(seed.invitaciones ?? {}).map(([k, v]) => [k.toLowerCase(), { ...v }]),
   );
+  const claves = new Map<string, Cifrado>();
   let contador = 0;
 
   const fila = (negocioId: string, mes: string) => {
@@ -199,6 +201,16 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
         }
         return "ok" as const;
       });
+    },
+    async guardarClaveIA(negocioId, x) {
+      claves.set(negocioId, copia(x));
+    },
+    async leerClaveIA(negocioId) {
+      const x = claves.get(negocioId);
+      return x ? copia(x) : null;
+    },
+    async borrarClaveIA(negocioId) {
+      claves.delete(negocioId);
     },
     eventoMarcado(id: string) {
       return eventos.has(id);

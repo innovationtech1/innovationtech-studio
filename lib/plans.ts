@@ -101,6 +101,9 @@ export type Negocio = {
   // De tarjeta a pago a mano: cuando termine el mes pagado con tarjeta (aviso de suscripción
   // borrada), el negocio pasa a pago a mano con este plan hasta esta fecha (ms).
   manualSiguiente?: { plan: "basico" | "pro"; hasta: number };
+  // Cuenta de Cloudflare propia del negocio. Solo datos para mostrar: la clave va cifrada aparte
+  // (colección claves_ia); aquí nunca el token ni el Account ID completo.
+  iaPropia?: { cuentaFin: string; conectada: number };
   creado: number;
   actualizado: number;
 };
