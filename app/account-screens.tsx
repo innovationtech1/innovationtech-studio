@@ -54,6 +54,21 @@ async function irAStripe(ruta: string, cuerpo: unknown): Promise<true | string> 
 
 /* ---------------- Piezas comunes ---------------- */
 
+// Enlaces a los Términos y la Privacidad (se abren en otra pestaña para no perder lo que estaba haciendo)
+function EnlacesLegales() {
+  return (
+    <p className="acct-legal">
+      <a href="/terminos" target="_blank" rel="noopener">
+        Términos
+      </a>
+      {" · "}
+      <a href="/privacidad" target="_blank" rel="noopener">
+        Privacidad
+      </a>
+    </p>
+  );
+}
+
 function Logo() {
   return (
     <div className="acct-logo">
@@ -271,6 +286,7 @@ export function Bienvenida({ fb, errorInicial = "" }: { fb: FB; errorInicial?: s
         )}
         {error && <div className="error">{error}</div>}
         {aviso && <div className="notice">{aviso}</div>}
+        <EnlacesLegales />
       </div>
     </div>
   );
@@ -292,6 +308,7 @@ function GoogleG() {
 
 export function CrearNegocio({ fb, onListo }: { fb: FB; onListo: () => Promise<void> }) {
   const [nombre, setNombre] = useState("");
+  const [acepta, setAcepta] = useState(false); // Términos y Privacidad: obligatorio para crear o unirse
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState("");
   const [verificar, setVerificar] = useState(false);
@@ -300,7 +317,7 @@ export function CrearNegocio({ fb, onListo }: { fb: FB; onListo: () => Promise<v
   async function crear() {
     setOcupado(true);
     setError("");
-    const r = await api("/api/cuenta", "POST", { nombre: nombre.trim() });
+    const r = await api("/api/cuenta", "POST", { nombre: nombre.trim(), aceptaTerminos: acepta });
     if (r.ok) {
       await onListo();
       setOcupado(false);
@@ -352,7 +369,7 @@ export function CrearNegocio({ fb, onListo }: { fb: FB; onListo: () => Promise<v
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (valido && !ocupado) crear();
+            if (valido && acepta && !ocupado) crear();
           }}
         >
           <label htmlFor="acct-negocio">Nombre de tu negocio</label>
@@ -365,7 +382,20 @@ export function CrearNegocio({ fb, onListo }: { fb: FB; onListo: () => Promise<v
             autoComplete="organization"
           />
           <p className="muted">¿Te invitaron a un equipo? Escribe cualquier nombre y te uniremos al negocio que te invitó.</p>
-          <button className="btn acct-ancho" type="submit" disabled={!valido || ocupado}>
+          <label className="acct-acepto">
+            <input type="checkbox" required checked={acepta} onChange={(e) => setAcepta(e.target.checked)} />
+            <span>
+              Acepto los{" "}
+              <a href="/terminos" target="_blank" rel="noopener">
+                Términos de servicio
+              </a>{" "}
+              y la{" "}
+              <a href="/privacidad" target="_blank" rel="noopener">
+                Política de privacidad
+              </a>
+            </span>
+          </label>
+          <button className="btn acct-ancho" type="submit" disabled={!valido || !acepta || ocupado}>
             {ocupado ? "Creando…" : "Crear mi negocio"}
           </button>
         </form>
@@ -373,7 +403,7 @@ export function CrearNegocio({ fb, onListo }: { fb: FB; onListo: () => Promise<v
         {verificar && (
           <>
             <div className="acct-acciones col">
-              <button className="btn ghost" disabled={ocupado} onClick={yaConfirme}>
+              <button className="btn ghost" disabled={ocupado || !acepta} onClick={yaConfirme}>
                 <Check size={16} aria-hidden /> Ya confirmé mi correo
               </button>
               <button className="btn ghost" disabled={ocupado} onClick={reenviar}>
@@ -868,6 +898,7 @@ export function MiCuenta({
             <button className="btn ghost small" onClick={() => fb.salir()}>
               <LogOut size={15} aria-hidden /> Cerrar sesión
             </button>
+            <EnlacesLegales />
           </div>
         </div>
       </div>
