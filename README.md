@@ -192,6 +192,34 @@ Si alguien se queda sin usos antes de fin de mes, puede comprar un **paquete** (
 - Se gasta **primero lo del mes** y después el saldo del paquete.
 - Si alguien pagó un paquete y no ve su saldo, agrégalo a mano en /admin con "Agregar paquete" (método "otro", nota "pago con tarjeta en Stripe").
 
+### Cambiar la forma de pago (efectivo ↔ tarjeta)
+
+Un cliente puede pasar de pagar a mano (efectivo, Zelle o Cash App) a pagar con tarjeta, o al revés, **sin pagar dos veces el mismo mes y sin que su cuenta se pause**. Siempre se queda con el **mismo plan**.
+
+**De efectivo a tarjeta (lo hace el cliente):**
+
+1. El dueño del negocio entra a **Mi cuenta** y presiona **Pasar a tarjeta**. El botón solo aparece si lo que pagó a mano vence en **2 días o más**.
+2. Studio le avisa: hoy no se le cobra nada y su **primer cobro** con tarjeta será el día en que termina lo que pagó a mano. Presiona **Sí, pasar a tarjeta**.
+3. Pone su tarjeta en la página de Stripe. Listo: sigue usando lo que pagó a mano y Stripe le cobra a partir de esa fecha.
+
+Si faltan menos de 2 días, Studio le dice que podrá poner su tarjeta el día en que vence. Ese día puede elegir su plan con tarjeta normalmente.
+
+**De tarjeta a efectivo (lo haces tú en `/admin`):**
+
+1. Recibe el pago a mano del cliente.
+2. En `/admin`, en la fila del negocio, presiona **Pasar a pago a mano**. El botón solo aparece si paga con tarjeta, su suscripción está al día y no tiene ya un pago a mano pendiente.
+3. Llena el formulario (es igual al de «Activar plan»): plan, **Pagado hasta**, monto, forma de pago y nota. Arriba dice cuándo termina el mes que ya pagó con tarjeta: la fecha «Pagado hasta» tiene que ser **después** de ese día.
+4. Presiona **Guardar pago a mano**. Studio le pide a Stripe que **no vuelva a cobrar** la tarjeta. El cliente usa lo que ya pagó con tarjeta hasta el fin de ese mes y después sigue con lo que pagó a mano, sin pausa.
+5. En la fila aparece la nota «Pasa a pago a mano el (día) (hasta …)». Al llegar ese día, el negocio queda como pago a mano solo.
+
+**Si aparece «Revisar» en rojo** («Revisar: esta suscripción volvió a renovar con un pago a mano pendiente»): la tarjeta del cliente se volvió a activar para cobrar (por ejemplo, el cliente reactivó su suscripción desde el portal de Stripe) aunque tú ya habías registrado su pago a mano. Así podría pagar dos veces. Qué hacer:
+
+1. Entra al panel de **Stripe → Clientes**, busca al cliente y revisa su suscripción: si dice que **se va a renovar** (no dice «se cancela el…»), cobrará de nuevo.
+2. Si el cliente quiere seguir pagando **en efectivo**, cancela la renovación en Stripe (*Cancelar suscripción → al final del periodo*). Si no estás seguro de qué quiere, **contáctalo** antes de cambiar nada.
+3. Si quiere seguir con **tarjeta**, deja la suscripción como está y habla con él sobre el pago a mano que ya hizo (por ejemplo, devolvérselo).
+
+**Cambiar de plan al mismo tiempo** (por ejemplo, de Básico en efectivo a Pro con tarjeta) no se hace desde Studio: el cliente tiene que **escribir a InnovationTECH** y tú lo ayudas a mano.
+
 ### Paso 1: Firebase (inicio de sesión)
 
 Se usa el proyecto de Firebase `innovationtech-nova`, base `(default)`.
@@ -312,6 +340,7 @@ Todo en **una sola publicación**: el sitio principal nunca debe tener las cuent
 - **Agregar paquete:** le suma a un negocio el saldo de un paquete (por ejemplo, si pagó en efectivo). Solo deja elegir los paquetes de su plan (Voz es solo para Pro).
 - **Quitar saldo:** resta saldo a un negocio. Úsalo si le devuelves el dinero a alguien: los reembolsos no quitan el saldo solos.
 - No se puede activar a mano un negocio cuya suscripción de tarjeta todavía puede cobrar (activa, con pago pendiente o en pausa en Stripe): primero cancélala en Stripe.
+- **Pasar a pago a mano:** para quien paga con tarjeta y quiere pasarse a efectivo. Ver «Cambiar la forma de pago».
 
 ### Limitaciones conocidas
 

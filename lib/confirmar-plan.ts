@@ -33,3 +33,19 @@ export function confirmacionCambio(
     boton: "Sí, cambiar a Básico",
   };
 }
+
+// «8 de diciembre»: la fecha del primer cobro, en la hora de Chicago
+const fechaCobro = new Intl.DateTimeFormat("es-MX", { timeZone: "America/Chicago", day: "numeric", month: "long" });
+
+// De pago a mano a tarjeta (mismo plan): hoy no se cobra nada, el primer cobro es cuando termina
+// lo pagado a mano. Recibe `cuenta.pasarATarjeta` (null si el servidor no ofrece la opción).
+export function confirmacionPasarATarjeta(
+  pasarATarjeta: { fecha: number; precio: number } | null,
+): { mensaje: string; boton: string } | null {
+  if (!pasarATarjeta) return null;
+  const { fecha, precio } = pasarATarjeta;
+  return {
+    mensaje: `Vas a pasar a pago con tarjeta. Hoy no se te cobra nada: tu primer cobro de $${precio} será el ${fechaCobro.format(fecha)}, cuando termina lo que pagaste a mano. ¿Continuar?`,
+    boton: "Sí, pasar a tarjeta",
+  };
+}

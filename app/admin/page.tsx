@@ -17,9 +17,13 @@ const PRECIOS = { basico: 19, pro: 39 };
 const fechaCorta = (ms: number) =>
   new Intl.DateTimeFormat("es-MX", { timeZone: "America/Chicago", day: "numeric", month: "short", year: "numeric" }).format(ms);
 
-// Hoy + 1 mes (AAAA-MM-DD, hora de Chicago). Si el mes siguiente es más corto, queda su último día.
-function dentroDeUnMes(): string {
-  const [y, m, d] = diaChicago(Date.now()).split("-").map(Number);
+// «8 de diciembre» (sin año), para las notas de pasar a pago a mano
+const fechaDia = (ms: number) =>
+  new Intl.DateTimeFormat("es-MX", { timeZone: "America/Chicago", day: "numeric", month: "long" }).format(ms);
+
+// Hoy (o la fecha dada) + 1 mes (AAAA-MM-DD, hora de Chicago). Si el mes siguiente es más corto, queda su último día.
+function dentroDeUnMes(desde = Date.now()): string {
+  const [y, m, d] = diaChicago(desde).split("-").map(Number);
   const ultimo = new Date(Date.UTC(y, m + 1, 0)).getUTCDate(); // último día del mes siguiente
   const f = new Date(Date.UTC(y, m, Math.min(d, ultimo)));
   return f.toISOString().slice(0, 10);
@@ -180,7 +184,7 @@ function PrepararStripe() {
 
 function Fila({ fila, onCambio }: { fila: FilaNegocio; onCambio: () => Promise<void> }) {
   const { negocio, efectivo } = fila;
-  const [abierto, setAbierto] = useState<"" | "activar" | "paquete" | "quitar" | "historial">("");
+  const [abierto, setAbierto] = useState<"" | "activar" | "a_mano" | "paquete" | "quitar" | "historial">("");
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState("");
 
@@ -202,6 +206,8 @@ function Fila({ fila, onCambio }: { fila: FilaNegocio; onCambio: () => Promise<v
   }
 
   const alternar = (que: Exclude<typeof abierto, "">) => setAbierto(abierto === que ? "" : que);
+  // Paga con tarjeta al día y todavía no tiene un pago a mano pendiente: se puede pasar a pago a mano
+  const puedePasarAMano = negocio.origen === "stripe" && negocio.stripe?.status === "active" && !negocio.manualSiguiente;
 
   return (
     <section className="adm-fila">
@@ -215,6 +221,9 @@ function Fila({ fila, onCambio }: { fila: FilaNegocio; onCambio: () => Promise<v
       <span data-et="Paquetes">{saldoTexto(fila.saldo)}</span>
       <div className="adm-acciones">
         <button className="btn small" disabled={ocupado} onClick={() => alternar("activar")}>Activar plan</button>
+        {puedePasarAMano && (
+          <button className="btn small ghost" disabled={ocupado} onClick={() => alternar("a_mano")}>Pasar a pago a mano</button>
+        )}
         <button className="btn small ghost" disabled={ocupado} onClick={() => void accion({ accion: "pausar" })}>Pausar</button>
         <button className="btn small ghost" disabled={ocupado} onClick={() => void accion({ accion: "reactivar" })}>Reactivar</button>
         <button className="btn small ghost" disabled={ocupado} onClick={() => alternar("paquete")}>Agregar paquete</button>
@@ -224,7 +233,31 @@ function Fila({ fila, onCambio }: { fila: FilaNegocio; onCambio: () => Promise<v
       {negocio.origen === "stripe" && (
         <p className="muted adm-ancho">Si paga con tarjeta, pausa o cancela en Stripe; el siguiente aviso de Stripe puede reactivarlo.</p>
       )}
+      {negocio.manualSiguiente && (
+        <p className="muted adm-ancho">
+          {fila.finTarjeta !== undefined
+            ? `Pasa a pago a mano el ${fechaDia(fila.finTarjeta)} (hasta ${fechaDia(negocio.manualSiguiente.hasta)})`
+            : `Pasa a pago a mano al terminar el mes con tarjeta (hasta ${fechaDia(negocio.manualSiguiente.hasta)})`}
+        </p>
+      )}
+      {negocio.stripe?.renovoConManual && (
+        <p className="adm-error adm-ancho" role="alert">Revisar: esta suscripción volvió a renovar con un pago a mano pendiente</p>
+      )}
       {error && <p className="adm-error adm-ancho" role="alert">{error}</p>}
+      {abierto === "a_mano" && (
+        <FormActivar
+          titulo="Pasar a pago a mano"
+          ayuda={negocio.stripe?.finPeriodo !== undefined ? `El mes con tarjeta termina el ${fechaDia(negocio.stripe.finPeriodo)}` : undefined}
+          planInicial={negocio.plan === "pro" ? "pro" : "basico"}
+          fechaInicial={negocio.stripe?.finPeriodo !== undefined ? dentroDeUnMes(negocio.stripe.finPeriodo) : undefined}
+          boton="Guardar pago a mano"
+          ocupado={ocupado}
+          onCancelar={() => setAbierto("")}
+          onEnviar={async (c) => {
+            if (await accion({ accion: "pasar_a_manual", ...c })) setAbierto("");
+          }}
+        />
+      )}
       {abierto === "activar" && (
         <FormActivar
           ocupado={ocupado}
@@ -259,18 +292,30 @@ function Fila({ fila, onCambio }: { fila: FilaNegocio; onCambio: () => Promise<v
   );
 }
 
+// Pago a mano: «Activar plan» (ahora mismo) o «Pasar a pago a mano» (cuando termina el mes con tarjeta).
+// Los dos piden lo mismo: plan, hasta cuándo pagó, monto, forma de pago y nota.
 function FormActivar({
+  titulo,
+  ayuda,
+  planInicial = "basico",
+  fechaInicial,
+  boton = "Guardar pago y activar",
   ocupado,
   onCancelar,
   onEnviar,
 }: {
+  titulo?: string;
+  ayuda?: string;
+  planInicial?: "basico" | "pro";
+  fechaInicial?: string; // AAAA-MM-DD; si falta, dentro de un mes
+  boton?: string;
   ocupado: boolean;
   onCancelar: () => void;
   onEnviar: (c: Record<string, unknown>) => Promise<void>;
 }) {
-  const [plan, setPlan] = useState<"basico" | "pro">("basico");
-  const [fecha, setFecha] = useState(dentroDeUnMes);
-  const [monto, setMonto] = useState(String(PRECIOS.basico));
+  const [plan, setPlan] = useState<"basico" | "pro">(planInicial);
+  const [fecha, setFecha] = useState(() => fechaInicial ?? dentroDeUnMes());
+  const [monto, setMonto] = useState(String(PRECIOS[planInicial]));
   const [metodo, setMetodo] = useState<PagoManual["metodo"]>("efectivo");
   const [nota, setNota] = useState("");
 
@@ -282,6 +327,8 @@ function FormActivar({
         void onEnviar({ plan, fecha, monto: monto.trim() === "" ? Number.NaN : Number(monto), metodo, nota });
       }}
     >
+      {titulo && <strong className="adm-ancho">{titulo}</strong>}
+      {ayuda && <p className="muted adm-ancho">{ayuda}</p>}
       <label>Plan
         <select
           value={plan}
@@ -312,7 +359,7 @@ function FormActivar({
         <input type="text" maxLength={300} value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Opcional" />
       </label>
       <div className="adm-acciones">
-        <button className="btn small" type="submit" disabled={ocupado}>Guardar pago y activar</button>
+        <button className="btn small" type="submit" disabled={ocupado}>{boton}</button>
         <button className="btn small ghost" type="button" onClick={onCancelar}>Cancelar</button>
       </div>
     </form>
