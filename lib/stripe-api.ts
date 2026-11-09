@@ -1,6 +1,6 @@
 import "server-only";
 import Stripe from "stripe";
-import { firestoreStore, type AccountStore } from "./account-store";
+import { firestoreStore, type AccountStore, type PagoManual } from "./account-store";
 import { esCorreoAdmin, type Falla } from "./account-api";
 import { validarDatosActivar, type DatosActivar } from "./admin-api";
 import { estadoEfectivo, esPaquete, quedaMargenParaTarjeta, type Negocio, type PaqueteId } from "./plans";
@@ -496,6 +496,10 @@ export async function abrirPortal(
 /* ---------------- De tarjeta a pago a mano (administrador) ---------------- */
 
 const SIN_TARJETA_AL_DIA = "Este negocio no tiene una suscripción con tarjeta al día.";
+const YA_PENDIENTE = "Este negocio ya tiene un pago a mano pendiente.";
+const NO_SE_GUARDO_MANUAL =
+  "La tarjeta ya no volverá a cobrar, pero no se pudo guardar el pago a mano. Vuelve a intentarlo o anótalo en el historial.";
+const NO_NEGOCIO_ADMIN = () => falla(404, "No encontramos ese negocio.");
 
 // «Pasar a pago a mano»: el cliente paga con tarjeta y ahora pagará a mano.
 // No se cobra dos veces ni se pausa: la suscripción se cancela al final del mes ya pagado con
@@ -519,7 +523,46 @@ export async function pasarAManual(
   if (invalido) return invalido;
 
   const guardado = await store.getNegocio(negocioId);
-  if (!guardado) return falla(404, "No encontramos ese negocio.");
+  if (!guardado) return NO_NEGOCIO_ADMIN();
+  const nota = typeof datos.nota === "string" ? datos.nota.trim().slice(0, 300) : "";
+  const pago: PagoManual = {
+    id: crypto.randomUUID(),
+    negocioId,
+    plan: datos.plan,
+    monto: datos.monto,
+    metodo: datos.metodo,
+    hasta: datos.hasta,
+    ...(nota ? { nota } : {}),
+    registradoPor: adminEmail.trim().toLowerCase(),
+    fecha: ahora,
+  };
+  const noSeGuardo = (subId: string | undefined, e: unknown) => {
+    console.error(
+      `Stripe: la suscripción ${subId ?? "(sin id)"} del negocio ${negocioId} ya no volverá a cobrar, pero no se pudo ` +
+        `guardar el pago a mano (plan ${datos.plan}, hasta ${datos.hasta}, monto ${datos.monto}):`,
+      mensaje(e),
+    );
+    return falla(500, NO_SE_GUARDO_MANUAL);
+  };
+
+  // Ya hay un pago a mano pendiente (doble clic o reintento): no se registra otro.
+  // Única excepción: un reintento con el mismo plan y fecha cuando el pendiente se guardó pero el
+  // pago no (falló al anotarlo). Entonces solo se anota el pago, sin volver a Stripe.
+  const previo = guardado.manualSiguiente;
+  if (previo) {
+    const mismo = previo.plan === datos.plan && previo.hasta === datos.hasta;
+    const finGuardado = guardado.stripe?.finPeriodo;
+    if (!mismo || finGuardado === undefined) return falla(400, YA_PENDIENTE);
+    const pagos = await store.listarPagosManuales(negocioId);
+    if (pagos.some((p) => p.plan === datos.plan && p.hasta === datos.hasta)) return falla(400, YA_PENDIENTE);
+    try {
+      await store.registrarPagoManual(pago);
+    } catch (e) {
+      return noSeGuardo(guardado.stripe?.subscriptionId, e);
+    }
+    return { ok: true, finTarjeta: finGuardado };
+  }
+
   const cliente = clienteDe(deps);
   if (!cliente) return NO_CONFIGURADO();
   // Solo una suscripción de tarjeta de este modo de Stripe (la del otro modo no cobra aquí)
@@ -547,30 +590,33 @@ export async function pasarAManual(
     if (datos.hasta <= finTarjeta) {
       return falla(400, `La fecha debe ser después del ${fechaCorta(finTarjeta)}, cuando termina el mes pagado con tarjeta.`);
     }
-    // Deja de cobrar al final del mes ya pagado (no cancela hoy: el cliente sigue con su plan)
+    // Deja de cobrar al final del mes ya pagado (no cancela hoy: el cliente sigue con su plan).
+    // Repetirlo no hace daño (otra llamada a la vez deja lo mismo).
     await cliente.subscriptions.update(subId, { cancel_at_period_end: true });
   } catch (e) {
     console.error("Stripe: no se pudo pasar a pago a mano:", mensaje(e));
     return ERROR_STRIPE();
   }
 
-  const nota = typeof datos.nota === "string" ? datos.nota.trim().slice(0, 300) : "";
-  await store.registrarPagoManual({
-    id: crypto.randomUUID(),
-    negocioId,
-    plan: datos.plan,
-    monto: datos.monto,
-    metodo: datos.metodo,
-    hasta: datos.hasta,
-    ...(nota ? { nota } : {}),
-    registradoPor: adminEmail.trim().toLowerCase(),
-    fecha: ahora,
-  });
-  await store.modificarNegocio(negocioId, (n) => ({
-    manualSiguiente: { plan: datos.plan, hasta: datos.hasta },
-    stripe: { ...n.stripe, finPeriodo: finTarjeta },
-    actualizado: ahora,
-  }));
+  // Primero el pendiente (lo que el webhook necesita) y después el registro del pago.
+  // Se revisa otra vez dentro de la transacción: si otra llamada lo guardó antes, esta no registra nada.
+  try {
+    let yaHabia = false;
+    const r = await store.modificarNegocio(negocioId, (n) => {
+      yaHabia = !!n.manualSiguiente; // se asigna en cada vuelta: Firestore puede repetir la transacción
+      if (yaHabia) return null;
+      return {
+        manualSiguiente: { plan: datos.plan, hasta: datos.hasta },
+        stripe: { ...n.stripe, finPeriodo: finTarjeta },
+        actualizado: ahora,
+      };
+    });
+    if (r === "no_existe") return NO_NEGOCIO_ADMIN();
+    if (yaHabia) return falla(400, YA_PENDIENTE);
+    await store.registrarPagoManual(pago);
+  } catch (e) {
+    return noSeGuardo(subId, e);
+  }
   return { ok: true, finTarjeta };
 }
 

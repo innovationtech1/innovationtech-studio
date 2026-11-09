@@ -1494,7 +1494,7 @@ test("pasarAManual: suscripción active → cancela al final del periodo, regist
   const r = await pasarAManual(ADMIN, true, "n1", datosManual({ nota: " pagó en tienda " }), depsM(store, f.cliente));
   assert.deepEqual(r, { ok: true, finTarjeta: Math.floor(FIN_TARJETA / 1000) * 1000 });
   assert.deepEqual(f.metodos(), ["subscriptions.retrieve", "subscriptions.update"]);
-  assert.deepEqual(f.llamadas[1].args, ["sub_1", { cancel_at_period_end: true }]);
+  assert.deepEqual(f.llamadas.find((l) => l.metodo === "subscriptions.update")!.args, ["sub_1", { cancel_at_period_end: true }]);
   const n = await store.getNegocio("n1");
   assert.equal(n?.origen, "stripe");
   assert.equal(n?.estado, "activo");
@@ -1660,4 +1660,105 @@ test("aviso updated con cancel_at_period_end true y manualSiguiente → sin marc
   );
   assert.equal(r2?.stripe?.renovoConManual, undefined);
   assert.deepEqual(e2, []);
+});
+
+const YA_PENDIENTE = "Este negocio ya tiene un pago a mano pendiente.";
+const NO_SE_GUARDO = "La tarjeta ya no volverá a cobrar, pero no se pudo guardar el pago a mano. Vuelve a intentarlo o anótalo en el historial.";
+
+test("pasarAManual dos veces seguidas → la segunda 400 y un solo pago a mano", async () => {
+  const f = stripeFalso({ suscripciones: [subConFin()] });
+  const store = nuevoStore(conTarjeta());
+  assert.equal((await pasarAManual(ADMIN, true, "n1", datosManual(), depsM(store, f.cliente))).ok, true);
+  // Otra vez (doble clic o reintento), con los mismos datos o con otros
+  for (const d of [datosManual(), datosManual({ hasta: FIN_TARJETA + 40 * DIA })]) {
+    const r = await pasarAManual(ADMIN, true, "n1", d, depsM(store, f.cliente));
+    assert.equal(r.ok, false);
+    if (!r.ok) {
+      assert.equal(r.status, 400);
+      assert.equal(r.error, YA_PENDIENTE);
+    }
+  }
+  assert.equal((await store.listarPagosManuales("n1")).length, 1);
+  assert.deepEqual((await store.getNegocio("n1"))?.manualSiguiente, { plan: "basico", hasta: FIN_TARJETA + 30 * DIA });
+});
+
+test("pasarAManual dos a la vez → solo una pasa y un solo pago a mano", async () => {
+  const f = stripeFalso({ suscripciones: [subConFin()] });
+  const store = nuevoStore(conTarjeta());
+  const r = await Promise.all([
+    pasarAManual(ADMIN, true, "n1", datosManual(), depsM(store, f.cliente)),
+    pasarAManual(ADMIN, true, "n1", datosManual({ hasta: FIN_TARJETA + 40 * DIA }), depsM(store, f.cliente)),
+  ]);
+  assert.equal(r.filter((x) => x.ok).length, 1);
+  const malo = r.find((x) => !x.ok);
+  assert.ok(malo && !malo.ok && malo.status === 400 && malo.error === YA_PENDIENTE);
+  assert.equal((await store.listarPagosManuales("n1")).length, 1);
+});
+
+test("pasarAManual: guarda manualSiguiente antes del pago; si el pago falla → 500 y el reintento solo anota el pago", async () => {
+  const f = stripeFalso({ suscripciones: [subConFin()] });
+  const store = nuevoStore(conTarjeta());
+  const original = store.registrarPagoManual;
+  store.registrarPagoManual = async () => {
+    throw new Error("sin conexión");
+  };
+  const errores: string[] = [];
+  const e = console.error;
+  console.error = (...a: unknown[]) => void errores.push(a.map(String).join(" "));
+  let r;
+  try {
+    r = await pasarAManual(ADMIN, true, "n1", datosManual(), depsM(store, f.cliente));
+  } finally {
+    console.error = e;
+  }
+  assert.equal(r.ok, false);
+  if (!r.ok) {
+    assert.equal(r.status, 500);
+    assert.equal(r.error, NO_SE_GUARDO);
+  }
+  assert.equal(errores.length, 1);
+  for (const dato of ["n1", "sub_1", "basico", String(FIN_TARJETA + 30 * DIA), "19"]) assert.ok(errores[0].includes(dato), errores[0]);
+  // El pendiente ya quedó guardado (la tarjeta no volverá a cobrar)
+  assert.deepEqual((await store.getNegocio("n1"))?.manualSiguiente, { plan: "basico", hasta: FIN_TARJETA + 30 * DIA });
+
+  // Reintento con otros datos: no se mezcla
+  store.registrarPagoManual = original;
+  const otro = await pasarAManual(ADMIN, true, "n1", datosManual({ hasta: FIN_TARJETA + 40 * DIA }), depsM(store, f.cliente));
+  assert.ok(!otro.ok && otro.status === 400 && otro.error === YA_PENDIENTE);
+  // Reintento con los mismos datos: solo anota el pago (sin volver a Stripe)
+  const antes = f.llamadas.length;
+  const r2 = await pasarAManual(ADMIN, true, "n1", datosManual(), depsM(store, f.cliente));
+  assert.deepEqual(r2, { ok: true, finTarjeta: Math.floor(FIN_TARJETA / 1000) * 1000 });
+  assert.equal(f.llamadas.length, antes);
+  assert.equal((await store.listarPagosManuales("n1")).length, 1);
+  // Y ya no se puede repetir
+  const r3 = await pasarAManual(ADMIN, true, "n1", datosManual(), depsM(store, f.cliente));
+  assert.ok(!r3.ok && r3.status === 400 && r3.error === YA_PENDIENTE);
+  assert.equal((await store.listarPagosManuales("n1")).length, 1);
+});
+
+test("pasarAManual: si guardar el pendiente falla → 500 sin pago a mano", async () => {
+  const f = stripeFalso({ suscripciones: [subConFin()] });
+  const store = nuevoStore(conTarjeta());
+  store.modificarNegocio = async () => {
+    throw new Error("sin conexión");
+  };
+  const e = console.error;
+  console.error = () => {};
+  try {
+    const r = await pasarAManual(ADMIN, true, "n1", datosManual(), depsM(store, f.cliente));
+    assert.ok(!r.ok && r.status === 500 && r.error === NO_SE_GUARDO);
+  } finally {
+    console.error = e;
+  }
+  assert.equal((await store.listarPagosManuales("n1")).length, 0);
+});
+
+test("pasarAManual: el negocio desapareció al guardar → 404 sin pago a mano", async () => {
+  const f = stripeFalso({ suscripciones: [subConFin()] });
+  const store = nuevoStore(conTarjeta());
+  store.modificarNegocio = async () => "no_existe";
+  const r = await pasarAManual(ADMIN, true, "n1", datosManual(), depsM(store, f.cliente));
+  assert.ok(!r.ok && r.status === 404);
+  assert.equal((await store.listarPagosManuales("n1")).length, 0);
 });
