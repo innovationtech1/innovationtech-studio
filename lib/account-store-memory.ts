@@ -1,4 +1,5 @@
 // Versión falsa del AccountStore, guardada en memoria. Solo para pruebas.
+import type { Cifrado } from "./cifrado";
 import type {
   AccountStore,
   ConfigParcial,
@@ -10,7 +11,7 @@ import type {
   Uso,
 } from "./account-store";
 import type { Contador, Negocio, PlanesConfig } from "./plans";
-import { cantidadSegura, mezclarConfig, repartirReserva, sumarSaldo } from "./plans";
+import { aplicarCambios, cantidadSegura, mezclarConfig, repartirReserva, sumarSaldo } from "./plans";
 
 export type SemillaMemoria = {
   usuarios?: Usuario[];
@@ -44,6 +45,7 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
   const invitaciones = new Map<string, Invitacion>(
     Object.entries(seed.invitaciones ?? {}).map(([k, v]) => [k.toLowerCase(), { ...v }]),
   );
+  const claves = new Map<string, Cifrado>();
   let contador = 0;
 
   const fila = (negocioId: string, mes: string) => {
@@ -192,12 +194,23 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
         const cambios = fn(copia(n));
         if (eventoId) eventos.add(eventoId);
         if (cambios) {
+          // Como en Firestore: null en un campo borrable (manualSiguiente) lo borra
           const { id: _id, ...datos } = copia(cambios);
           void _id;
-          Object.assign(n, datos);
+          negocios.set(id, aplicarCambios(n, datos));
         }
         return "ok" as const;
       });
+    },
+    async guardarClaveIA(negocioId, x) {
+      claves.set(negocioId, copia(x));
+    },
+    async leerClaveIA(negocioId) {
+      const x = claves.get(negocioId);
+      return x ? copia(x) : null;
+    },
+    async borrarClaveIA(negocioId) {
+      claves.delete(negocioId);
     },
     eventoMarcado(id: string) {
       return eventos.has(id);

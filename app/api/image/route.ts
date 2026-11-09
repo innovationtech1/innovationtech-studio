@@ -23,11 +23,12 @@ export async function POST(req: Request) {
     contador: "imagenes",
     unidades: n,
     clavePropia: provider === "cloudflare" ? clavePropiaCF(req) : !!req.headers.get("x-replicate-key"),
+    cloudflare: provider === "cloudflare", // Replicate no usa la clave guardada de Cloudflare
   });
   if (!acceso.ok) return jsonAcceso(acceso);
 
   if (provider === "cloudflare") {
-    const c = getCreds(req, "image", n);
+    const c = getCreds(req, "image", n, acceso.cfGuardada);
     if ("error" in c) {
       await acceso.devolver();
       return jsonError(c.error, c.status);

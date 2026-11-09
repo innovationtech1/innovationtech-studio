@@ -192,6 +192,39 @@ Si alguien se queda sin usos antes de fin de mes, puede comprar un **paquete** (
 - Se gasta **primero lo del mes** y después el saldo del paquete.
 - Si alguien pagó un paquete y no ve su saldo, agrégalo a mano en /admin con "Agregar paquete" (método "otro", nota "pago con tarjeta en Stripe").
 
+### Cambiar la forma de pago (efectivo ↔ tarjeta)
+
+Un cliente puede pasar de pagar a mano (efectivo, Zelle o Cash App) a pagar con tarjeta, o al revés, **sin pagar dos veces el mismo mes y sin que su cuenta se pause**. Siempre se queda con el **mismo plan**.
+
+**De efectivo a tarjeta (lo hace el cliente):**
+
+1. El dueño del negocio entra a **Mi cuenta** y presiona **Pasar a tarjeta**. El botón solo aparece si lo que pagó a mano vence en **2 días o más**.
+2. Studio le avisa: hoy no se le cobra nada y su **primer cobro** con tarjeta será el día en que termina lo que pagó a mano. Presiona **Sí, pasar a tarjeta**.
+3. Pone su tarjeta en la página de Stripe. Listo: sigue usando lo que pagó a mano y Stripe le cobra a partir de esa fecha.
+
+Si faltan menos de 2 días, Studio le dice que podrá poner su tarjeta el día en que vence. Ese día puede elegir su plan con tarjeta normalmente.
+
+**De tarjeta a efectivo (lo haces tú en `/admin`):**
+
+1. Recibe el pago a mano del cliente.
+2. En `/admin`, en la fila del negocio, presiona **Pasar a pago a mano**. El botón solo aparece si paga con tarjeta, su suscripción está al día y no tiene ya un pago a mano pendiente.
+3. Llena el formulario (es igual al de «Activar plan»): plan, **Pagado hasta**, monto, forma de pago y nota. Arriba dice cuándo termina el mes que ya pagó con tarjeta: la fecha «Pagado hasta» tiene que ser **después** de ese día.
+4. Presiona **Guardar pago a mano**. Studio le pide a Stripe que **no vuelva a cobrar** la tarjeta. El cliente usa lo que ya pagó con tarjeta hasta el fin de ese mes y después sigue con lo que pagó a mano, sin pausa.
+5. En la fila aparece la nota «Pasa a pago a mano el (día) (hasta …)». Al llegar ese día, el negocio queda como pago a mano solo.
+
+**Cambios de plan mientras tanto:** mientras la tarjeta está en su periodo gratis (hasta la fecha del pago a mano) o hay un paso a pago a mano pendiente, el cliente cambia de plan escribiéndole a InnovationTECH. Si lo cambia en el portal de Stripe durante ese tiempo, el plan nuevo empieza con el primer cobro de la tarjeta.
+
+**Si aparece «Revisar» en rojo** («Revisar: esta suscripción volvió a renovar con un pago a mano pendiente»): la tarjeta del cliente se volvió a activar para cobrar (por ejemplo, el cliente reactivó su suscripción desde el portal de Stripe) aunque tú ya habías registrado su pago a mano. Así podría pagar dos veces. Qué hacer:
+
+1. Entra al panel de **Stripe → Clientes**, busca al cliente y revisa su suscripción: si dice que **se va a renovar** (no dice «se cancela el…»), cobrará de nuevo.
+2. Si no estás seguro de qué quiere el cliente, **contáctalo** antes de cambiar nada. Luego elige una de estas dos opciones:
+   - **Si el cliente quiere seguir pagando a mano:** en Stripe, en su suscripción, vuelve a programar la cancelación **al final del periodo** (*Cancelar suscripción → al final del periodo*). No la canceles de inmediato, para no quitarle días que ya pagó con tarjeta.
+   - **Si el cliente prefiere seguir con tarjeta:** en `/admin` presiona **Quitar pago a mano pendiente** y acuerda con él qué hacer con el pago a mano que ya te dio (por ejemplo, tomarlo como pago de otro mes). No toques Stripe.
+
+**Si te equivocaste** en la fecha o el monto al pasar a pago a mano: presiona **Quitar pago a mano pendiente** y vuelve a hacer **Pasar a pago a mano** con los datos correctos. Quitar el pendiente no cambia la suscripción de Stripe (si sigue cancelada, la cuenta se pausará al terminar el mes si no vuelves a registrar el pago) y **no se anota en el Historial**: el renglón del pago original se queda ahí, así que escribe en la **Nota** del nuevo registro por qué lo corregiste.
+
+**Cambiar de plan al mismo tiempo** (por ejemplo, de Básico en efectivo a Pro con tarjeta) no se hace desde Studio: el cliente tiene que **escribir a InnovationTECH** y tú lo ayudas a mano.
+
 ### Paso 1: Firebase (inicio de sesión)
 
 Se usa el proyecto de Firebase `innovationtech-nova`, base `(default)`.
@@ -215,6 +248,7 @@ Entra a Netlify → proyecto **innovationtech-studio** → *Project configuratio
 | `STRIPE_SECRET_KEY` | Clave secreta de Stripe (`sk_test_...` en pruebas) |
 | `STRIPE_WEBHOOK_SECRET` | Secreto de firma del webhook (se obtiene en el Paso 3) |
 | `CF_API_TOKEN` | Token de Workers AI de Cloudflare |
+| `STUDIO_CLAVES_SECRETO` | Llave para guardar cifradas las claves de Cloudflare de los clientes (ver «Conectar la cuenta de Cloudflare del cliente») |
 
 **No secretas** (son datos públicos o ajustes; no son claves):
 
@@ -305,6 +339,27 @@ Todo en **una sola publicación**: el sitio principal nunca debe tener las cuent
 6. **El día del lanzamiento (no antes):** en Cloudflare activa **Workers Paid** (esto sí tiene costo: lo pagas tú, revisa el precio en Cloudflare antes de activarlo) y crea una **alerta de gasto** (*Billing → Notifications*), para enterarte si el uso crece. Antes del lanzamiento no hace falta.
 7. Para **apagar** todo: pon `STUDIO_CUENTAS` y `NEXT_PUBLIC_STUDIO_CUENTAS` en `off` (o bórralas) y publica de nuevo.
 
+### Conectar la cuenta de Cloudflare del cliente (opcional)
+
+Cada negocio puede conectar **su propia cuenta gratis de Cloudflare** una sola vez. Desde ese momento Studio usa la IA de esa cuenta para todo el equipo del negocio, **sin los límites del mes** y sin gastar sus paquetes.
+
+- **Quién la conecta:** solo el dueño del negocio. En **Mi cuenta → Tu cuenta de Cloudflare (opcional)** presiona **Conectar Cloudflare**: se abre el mismo asistente de siempre (crear la cuenta, copiar el Account ID y crear el token). Al final, Studio prueba la clave y la guarda **cifrada** (con un candado digital) en la cuenta, no en el navegador.
+- **Si ya tenía la clave en su dispositivo:** Mi cuenta muestra **Guardar en tu cuenta**. La sube a la cuenta y la borra del navegador.
+- **Las demás personas del equipo** no tienen que hacer nada: ven «Tu negocio usa su propia cuenta de Cloudflare.».
+- **Desconectar:** en Mi cuenta, **Desconectar**. Studio vuelve a usar la IA de InnovationTECH con los límites del plan.
+- Studio nunca muestra el token; solo los últimos 4 caracteres del Account ID (por ejemplo, «cuenta …a1b2»).
+
+**Lo que tienes que hacer tú una vez:** crear en Netlify la variable `STUDIO_CLAVES_SECRETO` (es la llave del candado). Créala para **todas las publicaciones** (Production, Deploy Previews y Branch deploys) y marca **Contains secret values**. Para inventar el valor, abre **PowerShell** en tu computadora (menú Inicio → escribe «PowerShell»), pega este comando y presiona Enter:
+
+```powershell
+$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
+```
+
+Copia el texto que aparece (termina en `=`) y pégalo como valor de la variable. No lo compartas con nadie. Puedes usar un valor distinto para las versiones de prueba y para el sitio principal. Después, vuelve a publicar el sitio.
+
+- **Si falta la variable:** los clientes no pueden conectar su Cloudflare (verán «Falta configurar el guardado seguro de claves. Avísale a InnovationTECH.»). Todo lo demás sigue funcionando.
+- **Si la cambias después:** las claves que ya estaban guardadas **dejan de poder leerse**. Esos clientes vuelven a usar la IA de InnovationTECH con los límites del plan y en Mi cuenta ven «Tu Cloudflare conectado ya no se puede leer. Conéctalo otra vez.». Tienen que conectarla de nuevo. Por eso, cámbiala solo si crees que alguien la vio.
+
 ### Cómo usar `/admin`
 
 - **Activar a mano:** para quien paga en efectivo o con Cash App. Al vencer la fecha, el negocio se pausa solo.
@@ -312,6 +367,7 @@ Todo en **una sola publicación**: el sitio principal nunca debe tener las cuent
 - **Agregar paquete:** le suma a un negocio el saldo de un paquete (por ejemplo, si pagó en efectivo). Solo deja elegir los paquetes de su plan (Voz es solo para Pro).
 - **Quitar saldo:** resta saldo a un negocio. Úsalo si le devuelves el dinero a alguien: los reembolsos no quitan el saldo solos.
 - No se puede activar a mano un negocio cuya suscripción de tarjeta todavía puede cobrar (activa, con pago pendiente o en pausa en Stripe): primero cancélala en Stripe.
+- **Pasar a pago a mano:** para quien paga con tarjeta y quiere pasarse a efectivo. Ver «Cambiar la forma de pago».
 
 ### Limitaciones conocidas
 

@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import type { Settings } from "@/lib/types";
+import { useEffect, useState } from "react";
 import type { DemoStatus } from "@/lib/use-demo";
+import { refrescarCuenta } from "./account-context";
+import { borrarClaveCfLocal, EVENTO_AJUSTES, leerClaveCfLocal } from "@/lib/limpiar-dispositivo";
 
 import { ArrowLeft, Check, CircleCheck, CircleX, ClipboardPaste, Cog, ExternalLink, Plug, Rocket } from "lucide-react";
 type Check = { ok: boolean; label: string; help?: string };
@@ -43,20 +44,53 @@ export function CheckList({ checks }: { checks: Check[] }) {
   );
 }
 
-// Asistente paso a paso para conectar la cuenta gratis de Cloudflare
+export type ResultadoClave = { ok: true } | { ok: false; error: string; checks?: Check[] };
+
+// Guarda la clave de Cloudflare en la cuenta del negocio (solo el dueño). El servidor la prueba
+// antes de guardarla. Si se guardó: se borra la copia del navegador y se vuelve a leer la cuenta.
+export async function guardarClaveEnCuenta(accountId: string, token: string): Promise<ResultadoClave> {
+  try {
+    const r = await fetch("/api/cuenta/clave-ia", {
+      method: "POST",
+      cache: "no-store",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ accountId: accountId.trim(), token: token.trim() }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok && d?.ok) {
+      borrarClaveCfLocal();
+      await refrescarCuenta();
+      return { ok: true };
+    }
+    return {
+      ok: false,
+      error: typeof d?.error === "string" && d.error ? d.error : "Algo salió mal. Intenta de nuevo.",
+      checks: Array.isArray(d?.checks) && d.checks.length > 0 ? d.checks : undefined,
+    };
+  } catch {
+    return { ok: false, error: "No se pudo guardar. Revisa tu internet." };
+  }
+}
+
+// Asistente paso a paso para conectar la cuenta gratis de Cloudflare.
+// Sin `enCuenta` (modo demo / cuentas apagadas): prueba la clave y la guarda en el navegador (onSave).
+// Con `enCuenta` (dueño, cuentas encendidas): el último paso la guarda en la cuenta del negocio.
 export function CloudflareWizard({
   settings,
   onSave,
   onFinish,
+  enCuenta = false,
 }: {
-  settings: Settings;
-  onSave: (s: Settings) => void;
+  settings: { cfAccountId: string; cfToken: string };
+  onSave?: (accountId: string, token: string) => void;
   onFinish: () => void;
+  enCuenta?: boolean;
 }) {
   const [step, setStep] = useState(settings.cfAccountId && settings.cfToken ? 4 : 1);
   const [accountId, setAccountId] = useState(settings.cfAccountId);
   const [token, setToken] = useState(settings.cfToken);
   const [checks, setChecks] = useState<Check[] | null>(null);
+  const [error, setError] = useState("");
   const [testing, setTesting] = useState(false);
   const [done, setDone] = useState(false);
 
@@ -65,11 +99,20 @@ export function CloudflareWizard({
   const test = async () => {
     setTesting(true);
     setChecks(null);
+    setError("");
+    if (enCuenta) {
+      const r = await guardarClaveEnCuenta(accountId, token);
+      if (r.ok) setDone(true);
+      else if (r.checks) setChecks(r.checks);
+      else setError(r.error);
+      setTesting(false);
+      return;
+    }
     try {
       const r = await testCloudflare(accountId, token);
       setChecks(r.checks);
       if (r.ok) {
-        onSave({ ...settings, cfAccountId: accountId.trim(), cfToken: token.trim(), textProvider: "cloudflare", imageProvider: "cloudflare" });
+        onSave?.(accountId.trim(), token.trim());
         setDone(true);
       }
     } catch {
@@ -166,7 +209,11 @@ export function CloudflareWizard({
               <ClipboardPaste size={16} aria-hidden /> Pegar
             </button>
           </div>
-          <p className="muted">El token es como una contraseña: no lo compartas con nadie. Se guarda solo en este dispositivo.</p>
+          <p className="muted">
+            {enCuenta
+              ? "El token es como una contraseña: no lo compartas con nadie. Se guarda cifrado en tu cuenta y lo usa todo tu equipo."
+              : "El token es como una contraseña: no lo compartas con nadie. Se guarda solo en este dispositivo."}
+          </p>
           <div className="actions">
             <button className="btn ghost" onClick={() => setStep(2)}>
               <ArrowLeft size={16} aria-hidden /> Atrás
@@ -182,12 +229,19 @@ export function CloudflareWizard({
         <div className="wizard-body">
           <h3>4. Probar la conexión</h3>
           {!checks && !testing && <p>Revisaremos que tu Account ID y tu token funcionen.</p>}
-          {testing && <div className="notice">Probando la conexión con Cloudflare…</div>}
+          {testing && (
+            <div className="notice">{enCuenta ? "Probando y guardando en tu cuenta…" : "Probando la conexión con Cloudflare…"}</div>
+          )}
           {checks && <CheckList checks={checks} />}
+          {error && <div className="error">{error}</div>}
           {done ? (
             <div className="success-box">
               <strong>¡Listo! Tu cuenta quedó conectada.</strong>
-              <p>Ya puedes crear textos, imágenes y voz con IA gratis, sin los límites del modo demo.</p>
+              <p>
+                {enCuenta
+                  ? "Ya puedes usar Studio sin los límites del mes. Lo usa todo tu equipo."
+                  : "Ya puedes crear textos, imágenes y voz con IA gratis, sin los límites del modo demo."}
+              </p>
               <button className="btn" onClick={onFinish}>
                 Empezar a crear
               </button>
@@ -205,6 +259,102 @@ export function CloudflareWizard({
         </div>
       )}
     </div>
+  );
+}
+
+type IaPropia = { cuentaFin: string; conectada: number; legible: boolean } | null;
+
+// «Tu cuenta de Cloudflare (opcional)» con las cuentas encendidas (Mi cuenta y Configuración).
+// Dueño: estado, «Conectar Cloudflare» (abre el asistente) y «Guardar en tu cuenta» si este
+// dispositivo tiene una clave y la cuenta no. Miembro: solo la línea, si el negocio tiene la suya.
+// `acciones`: botones extra junto a «Conectada» (en Mi cuenta, «Desconectar»).
+export function CloudflareCuenta({
+  iaPropia,
+  esDueno,
+  titulo,
+  acciones,
+  onFinish,
+}: {
+  iaPropia: IaPropia;
+  esDueno: boolean;
+  titulo: (texto: string) => React.ReactNode;
+  acciones?: React.ReactNode;
+  onFinish?: () => void;
+}) {
+  const [local, setLocal] = useState<{ accountId: string; token: string } | null>(null);
+  const [abierto, setAbierto] = useState(false);
+  const [ocupado, setOcupado] = useState(false);
+  const [fallo, setFallo] = useState<{ error: string; checks?: Check[] } | null>(null);
+
+  useEffect(() => {
+    const leer = () => setLocal(leerClaveCfLocal());
+    leer();
+    window.addEventListener(EVENTO_AJUSTES, leer);
+    return () => window.removeEventListener(EVENTO_AJUSTES, leer);
+  }, []);
+
+  if (!esDueno) return iaPropia?.legible ? <p className="muted">Tu negocio usa su propia cuenta de Cloudflare.</p> : null;
+
+  const conectada = !!iaPropia?.legible;
+
+  async function subirLocal() {
+    if (!local) return;
+    setOcupado(true);
+    setFallo(null);
+    const r = await guardarClaveEnCuenta(local.accountId, local.token);
+    if (!r.ok) setFallo({ error: r.error, checks: r.checks });
+    setOcupado(false);
+  }
+
+  return (
+    <>
+      {titulo("Tu cuenta de Cloudflare (opcional)")}
+      {conectada ? (
+        <p className="ok">{`Conectada (cuenta …${iaPropia!.cuentaFin}) · Sin límites del mes`}</p>
+      ) : iaPropia ? (
+        <p className="notice">Tu Cloudflare conectado ya no se puede leer. Conéctalo otra vez.</p>
+      ) : (
+        <p className="muted">Conéctala para usar Studio sin los límites del mes. Es gratis en Cloudflare.</p>
+      )}
+      {!iaPropia && local && !abierto && (
+        <p className="muted">Este dispositivo tiene guardada una clave de Cloudflare. Guárdala en tu cuenta para que la use todo tu equipo.</p>
+      )}
+      <div className="acct-acciones">
+        {!conectada && !abierto && (
+          <button className="btn small" disabled={ocupado} onClick={() => (setFallo(null), setAbierto(true))}>
+            <Plug size={15} aria-hidden /> Conectar Cloudflare
+          </button>
+        )}
+        {!iaPropia && local && !abierto && (
+          <button className="btn ghost small" disabled={ocupado} onClick={() => void subirLocal()}>
+            {ocupado ? "Guardando…" : "Guardar en tu cuenta"}
+          </button>
+        )}
+        {iaPropia && !abierto && acciones}
+      </div>
+      {fallo && (
+        <>
+          <div className="error">{fallo.error}</div>
+          {fallo.checks && <CheckList checks={fallo.checks} />}
+        </>
+      )}
+      {abierto && (
+        <>
+          <CloudflareWizard
+            settings={{ cfAccountId: local?.accountId ?? "", cfToken: local?.token ?? "" }}
+            enCuenta
+            onFinish={() => (setAbierto(false), onFinish?.())}
+          />
+          {!conectada && (
+            <div className="acct-acciones">
+              <button className="btn ghost small" onClick={() => setAbierto(false)}>
+                Cerrar asistente
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </>
   );
 }
 

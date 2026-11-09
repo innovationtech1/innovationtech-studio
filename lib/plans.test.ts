@@ -11,7 +11,9 @@ import {
   sumarSaldo,
   cantidadSegura,
   esPaquete,
+  MARGEN_RELOJ_STRIPE,
   mezclarConfig,
+  pasarATarjetaDisponible,
   puedeUsar,
   type Negocio,
 } from "./plans";
@@ -204,4 +206,70 @@ test("mezclarConfig ignora los límites diarios viejos", () => {
   assert.equal(cfg.limitesMes.basico.textos, 1000);
   assert.equal(cfg.paquetes.voz.monto, 9);
   assert.deepEqual(cfg.paquetes.voz.planes, ["pro"]);
+});
+
+/* ---------- Pasar de pago a mano a tarjeta ---------- */
+
+const HORA = 60 * 60 * 1000;
+const aMano = (extra: Partial<Negocio> = {}) =>
+  negocio({ estado: "activo", origen: "manual", plan: "basico", pagadoHasta: AHORA + 49 * HORA, ...extra });
+
+test("pasarATarjetaDisponible: pago a mano que vence en 49 h → sí", () => {
+  assert.equal(pasarATarjetaDisponible(aMano(), AHORA), true);
+});
+
+test("pasarATarjetaDisponible: 48 h + 10 min → sí; 48 h + 9 min, 48 h o 47 h → no", () => {
+  const MINUTO = 60 * 1000;
+  assert.equal(MARGEN_RELOJ_STRIPE, 10 * MINUTO);
+  assert.equal(pasarATarjetaDisponible(aMano({ pagadoHasta: AHORA + 48 * HORA + 10 * MINUTO }), AHORA), true);
+  assert.equal(pasarATarjetaDisponible(aMano({ pagadoHasta: AHORA + 48 * HORA + 9 * MINUTO }), AHORA), false);
+  assert.equal(pasarATarjetaDisponible(aMano({ pagadoHasta: AHORA + 48 * HORA }), AHORA), false);
+  assert.equal(pasarATarjetaDisponible(aMano({ pagadoHasta: AHORA + 47 * HORA }), AHORA), false);
+});
+
+/* ---------- El pago a mano cubre hasta su fecha aunque ya pase a tarjeta ---------- */
+
+const yaConTarjeta = (stripe: Negocio["stripe"], extra: Partial<Negocio> = {}) =>
+  negocio({ estado: "activo", origen: "stripe", plan: "basico", pagadoHasta: AHORA + 10 * DIA, stripe, ...extra });
+
+test("estadoEfectivo: stripe sin status todavía (recién pagó) + pago a mano vigente → activo", () => {
+  assert.deepEqual(estadoEfectivo(yaConTarjeta({ customerId: "cus_1" }), AHORA), { estado: "activo", plan: "basico" });
+});
+
+test("estadoEfectivo: stripe canceled (canceló la prueba) + pago a mano vigente → activo", () => {
+  assert.deepEqual(estadoEfectivo(yaConTarjeta({ status: "canceled" }), AHORA), { estado: "activo", plan: "basico" });
+});
+
+test("estadoEfectivo: stripe canceled + pago a mano vencido → pausado", () => {
+  const n = yaConTarjeta({ status: "canceled" }, { pagadoHasta: AHORA - DIA });
+  assert.deepEqual(estadoEfectivo(n, AHORA), { estado: "pausado", plan: "basico" });
+});
+
+test("estadoEfectivo: pausado por el administrador manda aunque el pago a mano siga vigente", () => {
+  const n = yaConTarjeta({ status: "canceled" }, { estado: "pausado" });
+  assert.deepEqual(estadoEfectivo(n, AHORA), { estado: "pausado", plan: "basico" });
+});
+
+test("estadoEfectivo: suscripción del otro modo sigue sin plan aunque haya pago a mano vigente", () => {
+  const n = yaConTarjeta({ status: "active", livemode: false });
+  assert.deepEqual(estadoEfectivo(n, AHORA, { stripeLive: true }), { estado: "sin_plan", plan: null });
+});
+
+test("pasarATarjetaDisponible: ya paga con tarjeta (suscripción viva) → no", () => {
+  for (const status of ["active", "trialing", "past_due", "unpaid", "paused"]) {
+    assert.equal(pasarATarjetaDisponible(aMano({ origen: "stripe", stripe: { status } }), AHORA), false, status);
+  }
+});
+
+test("pasarATarjetaDisponible: tarjeta sin suscripción viva (canceló) y efectivo vigente → sí", () => {
+  assert.equal(pasarATarjetaDisponible(aMano({ origen: "stripe", stripe: { status: "canceled" } }), AHORA), true);
+  assert.equal(pasarATarjetaDisponible(aMano({ origen: "stripe", stripe: { status: "canceled" }, pagadoHasta: AHORA - 1 }), AHORA), false);
+});
+
+test("pasarATarjetaDisponible: pausado → no", () => {
+  assert.equal(pasarATarjetaDisponible(aMano({ estado: "pausado" }), AHORA), false);
+});
+
+test("pasarATarjetaDisponible: sin fecha de pago → no", () => {
+  assert.equal(pasarATarjetaDisponible(aMano({ pagadoHasta: undefined }), AHORA), false);
 });

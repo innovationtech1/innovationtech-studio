@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { cuentasActivas, jsonAcceso, requireAccess } from "./account";
 import type { AccountStore, Usuario } from "./account-store";
 import { memoryStore } from "./account-store-memory";
+import { randomBytes } from "node:crypto";
+import { cifrarClave, type ClaveIA } from "./cifrado";
 import { DEFAULT_CONFIG, mesChicago, type Negocio } from "./plans";
 
 const AHORA = Date.parse("2026-11-07T18:00:00Z");
@@ -388,4 +390,86 @@ test("guardián: un miembro en un negocio Pro → ok", async () => {
   const store = memoryStore({ usuarios: [usuario, miembroU2], negocios: [negocio({ plan: "pro", miembros: ["u1", "u2"] })] });
   const a = await requireAccess(req(), { herramienta: "textos", clavePropia: false }, { store, verify: verifyU2, now: AHORA });
   assert.equal(a.ok, true);
+});
+
+// ---------- Clave de Cloudflare guardada en la cuenta ----------
+// Datos falsos y aleatorios: nunca un secreto real
+const LLAVE = randomBytes(32);
+const CLAVE: ClaveIA = { accountId: randomBytes(16).toString("hex"), token: `tok-${randomBytes(12).toString("hex")}` };
+const IA_PROPIA = { iaPropia: { cuentaFin: CLAVE.accountId.slice(-4), conectada: AHORA - MIN } };
+
+async function tiendaConClave(n: Partial<Negocio> = {}, llave: Buffer = LLAVE) {
+  const store = tienda({ ...IA_PROPIA, ...n });
+  await store.guardarClaveIA("n1", cifrarClave(CLAVE, llave));
+  return store;
+}
+const CF = { herramienta: "imagenes", contador: "imagenes", clavePropia: false, cloudflare: true } as const;
+
+test("clave guardada: no cuenta el uso y devuelve cfGuardada", async () => {
+  const store = await tiendaConClave();
+  const a = await requireAccess(req(), CF, { store, verify, now: AHORA, llave: LLAVE });
+  assert.ok(a.ok);
+  if (!a.ok) return;
+  assert.equal(a.contado, false);
+  assert.deepEqual(a.cfGuardada, CLAVE);
+  assert.equal(store.uso("n1", MES).imagenes, 0);
+});
+
+test("clave guardada: los encabezados del navegador ganan (no se lee la guardada)", async () => {
+  const store = await tiendaConClave();
+  let leidas = 0;
+  const leer = store.leerClaveIA.bind(store);
+  store.leerClaveIA = async (id) => (leidas++, leer(id));
+  const a = await requireAccess(req(), { ...CF, clavePropia: true }, { store, verify, now: AHORA, llave: LLAVE });
+  assert.ok(a.ok && !a.contado && !a.cfGuardada);
+  assert.equal(leidas, 0);
+});
+
+test("clave guardada ilegible (llave distinta) → cuenta de InnovationTECH con límites, sin 500", async () => {
+  const store = await tiendaConClave({}, randomBytes(32));
+  const errores: string[] = [];
+  const orig = console.error;
+  console.error = (...m: unknown[]) => void errores.push(m.join(" "));
+  try {
+    const a = await requireAccess(req(), CF, { store, verify, now: AHORA, llave: LLAVE });
+    assert.ok(a.ok && a.contado && !a.cfGuardada);
+    assert.equal(store.uso("n1", MES).imagenes, 1);
+  } finally {
+    console.error = orig;
+  }
+  assert.equal(errores.length, 1);
+  assert.ok(errores[0].includes("n1"));
+  assert.ok(!errores[0].includes(CLAVE.token) && !errores[0].includes(CLAVE.accountId));
+});
+
+test("clave guardada sin llave configurada → cuenta de InnovationTECH con límites", async () => {
+  const store = await tiendaConClave();
+  const orig = console.error;
+  console.error = () => {};
+  try {
+    const a = await requireAccess(req(), CF, { store, verify, now: AHORA, llave: null });
+    assert.ok(a.ok && a.contado && !a.cfGuardada);
+  } finally {
+    console.error = orig;
+  }
+});
+
+test("clave guardada: la ruta de Replicate (cloudflare: false) no la usa como clave propia", async () => {
+  const store = await tiendaConClave({ plan: "pro" });
+  const img = await requireAccess(req(), { ...CF, cloudflare: false }, { store, verify, now: AHORA, llave: LLAVE });
+  assert.ok(img.ok && img.contado && !img.cfGuardada);
+  const video = await requireAccess(req(), { herramienta: "video_ia", clavePropia: false }, { store, verify, now: AHORA, llave: LLAVE });
+  assert.ok(!video.ok && video.codigo === "CLAVE_PROPIA");
+});
+
+test("clave guardada no salta el plan: pausado y sin plan siguen bloqueados", async () => {
+  const pausado = await tiendaConClave({ estado: "pausado" });
+  const a = await requireAccess(req(), CF, { store: pausado, verify, now: AHORA, llave: LLAVE });
+  assert.ok(!a.ok && a.codigo === "PAUSADO");
+  const vencido = await tiendaConClave({ estado: "prueba", plan: null, origen: null, pagadoHasta: undefined, pruebaHasta: AHORA - MIN });
+  const b = await requireAccess(req(), CF, { store: vencido, verify, now: AHORA, llave: LLAVE });
+  assert.ok(!b.ok && b.codigo === "SIN_PLAN");
+  const voz = await tiendaConClave(); // básico no tiene voz
+  const c = await requireAccess(req(), { herramienta: "voz", contador: "voces", clavePropia: false, cloudflare: true }, { store: voz, verify, now: AHORA, llave: LLAVE });
+  assert.ok(!c.ok && c.codigo === "PLAN");
 });

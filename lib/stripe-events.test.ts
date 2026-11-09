@@ -2,10 +2,11 @@ import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import Stripe from "stripe";
 import { aplicarEvento, EVENTOS_STRIPE } from "./stripe-events";
-import { abrirPortal, comprarPaquete, pagarPlan, prepararStripe, procesarWebhook, type ClienteStripe } from "./stripe-api";
+import { obtenerCuenta } from "./account-api";
+import { abrirPortal, comprarPaquete, pagarPlan, pasarAManual, prepararStripe, procesarWebhook, type ClienteStripe } from "./stripe-api";
 import type { Usuario } from "./account-store";
 import { memoryStore, type MemoryStore } from "./account-store-memory";
-import { mezclarConfig, type Negocio, type PlanesConfig } from "./plans";
+import { aplicarCambios, estadoEfectivo, mezclarConfig, type CambiosNegocio, type Negocio, type PlanesConfig } from "./plans";
 
 const AHORA = Date.parse("2026-11-07T18:00:00Z");
 const T = Math.floor(AHORA / 1000); // segundos, como los manda Stripe
@@ -89,7 +90,7 @@ const factura = (sub = "sub_1", extra: Record<string, unknown> = {}) => ({
 });
 
 // Aplica los cambios como lo haría la base, para encadenar eventos en las pruebas
-const aplicar = (n: Negocio, c: Partial<Negocio> | null): Negocio => (c ? { ...n, ...c } : n);
+const aplicar = (n: Negocio, c: CambiosNegocio | null): Negocio => (c ? aplicarCambios(n, c) : n);
 
 /* ---------- aplicarEvento (función pura) ---------- */
 
@@ -265,6 +266,18 @@ test("otra suscripción viva no reemplaza a la actual (posible doble cobro)", ()
   const n = conStripe({ subscriptionId: "sub_1", customerId: "cus_1", status: "active" });
   assert.equal(aplicarEvento(evento("customer.subscription.created", suscripcion({ id: "sub_2" })), n, cfg), null);
   assert.equal(aplicarEvento(evento("checkout.session.completed", sesion({ subscription: "sub_2" })), n, cfg), null);
+});
+
+test("pasar a tarjeta: suscripción trialing sobre un pago a mano vigente se adopta", () => {
+  const n = negocio({ estado: "activo", origen: "manual", plan: "basico", pagadoHasta: AHORA + 30 * DIA });
+  const sub = suscripcion({ status: "trialing", trial_end: Math.floor((AHORA + 30 * DIA) / 1000) }, PRECIO_B);
+  const c = aplicarEvento(evento("customer.subscription.created", sub), n, cfg);
+  assert.ok(c);
+  assert.equal(c.origen, "stripe");
+  assert.equal(c.estado, "activo");
+  assert.equal(c.plan, "basico");
+  assert.equal(c.stripe?.status, "trialing");
+  assert.equal(c.stripe?.subscriptionId, "sub_1");
 });
 
 /* ---------- Paquetes (pago único) ---------- */
@@ -534,6 +547,7 @@ function stripeFalso(op: {
   sesiones?: Record<string, { status: string; subscription?: string; customer?: string }>;
   expirarFalla?: boolean; // simula que la pagaron justo antes de vencerla
   sinCliente?: string[]; // customers que Stripe no conoce (p. ej. de otro modo)
+  registrarSesiones?: boolean; // las sesiones creadas quedan abiertas (cs_nuevo_1, cs_nuevo_2…)
 } = {}) {
   const noHayCliente = (c: unknown) => {
     if (typeof c === "string" && op.sinCliente?.includes(c)) {
@@ -576,7 +590,9 @@ function stripeFalso(op: {
         async create(p: { customer?: string }) {
           anotar("checkout.sessions.create", p);
           noHayCliente(p.customer);
-          return { id: "cs_nuevo", url: "https://checkout.stripe.com/c/pay/cs_nuevo" };
+          const id = op.registrarSesiones ? `cs_nuevo_${++n}` : "cs_nuevo";
+          if (op.registrarSesiones) sesiones[id] = { status: "open" };
+          return { id, url: `https://checkout.stripe.com/c/pay/${id}` };
         },
         async retrieve(id: string) {
           anotar("checkout.sessions.retrieve", id);
@@ -786,16 +802,140 @@ test("checkout: sin precios preparados (503)", async () => {
   }
 });
 
-test("checkout: pagado a mano y vigente → 400 con la fecha", async () => {
+/* ---------- Pasar de pago a mano a tarjeta ---------- */
+
+const HORA = 60 * 60 * 1000;
+// Como el negocio 053: Básico pagado a mano hasta el fin del 7 de diciembre (hora de Chicago)
+const FIN_MANUAL = Date.parse("2026-12-08T05:59:59Z");
+const aMano = (extra: Partial<Negocio> = {}) =>
+  negocio({ estado: "activo", origen: "manual", plan: "basico", pagadoHasta: FIN_MANUAL, ...extra });
+
+test("pago a mano vigente, mismo plan: Checkout de suscripción con prueba hasta que vence lo pagado", async () => {
   const f = stripeFalso();
-  const store = nuevoStore(negocio({ estado: "activo", origen: "manual", plan: "basico", pagadoHasta: Date.parse("2026-12-08T05:59:59Z") }));
+  const store = nuevoStore(aMano());
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r.ok, true);
+  if (r.ok) assert.equal(r.url, "https://checkout.stripe.com/c/pay/cs_nuevo");
+  const p = f.llamadas.find((l) => l.metodo === "checkout.sessions.create")!.args[0] as Record<string, unknown>;
+  assert.equal(p.mode, "subscription");
+  assert.deepEqual(p.line_items, [{ price: PRECIO_B, quantity: 1 }]);
+  assert.deepEqual(p.subscription_data, { metadata: { negocioId: "n1" }, trial_end: Math.floor(FIN_MANUAL / 1000) });
+  assert.deepEqual(p.metadata, { negocioId: "n1" });
+  assert.equal((await store.getNegocio("n1"))?.stripe?.checkoutPendiente, "cs_nuevo");
+});
+
+test("pago a mano vigente, otro plan → 400 «Para cambiar de plan, escríbenos.» sin tocar Stripe", async () => {
+  const f = stripeFalso();
+  const store = nuevoStore(aMano());
   const r = await pagarPlan("u1", "dueno@ejemplo.com", "pro", ORIGEN, depsP(store, f.cliente));
   assert.equal(r.ok, false);
   if (!r.ok) {
     assert.equal(r.status, 400);
-    assert.match(r.error, /^Tu plan está pagado a mano hasta .*7.*dic.*2026.*\. Escríbenos si quieres pasarte a tarjeta\.$/);
+    assert.equal(r.error, "Tu plan está pagado a mano hasta 7 de diciembre de 2026. Para cambiar de plan, escríbenos.");
   }
   assert.equal(f.llamadas.length, 0);
+});
+
+test("pago a mano que vence en menos de 48 h → 400 «Ese día podrás poner tu tarjeta.» sin tocar Stripe", async () => {
+  const f = stripeFalso();
+  const store = nuevoStore(aMano({ pagadoHasta: AHORA + 24 * HORA }));
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r.ok, false);
+  if (!r.ok) {
+    assert.equal(r.status, 400);
+    assert.equal(r.error, "Tu plan está pagado a mano hasta el 8 de noviembre. Ese día podrás poner tu tarjeta.");
+  }
+  assert.equal(f.llamadas.length, 0);
+});
+
+test("pago a mano vigente pero pausado → 400 sin tocar Stripe", async () => {
+  const f = stripeFalso();
+  const store = nuevoStore(aMano({ estado: "pausado" }));
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r.ok, false);
+  if (!r.ok) {
+    assert.equal(r.status, 400);
+    assert.equal(r.error, "Tu plan está pagado a mano hasta 7 de diciembre de 2026. Escríbenos si quieres pasarte a tarjeta.");
+  }
+  assert.equal(f.llamadas.length, 0);
+});
+
+test("pago a mano que vence en 48 h + 9 min → 400 (margen para el reloj de Stripe); 48 h + 10 min → Checkout", async () => {
+  const f = stripeFalso();
+  const casi = AHORA + 48 * HORA + 9 * 60 * 1000;
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(nuevoStore(aMano({ pagadoHasta: casi })), f.cliente));
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.match(r.error, /Ese día podrás poner tu tarjeta\.$/);
+  assert.equal(f.llamadas.length, 0);
+  const justo = AHORA + 48 * HORA + 10 * 60 * 1000;
+  const r2 = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(nuevoStore(aMano({ pagadoHasta: justo })), f.cliente));
+  assert.equal(r2.ok, true);
+  const p = f.llamadas.find((l) => l.metodo === "checkout.sessions.create")!.args[0] as { subscription_data: { trial_end: number } };
+  assert.equal(p.subscription_data.trial_end, Math.floor(justo / 1000));
+});
+
+// Pasó a tarjeta y lo guardado va atrasado (el aviso de que terminó la suscripción no llegó todavía):
+// lo pagado en efectivo sigue cubriendo hasta FIN_MANUAL. El camino completo por el webhook está al final.
+const cancelada = (extra: Partial<Negocio> = {}, status = "canceled") =>
+  conStripe({ customerId: "cus_1", subscriptionId: "sub_1", status }, { pagadoHasta: FIN_MANUAL, ...extra });
+
+test("volver a tarjeta: status guardado atrasado (active) pero Stripe dice canceled → igual con trial_end", async () => {
+  const f = stripeFalso({ suscripciones: [subViva("canceled", PRECIO_B)] });
+  const store = nuevoStore(cancelada({}, "active"));
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r.ok, true);
+  const p = f.llamadas.find((l) => l.metodo === "checkout.sessions.create")!.args[0] as { subscription_data: { trial_end?: number } };
+  assert.equal(p.subscription_data.trial_end, Math.floor(FIN_MANUAL / 1000));
+});
+
+test("tarjeta con suscripción viva y efectivo vigente → camino de siempre (portal / cambio de plan)", async () => {
+  const f = stripeFalso({ suscripciones: [subViva("active", PRECIO_B)] });
+  const store = nuevoStore(cancelada({}, "active"));
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r.ok, true);
+  if (r.ok) assert.equal(r.url, "https://billing.stripe.com/p/session/bps_1");
+  assert.equal(f.metodos().includes("checkout.sessions.create"), false);
+  const r2 = await pagarPlan("u1", "dueno@ejemplo.com", "pro", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r2.ok, true);
+  assert.equal(f.llamadas.find((l) => l.metodo === "subscriptions.update")?.args[0], "sub_1");
+});
+
+test("pasar a tarjeta dos veces seguidas: la segunda vence la sesión abierta (nunca dos a la vez)", async () => {
+  const f = stripeFalso({ registrarSesiones: true });
+  const store = nuevoStore(aMano());
+  const r1 = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(store, f.cliente));
+  const r2 = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r1.ok && r2.ok, true);
+  const creadas = f.llamadas.filter((l) => l.metodo === "checkout.sessions.create");
+  assert.equal(creadas.length, 2);
+  for (const c of creadas) {
+    assert.equal((c.args[0] as { subscription_data: { trial_end: number } }).subscription_data.trial_end, Math.floor(FIN_MANUAL / 1000));
+  }
+  const m = f.metodos();
+  assert.deepEqual(f.llamadas.filter((l) => l.metodo === "checkout.sessions.expire").map((l) => l.args[0]), ["cs_nuevo_1"]);
+  assert.ok(m.lastIndexOf("checkout.sessions.expire") < m.lastIndexOf("checkout.sessions.create"));
+  assert.equal((await store.getNegocio("n1"))?.stripe?.checkoutPendiente, "cs_nuevo_2");
+});
+
+test("pasar a tarjeta con la primera sesión ya pagada (sin aviso todavía) → no se crea otra", async () => {
+  const f = stripeFalso({
+    sesiones: { cs_viejo: { status: "complete", subscription: "sub_1", customer: "cus_1" } },
+    suscripciones: [subViva("trialing", PRECIO_B)],
+  });
+  const store = nuevoStore(aMano({ stripe: { checkoutPendiente: "cs_viejo" } }));
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r.ok, true);
+  assert.equal(f.metodos().includes("checkout.sessions.create"), false);
+  if (r.ok) assert.equal(r.url, "https://billing.stripe.com/p/session/bps_1");
+});
+
+test("pago a mano vigente con una suscripción viva en Stripe → se usa esa (no Checkout nuevo)", async () => {
+  const f = stripeFalso({ suscripciones: [subViva("trialing", PRECIO_B)] });
+  const store = nuevoStore(aMano({ stripe: { customerId: "cus_1", subscriptionId: "sub_1" } }));
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r.ok, true);
+  assert.equal(f.metodos().includes("checkout.sessions.create"), false);
+  assert.ok(f.metodos().includes("billingPortal.sessions.create"));
 });
 
 test("checkout nuevo: parámetros correctos (sin payment_method_types)", async () => {
@@ -1293,4 +1433,455 @@ test("prepararStripe: un precio de paquete recurrente no sirve (409)", async () 
   const r = await prepararStripe(ADMIN, true, { store: memoryStore(), stripe: f.cliente });
   assert.equal(r.ok, false);
   if (!r.ok) assert.equal(r.status, 409);
+});
+
+/* ---------- De tarjeta a pago a mano (pasarAManual y avisos) ---------- */
+
+const FIN_TARJETA = AHORA + 20 * DIA; // fin del mes pagado con tarjeta (ms)
+const subConFin = (status = "active", extra: Record<string, unknown> = {}) => ({
+  id: "sub_1",
+  status,
+  customer: "cus_1",
+  cancel_at_period_end: false,
+  items: { data: [{ id: "si_1", price: { id: PRECIO_B }, current_period_end: Math.floor(FIN_TARJETA / 1000) }] },
+  ...extra,
+});
+const datosManual = (extra: Record<string, unknown> = {}) => ({
+  plan: "basico" as const,
+  hasta: FIN_TARJETA + 30 * DIA,
+  monto: 19,
+  metodo: "efectivo" as const,
+  ...extra,
+});
+const conTarjeta = (extra: Partial<Negocio> = {}) =>
+  conStripe({ customerId: "cus_1", subscriptionId: "sub_1", status: "active", priceId: PRECIO_B, livemode: false }, extra);
+const depsM = (store: MemoryStore, cliente: ClienteStripe) => ({ store, stripe: cliente, now: AHORA, stripeLive: false });
+
+test("pasarAManual: suscripción active → cancela al final del periodo, registra el pago y guarda manualSiguiente", async () => {
+  const f = stripeFalso({ suscripciones: [subConFin()] });
+  const store = nuevoStore(conTarjeta());
+  const r = await pasarAManual(ADMIN, true, "n1", datosManual({ nota: " pagó en tienda " }), depsM(store, f.cliente));
+  assert.deepEqual(r, { ok: true, finTarjeta: Math.floor(FIN_TARJETA / 1000) * 1000 });
+  assert.deepEqual(f.metodos(), ["subscriptions.retrieve", "subscriptions.update"]);
+  assert.deepEqual(f.llamadas.find((l) => l.metodo === "subscriptions.update")!.args, ["sub_1", { cancel_at_period_end: true }]);
+  const n = await store.getNegocio("n1");
+  assert.equal(n?.origen, "stripe");
+  assert.equal(n?.estado, "activo");
+  assert.deepEqual(n?.manualSiguiente, { plan: "basico", hasta: FIN_TARJETA + 30 * DIA });
+  assert.equal(n?.stripe?.finPeriodo, Math.floor(FIN_TARJETA / 1000) * 1000);
+  assert.equal(n?.stripe?.subscriptionId, "sub_1");
+  assert.equal(n?.pagadoHasta, undefined);
+  const pagos = await store.listarPagosManuales("n1");
+  assert.equal(pagos.length, 1);
+  assert.equal(pagos[0].hasta, FIN_TARJETA + 30 * DIA);
+  assert.equal(pagos[0].metodo, "efectivo");
+  assert.equal(pagos[0].nota, "pagó en tienda");
+  assert.equal(pagos[0].registradoPor, ADMIN);
+});
+
+test("pasarAManual: fecha igual o antes del fin del periodo → 400 sin tocar Stripe ni la base", async () => {
+  for (const hasta of [Math.floor(FIN_TARJETA / 1000) * 1000, FIN_TARJETA - DIA]) {
+    const f = stripeFalso({ suscripciones: [subConFin()] });
+    const store = nuevoStore(conTarjeta());
+    const r = await pasarAManual(ADMIN, true, "n1", datosManual({ hasta }), depsM(store, f.cliente));
+    assert.equal(r.ok, false);
+    if (!r.ok) {
+      assert.equal(r.status, 400);
+      assert.equal(r.error, "La fecha debe ser después del 27 de noviembre, cuando termina el mes pagado con tarjeta.");
+    }
+    assert.equal(f.metodos().includes("subscriptions.update"), false);
+    assert.equal((await store.listarPagosManuales("n1")).length, 0);
+    assert.equal((await store.getNegocio("n1"))?.manualSiguiente, undefined);
+  }
+});
+
+test("pasarAManual: sin suscripción active (manual, pausada, past_due) → 400", async () => {
+  const casos: Array<{ n: Negocio; subs: Array<Record<string, unknown>> }> = [
+    { n: negocio({ origen: "manual", estado: "activo", plan: "basico", pagadoHasta: AHORA + 10 * DIA }), subs: [] },
+    { n: conTarjeta({ estado: "pausado" }), subs: [subConFin("paused")] },
+    { n: conTarjeta(), subs: [subConFin("past_due")] },
+    { n: conTarjeta(), subs: [subConFin("trialing")] },
+    { n: conTarjeta({ stripe: { customerId: "cus_1", subscriptionId: "sub_1", status: "active", livemode: true } }), subs: [subConFin()] },
+  ];
+  for (const { n, subs } of casos) {
+    const f = stripeFalso({ suscripciones: subs });
+    const store = nuevoStore(n);
+    const r = await pasarAManual(ADMIN, true, "n1", datosManual(), depsM(store, f.cliente));
+    assert.equal(r.ok, false);
+    if (!r.ok) {
+      assert.equal(r.status, 400);
+      assert.equal(r.error, "Este negocio no tiene una suscripción con tarjeta al día.");
+    }
+    assert.equal(f.metodos().includes("subscriptions.update"), false);
+    assert.equal((await store.listarPagosManuales("n1")).length, 0);
+  }
+});
+
+test("pasarAManual: no admin → 403; datos inválidos → 400; negocio desconocido → 404", async () => {
+  const f = stripeFalso({ suscripciones: [subConFin()] });
+  const store = nuevoStore(conTarjeta());
+  const r = await pasarAManual("otro@x.com", true, "n1", datosManual(), depsM(store, f.cliente));
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.equal(r.status, 403);
+  const r2 = await pasarAManual(ADMIN, true, "n1", datosManual({ metodo: "tarjeta" as never }), depsM(store, f.cliente));
+  assert.equal(r2.ok, false);
+  if (!r2.ok) assert.equal(r2.status, 400);
+  const r3 = await pasarAManual(ADMIN, true, "nada", datosManual(), depsM(store, f.cliente));
+  assert.equal(r3.ok, false);
+  if (!r3.ok) assert.equal(r3.status, 404);
+  assert.deepEqual(f.metodos(), []);
+});
+
+test("pasarAManual: error de Stripe → 502 sin cambios en la base", async () => {
+  for (const falla of ["retrieve", "update"] as const) {
+    const f = stripeFalso({ suscripciones: [subConFin()] });
+    (f.cliente.subscriptions as Record<string, unknown>)[falla] = async () => {
+      throw new Error("conexión");
+    };
+    const store = nuevoStore(conTarjeta());
+    const antes = await store.getNegocio("n1");
+    const original = console.error;
+    console.error = () => {};
+    try {
+      const r = await pasarAManual(ADMIN, true, "n1", datosManual(), depsM(store, f.cliente));
+      assert.equal(r.ok, false);
+      if (!r.ok) assert.equal(r.status, 502);
+    } finally {
+      console.error = original;
+    }
+    assert.deepEqual(await store.getNegocio("n1"), antes);
+    assert.equal((await store.listarPagosManuales("n1")).length, 0);
+  }
+});
+
+const conSiguiente = (hasta: number) =>
+  conTarjeta({ manualSiguiente: { plan: "pro", hasta }, stripe: { customerId: "cus_1", subscriptionId: "sub_1", status: "active", livemode: false, finPeriodo: FIN_TARJETA } });
+
+test("aviso deleted de la suscripción actual con manualSiguiente vigente → pasa a pago a mano", async () => {
+  const store = nuevoStore(conSiguiente(AHORA + 30 * DIA));
+  const { cuerpo, firma } = firmado(evento("customer.subscription.deleted", suscripcion({ status: "canceled" }, PRECIO_B)));
+  assert.equal((await procesarWebhook(cuerpo, firma, depsW(store))).status, 200);
+  const n = await store.getNegocio("n1");
+  assert.equal(n?.origen, "manual");
+  assert.equal(n?.plan, "pro");
+  assert.equal(n?.pagadoHasta, AHORA + 30 * DIA);
+  assert.equal(n?.estado, "activo");
+  assert.equal(n?.stripe?.status, "canceled");
+  assert.equal(n !== null && n !== undefined && "manualSiguiente" in n, false);
+  assert.equal(estadoEfectivo(n!, AHORA + DIA, { stripeLive: false }).estado, "activo");
+});
+
+test("aviso deleted con manualSiguiente vencido → pausa como siempre y se borra manualSiguiente", async () => {
+  const store = nuevoStore(conSiguiente(AHORA - DIA));
+  const { cuerpo, firma } = firmado(evento("customer.subscription.deleted", suscripcion({ status: "canceled" }, PRECIO_B)));
+  assert.equal((await procesarWebhook(cuerpo, firma, depsW(store))).status, 200);
+  const n = await store.getNegocio("n1");
+  assert.equal(n?.origen, "stripe");
+  assert.equal(n?.estado, "pausado");
+  assert.equal(n?.pagadoHasta, undefined);
+  assert.equal(n !== null && n !== undefined && "manualSiguiente" in n, false);
+});
+
+test("aviso deleted de otra suscripción con manualSiguiente → sin cambios", () => {
+  const n = conSiguiente(AHORA + 30 * DIA);
+  const c = aplicarEvento(evento("customer.subscription.deleted", suscripcion({ id: "sub_viejo", status: "canceled" })), n, cfg);
+  assert.equal(c, null);
+});
+
+test("aviso deleted (función pura): manualSiguiente se marca para borrar con null", () => {
+  const c = aplicarEvento(evento("customer.subscription.deleted", suscripcion({ status: "canceled" })), conSiguiente(AHORA + 30 * DIA), cfg);
+  assert.equal(c?.manualSiguiente, null);
+  // Sin manualSiguiente no se toca el campo
+  const c2 = aplicarEvento(evento("customer.subscription.deleted", suscripcion({ status: "canceled" })), conTarjeta(), cfg);
+  assert.equal(c2 !== null && "manualSiguiente" in c2, false);
+});
+
+test("aviso updated guarda el fin del periodo (finPeriodo en ms)", () => {
+  const c = aplicarEvento(evento("customer.subscription.updated", suscripcion()), conTarjeta(), cfg);
+  assert.equal(c?.stripe?.finPeriodo, (T + 30 * 86400) * 1000);
+  const c2 = aplicarEvento(evento("customer.subscription.created", suscripcion()), negocio(), cfg);
+  assert.equal(c2?.stripe?.finPeriodo, (T + 30 * 86400) * 1000);
+});
+
+test("aviso updated con cancel_at_period_end false y manualSiguiente → marca renovoConManual y error", () => {
+  const n = conSiguiente(AHORA + 30 * DIA);
+  const { r, errores } = conAvisos(() =>
+    aplicarEvento(evento("customer.subscription.updated", suscripcion({ cancel_at_period_end: false }, PRECIO_B)), n, cfg),
+  );
+  assert.equal(r?.stripe?.renovoConManual, true);
+  assert.equal(errores.length, 1);
+  assert.match(errores[0], /n1/);
+  assert.match(errores[0], /sub_1/);
+  assert.equal(r?.estado, "activo");
+});
+
+test("aviso updated con cancel_at_period_end true y manualSiguiente → sin marca (y quita una anterior)", () => {
+  const n = conSiguiente(AHORA + 30 * DIA);
+  n.stripe = { ...n.stripe, renovoConManual: true };
+  const { r, errores } = conAvisos(() =>
+    aplicarEvento(evento("customer.subscription.updated", suscripcion({ cancel_at_period_end: true }, PRECIO_B)), n, cfg),
+  );
+  assert.equal(r?.stripe?.renovoConManual, undefined);
+  assert.deepEqual(errores, []);
+  // Sin manualSiguiente, cancel_at_period_end false no marca nada
+  const { r: r2, errores: e2 } = conAvisos(() =>
+    aplicarEvento(evento("customer.subscription.updated", suscripcion({ cancel_at_period_end: false })), conTarjeta(), cfg),
+  );
+  assert.equal(r2?.stripe?.renovoConManual, undefined);
+  assert.deepEqual(e2, []);
+});
+
+const YA_PENDIENTE = "Este negocio ya tiene un pago a mano pendiente.";
+const NO_SE_GUARDO = "La tarjeta ya no volverá a cobrar, pero no se pudo guardar el pago a mano. Vuelve a intentarlo o anótalo en el historial.";
+
+test("pasarAManual dos veces seguidas → la segunda 400 y un solo pago a mano", async () => {
+  const f = stripeFalso({ suscripciones: [subConFin()] });
+  const store = nuevoStore(conTarjeta());
+  assert.equal((await pasarAManual(ADMIN, true, "n1", datosManual(), depsM(store, f.cliente))).ok, true);
+  // Otra vez (doble clic o reintento), con los mismos datos o con otros
+  for (const d of [datosManual(), datosManual({ hasta: FIN_TARJETA + 40 * DIA })]) {
+    const r = await pasarAManual(ADMIN, true, "n1", d, depsM(store, f.cliente));
+    assert.equal(r.ok, false);
+    if (!r.ok) {
+      assert.equal(r.status, 400);
+      assert.equal(r.error, YA_PENDIENTE);
+    }
+  }
+  assert.equal((await store.listarPagosManuales("n1")).length, 1);
+  assert.deepEqual((await store.getNegocio("n1"))?.manualSiguiente, { plan: "basico", hasta: FIN_TARJETA + 30 * DIA });
+});
+
+test("pasarAManual dos a la vez → solo una pasa y un solo pago a mano", async () => {
+  const f = stripeFalso({ suscripciones: [subConFin()] });
+  const store = nuevoStore(conTarjeta());
+  const r = await Promise.all([
+    pasarAManual(ADMIN, true, "n1", datosManual(), depsM(store, f.cliente)),
+    pasarAManual(ADMIN, true, "n1", datosManual({ hasta: FIN_TARJETA + 40 * DIA }), depsM(store, f.cliente)),
+  ]);
+  assert.equal(r.filter((x) => x.ok).length, 1);
+  const malo = r.find((x) => !x.ok);
+  assert.ok(malo && !malo.ok && malo.status === 400 && malo.error === YA_PENDIENTE);
+  assert.equal((await store.listarPagosManuales("n1")).length, 1);
+});
+
+test("pasarAManual: guarda manualSiguiente antes del pago; si el pago falla → 500 y el reintento solo anota el pago", async () => {
+  const f = stripeFalso({ suscripciones: [subConFin()] });
+  const store = nuevoStore(conTarjeta());
+  const original = store.registrarPagoManual;
+  store.registrarPagoManual = async () => {
+    throw new Error("sin conexión");
+  };
+  const errores: string[] = [];
+  const e = console.error;
+  console.error = (...a: unknown[]) => void errores.push(a.map(String).join(" "));
+  let r;
+  try {
+    r = await pasarAManual(ADMIN, true, "n1", datosManual(), depsM(store, f.cliente));
+  } finally {
+    console.error = e;
+  }
+  assert.equal(r.ok, false);
+  if (!r.ok) {
+    assert.equal(r.status, 500);
+    assert.equal(r.error, NO_SE_GUARDO);
+  }
+  assert.equal(errores.length, 1);
+  for (const dato of ["n1", "sub_1", "basico", String(FIN_TARJETA + 30 * DIA), "19"]) assert.ok(errores[0].includes(dato), errores[0]);
+  // El pendiente ya quedó guardado (la tarjeta no volverá a cobrar)
+  assert.deepEqual((await store.getNegocio("n1"))?.manualSiguiente, { plan: "basico", hasta: FIN_TARJETA + 30 * DIA });
+
+  // Reintento con otros datos: no se mezcla
+  store.registrarPagoManual = original;
+  const otro = await pasarAManual(ADMIN, true, "n1", datosManual({ hasta: FIN_TARJETA + 40 * DIA }), depsM(store, f.cliente));
+  assert.ok(!otro.ok && otro.status === 400 && otro.error === YA_PENDIENTE);
+  // Reintento con los mismos datos: solo anota el pago (sin volver a Stripe)
+  const antes = f.llamadas.length;
+  const r2 = await pasarAManual(ADMIN, true, "n1", datosManual(), depsM(store, f.cliente));
+  assert.deepEqual(r2, { ok: true, finTarjeta: Math.floor(FIN_TARJETA / 1000) * 1000 });
+  assert.equal(f.llamadas.length, antes);
+  assert.equal((await store.listarPagosManuales("n1")).length, 1);
+  // Y ya no se puede repetir
+  const r3 = await pasarAManual(ADMIN, true, "n1", datosManual(), depsM(store, f.cliente));
+  assert.ok(!r3.ok && r3.status === 400 && r3.error === YA_PENDIENTE);
+  assert.equal((await store.listarPagosManuales("n1")).length, 1);
+});
+
+test("pasarAManual: si guardar el pendiente falla → 500 sin pago a mano", async () => {
+  const f = stripeFalso({ suscripciones: [subConFin()] });
+  const store = nuevoStore(conTarjeta());
+  store.modificarNegocio = async () => {
+    throw new Error("sin conexión");
+  };
+  const e = console.error;
+  console.error = () => {};
+  try {
+    const r = await pasarAManual(ADMIN, true, "n1", datosManual(), depsM(store, f.cliente));
+    assert.ok(!r.ok && r.status === 500 && r.error === NO_SE_GUARDO);
+  } finally {
+    console.error = e;
+  }
+  assert.equal((await store.listarPagosManuales("n1")).length, 0);
+});
+
+test("pasarAManual: el negocio desapareció al guardar → 404 sin pago a mano", async () => {
+  const f = stripeFalso({ suscripciones: [subConFin()] });
+  const store = nuevoStore(conTarjeta());
+  store.modificarNegocio = async () => "no_existe";
+  const r = await pasarAManual(ADMIN, true, "n1", datosManual(), depsM(store, f.cliente));
+  assert.ok(!r.ok && r.status === 404);
+  assert.equal((await store.listarPagosManuales("n1")).length, 0);
+});
+
+/* ---------- Revisión final: el efectivo sigue cubriendo y sin cambio de plan gratis ---------- */
+
+// Camino A completo, por el webhook: Básico pagado a mano hasta HASTA_A → pasa a tarjeta →
+// Stripe crea la suscripción en prueba (trialing) hasta esa fecha.
+const HASTA_A = AHORA + 30 * DIA;
+const enviar = async (store: MemoryStore, ev: Stripe.Event) => {
+  const { cuerpo, firma } = firmado(ev);
+  assert.equal((await procesarWebhook(cuerpo, firma, depsW(store))).status, 200);
+};
+const pruebaA = (extra: Record<string, unknown> = {}, precio = PRECIO_B) =>
+  suscripcion({ status: "trialing", trial_end: Math.floor(HASTA_A / 1000), cancel_at_period_end: false, ...extra }, precio);
+async function caminoA(extra: Partial<Negocio> = {}) {
+  const store = nuevoStore(aMano({ pagadoHasta: HASTA_A, ...extra }));
+  await enviar(store, evento("checkout.session.completed", sesion()));
+  await enviar(store, evento("customer.subscription.created", pruebaA()));
+  const n = await store.getNegocio("n1");
+  assert.equal(n?.origen, "stripe");
+  assert.equal(n?.stripe?.status, "trialing");
+  return store;
+}
+
+test("camino A: canceló la prueba en el portal → vuelve a pago a mano activo (no pierde lo pagado)", async () => {
+  const store = await caminoA();
+  await enviar(store, evento("customer.subscription.deleted", pruebaA({ status: "canceled" }), T + 3600));
+  const n = (await store.getNegocio("n1"))!;
+  assert.equal(n.origen, "manual");
+  assert.equal(n.estado, "activo");
+  assert.equal(n.plan, "basico");
+  assert.equal(n.pagadoHasta, HASTA_A);
+  assert.equal(n.stripe?.status, "canceled");
+  const despues = AHORA + 2 * HORA;
+  assert.equal(estadoEfectivo(n, despues, { stripeLive: false }).estado, "activo");
+
+  // Puede volver a poner su tarjeta: mismo plan, primer cobro cuando vence lo pagado
+  const cuenta = await obtenerCuenta("u1", "dueno@ejemplo.com", true, { store, now: despues, stripeLive: false });
+  assert.ok(cuenta.usuario);
+  if (cuenta.usuario) assert.deepEqual(cuenta.pasarATarjeta, { fecha: HASTA_A, precio: 19 });
+  const f = stripeFalso({ suscripciones: [subViva("canceled", PRECIO_B)] });
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, { store, stripe: f.cliente, now: despues, stripeLive: false });
+  assert.equal(r.ok, true);
+  const p = f.llamadas.find((l) => l.metodo === "checkout.sessions.create")!.args[0] as Record<string, unknown>;
+  assert.equal(p.customer, "cus_1");
+  assert.deepEqual(p.subscription_data, { metadata: { negocioId: "n1" }, trial_end: Math.floor(HASTA_A / 1000) });
+});
+
+test("camino A cancelado: otro plan → 400 «Para cambiar de plan, escríbenos.»; a 24 h → «Ese día podrás…»", async () => {
+  const store = await caminoA();
+  await enviar(store, evento("customer.subscription.deleted", pruebaA({ status: "canceled" }), T + 3600));
+  const f = stripeFalso({ suscripciones: [subViva("canceled", PRECIO_B)] });
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "pro", ORIGEN, { store, stripe: f.cliente, now: AHORA + 2 * HORA, stripeLive: false });
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.equal(r.error, "Tu plan está pagado a mano hasta 7 de diciembre de 2026. Para cambiar de plan, escríbenos.");
+  const r2 = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, { store, stripe: f.cliente, now: HASTA_A - 24 * HORA, stripeLive: false });
+  assert.equal(r2.ok, false);
+  if (!r2.ok) assert.equal(r2.error, "Tu plan está pagado a mano hasta el 7 de diciembre. Ese día podrás poner tu tarjeta.");
+  assert.equal(f.metodos().includes("checkout.sessions.create"), false);
+});
+
+test("camino A: la suscripción termina cuando lo pagado a mano ya venció → se pausa como siempre", async () => {
+  const store = await caminoA();
+  await enviar(store, evento("customer.subscription.deleted", pruebaA({ status: "canceled" }), Math.floor(HASTA_A / 1000) + 3600));
+  const n = (await store.getNegocio("n1"))!;
+  assert.equal(n.origen, "stripe");
+  assert.equal(n.estado, "pausado");
+  assert.equal(estadoEfectivo(n, HASTA_A + 2 * HORA, { stripeLive: false }).estado, "pausado");
+});
+
+test("camino A cancelado con el negocio pausado por el administrador → sigue pausado", async () => {
+  const store = await caminoA();
+  await store.modificarNegocio("n1", () => ({ estado: "pausado" }));
+  await enviar(store, evento("customer.subscription.deleted", pruebaA({ status: "canceled" }), T + 3600));
+  const n = (await store.getNegocio("n1"))!;
+  assert.equal(n.origen, "manual");
+  assert.equal(n.estado, "pausado");
+});
+
+test("camino A: cambio de plan en el portal durante la prueba → se queda el plan pagado a mano hasta el primer cobro", async () => {
+  const store = await caminoA();
+  const { avisos } = await (async () => {
+    const avisos: string[] = [];
+    const w = console.warn;
+    console.warn = (...a: unknown[]) => void avisos.push(a.join(" "));
+    try {
+      await enviar(store, evento("customer.subscription.updated", pruebaA({}, PRECIO_P), T + 3600));
+    } finally {
+      console.warn = w;
+    }
+    return { avisos };
+  })();
+  let n = (await store.getNegocio("n1"))!;
+  assert.equal(n.plan, "basico");
+  assert.equal(n.stripe?.priceId, PRECIO_P);
+  assert.equal(avisos.length, 1);
+  assert.match(avisos[0], /sub_1/);
+  assert.match(avisos[0], /n1/);
+  // Termina la prueba y Stripe cobra Pro: desde ahí es Pro
+  const finA = Math.floor(HASTA_A / 1000);
+  await enviar(store, evento("customer.subscription.updated", suscripcion({ status: "active" }, PRECIO_P), finA + 60));
+  n = (await store.getNegocio("n1"))!;
+  assert.equal(n.plan, "pro");
+  assert.equal(n.estado, "activo");
+});
+
+test("pagarPlan en la prueba gratis del camino A, otro plan → 400 sin cambiar la suscripción", async () => {
+  const store = await caminoA();
+  const f = stripeFalso({ suscripciones: [subViva("trialing", PRECIO_B)] });
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "pro", ORIGEN, depsM(store, f.cliente));
+  assert.equal(r.ok, false);
+  if (!r.ok) {
+    assert.equal(r.status, 400);
+    assert.equal(r.error, "Tu plan está pagado a mano hasta 7 de diciembre de 2026. Para cambiar de plan, escríbenos.");
+  }
+  assert.equal(f.metodos().includes("subscriptions.update"), false);
+  // El mismo plan sigue yendo al portal
+  const r2 = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsM(store, f.cliente));
+  assert.equal(r2.ok && r2.url, "https://billing.stripe.com/p/session/bps_1");
+});
+
+test("pagarPlan con un pago a mano pendiente (camino B), otro plan → 400 sin cambiar la suscripción", async () => {
+  const store = nuevoStore(conSiguiente(AHORA + 30 * DIA));
+  const f = stripeFalso({ suscripciones: [subConFin()] });
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "pro", ORIGEN, depsM(store, f.cliente));
+  assert.equal(r.ok, false);
+  if (!r.ok) {
+    assert.equal(r.status, 400);
+    assert.equal(r.error, "Este negocio pasará a pago a mano el 27 de noviembre. Para cambiar de plan, escríbenos.");
+  }
+  assert.equal(f.metodos().includes("subscriptions.update"), false);
+});
+
+test("aviso deleted con manualSiguiente vigente y el negocio pausado → pasa a pago a mano pero sigue pausado", async () => {
+  const store = nuevoStore(conSiguiente(AHORA + 30 * DIA));
+  await store.modificarNegocio("n1", () => ({ estado: "pausado" }));
+  await enviar(store, evento("customer.subscription.deleted", suscripcion({ status: "canceled" }, PRECIO_B)));
+  const n = (await store.getNegocio("n1"))!;
+  assert.equal(n.origen, "manual");
+  assert.equal(n.estado, "pausado");
+  assert.equal("manualSiguiente" in n, false);
+});
+
+test("aviso updated con cancel_at programado (sin cancel_at_period_end) y manualSiguiente → no es renovación", () => {
+  const n = conSiguiente(AHORA + 30 * DIA);
+  n.stripe = { ...n.stripe, renovoConManual: true };
+  const { r, errores } = conAvisos(() =>
+    aplicarEvento(
+      evento("customer.subscription.updated", suscripcion({ cancel_at_period_end: false, cancel_at: T + 20 * 86400 }, PRECIO_B)),
+      n,
+      cfg,
+    ),
+  );
+  assert.equal(r?.stripe?.renovoConManual, undefined);
+  assert.deepEqual(errores, []);
 });

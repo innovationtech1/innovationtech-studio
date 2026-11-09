@@ -1,10 +1,13 @@
 import "server-only";
 import { firestoreStore, type AccountStore, type Usuario } from "./account-store";
 import { stripeModoLive } from "./stripe-server";
+import { cifrarClave, descifrarClave, llaveDeEntorno } from "./cifrado";
+import { probarCloudflare, type Check } from "./probar-cloudflare";
 import {
   estadoEfectivo,
   inicioMesSiguienteChicago,
   mesChicago,
+  pasarATarjetaDisponible,
   type Contador,
   type Efectivo,
   type Herramienta,
@@ -36,6 +39,8 @@ export function esCorreoAdmin(email: string, emailVerified: boolean): boolean {
   return lista.includes(email.trim().toLowerCase());
 }
 
+export type PersonaEquipo = { uid: string; email: string; esDueno: boolean };
+
 export type EstadoCuenta =
   | { usuario: null; esAdmin: boolean }
   | {
@@ -51,15 +56,25 @@ export type EstadoCuenta =
       esAdmin: boolean;
       esDueno: boolean;
       precios: { basico: number; pro: number };
-      // Solo lo ve el dueño. Las invitaciones solo vienen si se piden (GET /api/cuenta?equipo=1).
-      equipo?: { miembros: number; invitaciones?: string[] };
+      // Solo el dueño: puede pasar de pago a mano a tarjeta (fecha = primer cobro, en ms; precio en USD).
+      pasarATarjeta: { fecha: number; precio: number } | null;
+      // Solo lo ve el dueño. Las invitaciones y la lista de personas solo vienen si se piden
+      // (GET /api/cuenta?equipo=1).
+      equipo?: { miembros: number; invitaciones?: string[]; personas?: PersonaEquipo[] };
+      // Cuenta de Cloudflare propia del negocio (para todos los del negocio). Nunca el token ni el
+      // Account ID completo. legible: false si la llave falta o cambió (hay que reconectar).
+      iaPropia: { cuentaFin: string; conectada: number; legible: boolean } | null;
     };
+
+// llave: la de cifrado de las claves (si no se pasa, STUDIO_CLAVES_SECRETO; null = no hay).
+type ConLlave = { llave?: Buffer | null };
+const llaveDe = (deps: ConLlave) => (deps.llave !== undefined ? deps.llave : llaveDeEntorno());
 
 export async function obtenerCuenta(
   uid: string,
   email: string,
   emailVerified: boolean,
-  deps: DepsCuenta = {},
+  deps: DepsCuenta & ConLlave = {},
   opciones: { equipo?: boolean } = {},
 ): Promise<EstadoCuenta> {
   const store = deps.store ?? firestoreStore();
@@ -94,14 +109,56 @@ export async function obtenerCuenta(
     esAdmin,
     esDueno,
     precios: { basico: cfg.precios.basico.monto, pro: cfg.precios.pro.monto },
+    pasarATarjeta:
+      esDueno &&
+      negocio.plan &&
+      negocio.pagadoHasta !== undefined &&
+      cfg.precios[negocio.plan].stripePriceId && // sin precio de Stripe no se puede pagar con tarjeta
+      pasarATarjetaDisponible(negocio, ahora)
+        ? { fecha: negocio.pagadoHasta, precio: cfg.precios[negocio.plan].monto }
+        : null,
+    iaPropia: negocio.iaPropia
+      ? {
+          cuentaFin: negocio.iaPropia.cuentaFin,
+          conectada: negocio.iaPropia.conectada,
+          legible: await claveLegible(store, negocio.id, llaveDe(deps)),
+        }
+      : null,
   };
   if (esDueno) {
-    // Las invitaciones pendientes cuestan una consulta más: solo cuando las pide «Mi cuenta»
+    // Las invitaciones pendientes y la lista de personas cuestan lecturas de más: solo cuando las pide «Mi cuenta»
     cuenta.equipo = opciones.equipo
-      ? { miembros: negocio.miembros.length, invitaciones: await store.listarInvitaciones(negocio.id) }
+      ? {
+          miembros: negocio.miembros.length,
+          invitaciones: await store.listarInvitaciones(negocio.id),
+          personas: await personasDelEquipo(store, negocio, usuario),
+        }
       : { miembros: negocio.miembros.length };
   }
   return cuenta;
+}
+
+// ¿La clave guardada se puede descifrar con la llave de hoy? (una lectura de más, solo si hay iaPropia)
+async function claveLegible(store: AccountStore, negocioId: string, llave: Buffer | null): Promise<boolean> {
+  if (!llave) return false;
+  try {
+    const doc = await store.leerClaveIA(negocioId);
+    return !!doc && descifrarClave(doc, llave) !== null;
+  } catch {
+    return false;
+  }
+}
+
+// Personas del negocio para «Mi equipo»: el dueño primero y el resto por correo.
+// El dueño ya se leyó (es quien pide la cuenta): no se vuelve a leer.
+async function personasDelEquipo(store: AccountStore, negocio: Negocio, dueno: Usuario): Promise<PersonaEquipo[]> {
+  const personas = await Promise.all(
+    negocio.miembros.map(async (uid): Promise<PersonaEquipo> => {
+      const u = uid === dueno.uid ? dueno : await store.getUsuario(uid);
+      return { uid, email: u?.email ?? "", esDueno: uid === negocio.duenoUid };
+    }),
+  );
+  return personas.sort((a, b) => Number(b.esDueno) - Number(a.esDueno) || a.email.localeCompare(b.email));
 }
 
 export async function crearCuenta(
@@ -154,6 +211,15 @@ export async function crearCuenta(
   const nombre = (nombreNegocio ?? "").trim();
   if (nombre.length < 1 || nombre.length > 80) {
     return falla(400, "Escribe el nombre de tu negocio (máximo 80 caracteres).");
+  }
+  // La prueba gratis solo empieza con un correo confirmado (evita pruebas infinitas con correos inventados).
+  // La prueba cuenta desde aquí (cuando ya confirmó), no desde que se registró.
+  if (!emailVerified) {
+    return falla(
+      403,
+      "Confirma tu correo para empezar tu prueba gratis. Te enviamos un enlace a tu correo.",
+      "VERIFICAR_CORREO",
+    );
   }
   // Id fijo por persona: un doble clic no puede producir dos negocios
   const idNegocio = `n_${uid}`;
@@ -226,7 +292,7 @@ export async function quitarMiembro(
   const negocio = usuario ? await store.getNegocio(usuario.negocioId) : null;
   if (!usuario || !negocio) return falla(403, "Crea tu cuenta para empezar.");
   if (negocio.duenoUid !== uid) return falla(403, "Solo el dueño del negocio puede quitar personas.");
-  if (miembroUid === uid) return falla(400, "No puedes quitarte a ti mismo.");
+  if (miembroUid === uid) return falla(400, "No puedes quitarte a ti mismo del equipo.");
   // Solo gente de este negocio: nunca se toca a nadie de otro
   if (!negocio.miembros.includes(miembroUid)) return falla(404, "Esa persona no está en tu equipo.");
 
@@ -252,5 +318,60 @@ export async function cancelarInvitacion(
   if (!inv || inv.negocioId !== negocio.id) return falla(404, "No encontramos esa invitación.");
 
   await store.borrarInvitacion(correo);
+  return { ok: true };
+}
+
+// ---------- Clave de Cloudflare del negocio (solo el dueño) ----------
+
+const SIN_LLAVE = "Falta configurar el guardado seguro de claves. Avísale a InnovationTECH.";
+
+// Prueba la clave con la misma revisión de /api/cf-test y, si pasa, la guarda cifrada aparte.
+// En el negocio solo quedan los últimos 4 del Account ID y la fecha. Nunca se devuelve el token.
+export async function conectarClaveIA(
+  uid: string,
+  datos: { accountId: unknown; token: unknown },
+  deps: DepsCuenta & ConLlave & { probar?: typeof probarCloudflare } = {},
+): Promise<{ ok: true; cuentaFin: string } | (Falla & { checks?: Check[] })> {
+  const store = deps.store ?? firestoreStore();
+  const ahora = deps.now ?? Date.now();
+
+  const usuario = await store.getUsuario(uid);
+  const negocio = usuario ? await store.getNegocio(usuario.negocioId) : null;
+  if (!usuario || !negocio) return falla(403, "Crea tu cuenta para empezar.");
+  if (negocio.duenoUid !== uid) return falla(403, "Solo el dueño del negocio puede conectar la cuenta de Cloudflare.");
+
+  const llave = llaveDe(deps);
+  if (!llave) return falla(503, SIN_LLAVE);
+
+  if (typeof datos.accountId !== "string" || typeof datos.token !== "string") {
+    return falla(400, "Escribe tu Account ID y tu token de Cloudflare.");
+  }
+  const accountId = datos.accountId.trim();
+  const token = datos.token.trim();
+  if (!accountId || !token || accountId.length > 100 || token.length > 500) {
+    return falla(400, "Escribe tu Account ID y tu token de Cloudflare.");
+  }
+
+  const prueba = await (deps.probar ?? probarCloudflare)(accountId, token);
+  if (!prueba.ok) return { ...falla(400, "La clave no pasó la prueba."), checks: prueba.checks };
+
+  const cuentaFin = accountId.slice(-4);
+  await store.guardarClaveIA(negocio.id, cifrarClave({ accountId, token }, llave));
+  await store.modificarNegocio(negocio.id, () => ({ iaPropia: { cuentaFin, conectada: ahora }, actualizado: ahora }));
+  return { ok: true, cuentaFin };
+}
+
+// Borra la clave cifrada y lo visible en el negocio. Responde ok aunque no hubiera nada conectado.
+export async function desconectarClaveIA(uid: string, deps: DepsCuenta = {}): Promise<{ ok: true } | Falla> {
+  const store = deps.store ?? firestoreStore();
+  const ahora = deps.now ?? Date.now();
+
+  const usuario = await store.getUsuario(uid);
+  const negocio = usuario ? await store.getNegocio(usuario.negocioId) : null;
+  if (!usuario || !negocio) return falla(403, "Crea tu cuenta para empezar.");
+  if (negocio.duenoUid !== uid) return falla(403, "Solo el dueño del negocio puede desconectar la cuenta de Cloudflare.");
+
+  await store.borrarClaveIA(negocio.id);
+  await store.modificarNegocio(negocio.id, (n) => (n.iaPropia ? { iaPropia: null, actualizado: ahora } : null));
   return { ok: true };
 }

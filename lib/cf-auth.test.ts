@@ -96,3 +96,30 @@ test("estadoDemo: con cuentas apagadas, el modo demo de siempre", () => {
   assert.ok(e.limits && e.limits.text > 0);
   assert.ok(e.remaining && e.remaining.text > 0);
 });
+
+test("cuentas activas: sin encabezados usa la clave guardada del negocio antes que la del entorno", () => {
+  process.env.STUDIO_CUENTAS = "on";
+  process.env.CF_ACCOUNT_ID = "acc-env";
+  process.env.CF_API_TOKEN = "tok-env";
+  const c = getCreds(pedido(), "text", 1, { accountId: "acc-guardada", token: "tok-guardado" });
+  assert.ok(!("error" in c));
+  assert.equal(c.accountId, "acc-guardada");
+  assert.equal(c.token, "tok-guardado");
+  assert.equal(c.demo, false);
+});
+
+test("los encabezados del navegador ganan sobre la clave guardada", () => {
+  process.env.STUDIO_CUENTAS = "on";
+  const c = getCreds(pedido({ "x-cf-account": "acc-cli", "x-cf-token": "tok-cli" }), "image", 1, { accountId: "acc-guardada", token: "tok-guardado" });
+  assert.ok(!("error" in c));
+  assert.equal(c.accountId, "acc-cli");
+  assert.equal(c.token, "tok-cli");
+});
+
+test("cuentas activas: sin encabezados, sin entorno, pero con clave guardada → la guardada", () => {
+  process.env.STUDIO_CUENTAS = "on";
+  delete process.env.CF_ACCOUNT_ID;
+  delete process.env.CF_API_TOKEN;
+  const c = getCreds(pedido(), "voice", 1, { accountId: "acc-guardada", token: "tok-guardado" });
+  assert.ok(!("error" in c) && c.accountId === "acc-guardada");
+});

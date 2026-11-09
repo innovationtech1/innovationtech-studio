@@ -1,6 +1,9 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { cancelarInvitacion, crearCuenta, invitar, obtenerCuenta as obtener, quitarMiembro, type EstadoCuenta } from "./account-api";
+import { cancelarInvitacion, conectarClaveIA, crearCuenta, desconectarClaveIA, invitar, obtenerCuenta as obtener, quitarMiembro, type EstadoCuenta } from "./account-api";
+import { randomBytes } from "node:crypto";
+import { cifrarClave, descifrarClave } from "./cifrado";
+import type { Check } from "./probar-cloudflare";
 import type { Usuario } from "./account-store";
 import { memoryStore } from "./account-store-memory";
 import { mesChicago, type Negocio } from "./plans";
@@ -158,7 +161,7 @@ test("quitarMiembro: dueño quita a otro; no a sí mismo; miembro no puede", asy
     ok: false, status: 403, error: "Solo el dueño del negocio puede quitar personas.",
   });
   assert.deepEqual(await quitarMiembro("u1", "u1", { store, now: AHORA }), {
-    ok: false, status: 400, error: "No puedes quitarte a ti mismo.",
+    ok: false, status: 400, error: "No puedes quitarte a ti mismo del equipo.",
   });
   assert.ok((await quitarMiembro("u1", "u2", { store, now: AHORA })).ok);
   assert.deepEqual((await store.getNegocio("n1"))?.miembros, ["u1"]);
@@ -201,7 +204,14 @@ test("obtenerCuenta del dueño: plan, herramientas, límites, uso y equipo", asy
   // Sin pedirlo, no se leen las invitaciones (cuida las lecturas de Firestore)
   assert.deepEqual(r.equipo, { miembros: 2 });
   const conEquipo = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA }, { equipo: true });
-  assert.deepEqual(conEquipo.equipo, { miembros: 2, invitaciones: ["a@x.com"] });
+  assert.deepEqual(conEquipo.equipo, {
+    miembros: 2,
+    invitaciones: ["a@x.com"],
+    personas: [
+      { uid: "u1", email: "dueno@ejemplo.com", esDueno: true },
+      { uid: "u2", email: "u2@x.com", esDueno: false },
+    ],
+  });
   const m = await cuenta("u2", "u2@x.com", true, { store, now: AHORA }, { equipo: true });
   assert.equal(m.esDueno, false);
   assert.equal(m.equipo, undefined);
@@ -234,9 +244,42 @@ test("invitado sin correo confirmado: rechazado con VERIFICAR_CORREO y no se cre
   assert.ok(await store.getInvitacion("ana@gmail.com"));
 });
 
-test("sin invitación, un correo sin confirmar sí puede crear su negocio", async () => {
+/* ---------- Correo confirmado antes de la prueba gratis ---------- */
+
+test("sin invitación, un correo sin confirmar no crea negocio: VERIFICAR_CORREO", async () => {
   const store = memoryStore();
-  assert.ok((await crearCuenta("u9", "a@x.com", false, "Mío", { store, now: AHORA })).ok);
+  const r = await crearCuenta("u9", "a@x.com", false, "Mío", { store, now: AHORA });
+  assert.deepEqual(r, {
+    ok: false,
+    status: 403,
+    error: "Confirma tu correo para empezar tu prueba gratis. Te enviamos un enlace a tu correo.",
+    codigo: "VERIFICAR_CORREO",
+  });
+  assert.equal(await store.getUsuario("u9"), null);
+  assert.equal(store.cantidadNegocios(), 0);
+});
+
+test("sin confirmar y con nombre inválido: primero se pide el nombre (400)", async () => {
+  const r = await crearCuenta("u9", "a@x.com", false, "  ", { store: memoryStore(), now: AHORA });
+  assert.deepEqual(r, { ok: false, status: 400, error: "Escribe el nombre de tu negocio (máximo 80 caracteres)." });
+});
+
+test("después de confirmar el correo, la prueba empieza desde esa llamada", async () => {
+  const store = memoryStore();
+  await crearCuenta("u9", "a@x.com", false, "Mío", { store, now: AHORA });
+  const despues = AHORA + 7 * MIN;
+  const r = await crearCuenta("u9", "a@x.com", true, "Mío", { store, now: despues });
+  assert.ok(r.ok);
+  const cfg = await store.getConfig();
+  const n = await store.getNegocio((await store.getUsuario("u9"))!.negocioId);
+  assert.equal(n?.estado, "prueba");
+  assert.equal(n?.pruebaHasta, despues + cfg.pruebaMinutos * 60000);
+});
+
+test("quien ya tiene cuenta entra aunque su correo no esté confirmado", async () => {
+  const store = memoryStore({ usuarios: [dueno], negocios: [negocio()] });
+  const r = await crearCuenta("u1", "dueno@ejemplo.com", false, "", { store, now: AHORA });
+  assert.deepEqual(r, { ok: true, usuario: dueno });
 });
 
 test("cancelarInvitacion: dueño libera el lugar; miembro no; otra invitación ajena da 404", async () => {
@@ -385,4 +428,205 @@ test("obtenerCuenta: un negocio pausado no ofrece paquetes", async () => {
   const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA });
   assert.equal(r.efectivo?.estado, "pausado");
   assert.deepEqual(r.paquetes, []);
+});
+
+/* ---------- Pasar de pago a mano a tarjeta ---------- */
+
+// Con los precios de Stripe preparados (sin ellos no se puede pagar con tarjeta)
+const CON_PRECIOS = { precios: { basico: { monto: 19, stripePriceId: "price_b" }, pro: { monto: 39, stripePriceId: "price_p" } } };
+
+test("obtenerCuenta: dueño con pago a mano vigente (≥ 48 h) puede pasar a tarjeta", async () => {
+  const hasta = AHORA + 30 * 24 * 60 * MIN;
+  const store = memoryStore({ usuarios: [dueno], negocios: [negocio({ plan: "basico", pagadoHasta: hasta })], config: CON_PRECIOS });
+  const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA });
+  assert.deepEqual(r.pasarATarjeta, { fecha: hasta, precio: 19 });
+});
+
+test("obtenerCuenta: sin el precio de Stripe del plan preparado → sin pasar a tarjeta", async () => {
+  const store = memoryStore({ usuarios: [dueno], negocios: [negocio({ plan: "basico" })] });
+  const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA });
+  assert.equal(r.pasarATarjeta, null);
+  const soloPro = memoryStore({
+    usuarios: [dueno],
+    negocios: [negocio({ plan: "basico" })],
+    config: { precios: { basico: { monto: 19 }, pro: { monto: 39, stripePriceId: "price_p" } } },
+  });
+  assert.equal((await cuenta("u1", "dueno@ejemplo.com", true, { store: soloPro, now: AHORA })).pasarATarjeta, null);
+});
+
+test("obtenerCuenta: un miembro no ve pasar a tarjeta", async () => {
+  const store = memoryStore({
+    usuarios: [dueno, miembro("u2")],
+    negocios: [negocio({ plan: "basico", miembros: ["u1", "u2"] })],
+    config: CON_PRECIOS,
+  });
+  const r = await cuenta("u2", "u2@x.com", true, { store, now: AHORA });
+  assert.equal(r.pasarATarjeta, null);
+});
+
+test("obtenerCuenta: pago a mano que vence en menos de 48 h → sin pasar a tarjeta", async () => {
+  const store = memoryStore({ usuarios: [dueno], negocios: [negocio({ plan: "basico", pagadoHasta: AHORA + 47 * 60 * MIN })], config: CON_PRECIOS });
+  const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA });
+  assert.equal(r.pasarATarjeta, null);
+});
+
+test("obtenerCuenta: con tarjeta (Stripe) → sin pasar a tarjeta", async () => {
+  const store = memoryStore({
+    usuarios: [dueno],
+    negocios: [negocio({ origen: "stripe", pagadoHasta: undefined, stripe: { status: "active" } })],
+  });
+  const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA });
+  assert.equal(r.pasarATarjeta, null);
+});
+
+/* ---------- Lista del equipo ---------- */
+
+test("obtenerCuenta con equipo: personas con el dueño primero y el resto por correo", async () => {
+  const store = memoryStore({
+    usuarios: [
+      dueno,
+      { ...miembro("u2"), email: "zeta@x.com" },
+      { ...miembro("u3"), email: "ana@x.com" },
+    ],
+    negocios: [negocio({ miembros: ["u2", "u1", "u3"] })],
+  });
+  const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA }, { equipo: true });
+  assert.deepEqual(r.equipo?.personas, [
+    { uid: "u1", email: "dueno@ejemplo.com", esDueno: true },
+    { uid: "u3", email: "ana@x.com", esDueno: false },
+    { uid: "u2", email: "zeta@x.com", esDueno: false },
+  ]);
+});
+
+test("obtenerCuenta con equipo: un miembro sin usuario sale con correo vacío", async () => {
+  const store = memoryStore({ usuarios: [dueno], negocios: [negocio({ miembros: ["u1", "fantasma"] })] });
+  const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA }, { equipo: true });
+  assert.deepEqual(r.equipo?.personas, [
+    { uid: "u1", email: "dueno@ejemplo.com", esDueno: true },
+    { uid: "fantasma", email: "", esDueno: false },
+  ]);
+});
+
+test("obtenerCuenta sin equipo=1 no trae la lista de personas", async () => {
+  const store = memoryStore({ usuarios: [dueno, miembro("u2")], negocios: [negocio({ miembros: ["u1", "u2"] })] });
+  const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA });
+  assert.equal(r.equipo?.personas, undefined);
+});
+
+test("obtenerCuenta con equipo en Básico: el dueño igual ve personas e invitaciones que quedaron", async () => {
+  const store = memoryStore({
+    usuarios: [dueno, miembro("u2")],
+    negocios: [negocio({ plan: "basico", miembros: ["u1", "u2"] })],
+  });
+  await store.crearInvitacion("a@x.com", { negocioId: "n1", invitadoPor: "u1", creado: AHORA });
+  const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA }, { equipo: true });
+  assert.equal(r.efectivo.plan, "basico");
+  assert.deepEqual(r.equipo, {
+    miembros: 2,
+    invitaciones: ["a@x.com"],
+    personas: [
+      { uid: "u1", email: "dueno@ejemplo.com", esDueno: true },
+      { uid: "u2", email: "u2@x.com", esDueno: false },
+    ],
+  });
+});
+
+// ---------- Clave de Cloudflare en la cuenta ----------
+// Datos falsos y aleatorios: nunca un secreto real
+const LLAVE = randomBytes(32);
+const ID_CF = randomBytes(16).toString("hex");
+const TOKEN_CF = `tok-${randomBytes(12).toString("hex")}`;
+const VERDE: Check[] = [{ ok: true, label: "Todo bien" }];
+const ROJO: Check[] = [{ ok: false, label: "Token válido y activo", help: "El token no es válido." }];
+const probarOk = async () => ({ ok: true, checks: VERDE });
+const probarMal = async () => ({ ok: false, checks: ROJO });
+const conEquipo = () =>
+  memoryStore({ usuarios: [dueno, miembro("u2")], negocios: [negocio({ miembros: ["u1", "u2"] })] });
+
+test("conectarClaveIA: el dueño la conecta → iaPropia con los últimos 4 y documento cifrado legible", async () => {
+  const store = conEquipo();
+  let probada: [string, string] | null = null;
+  const probar = async (a: string, t: string) => ((probada = [a, t]), { ok: true, checks: VERDE });
+  const r = await conectarClaveIA("u1", { accountId: ` ${ID_CF} `, token: ` ${TOKEN_CF} ` }, { store, now: AHORA, llave: LLAVE, probar });
+  assert.deepEqual(r, { ok: true, cuentaFin: ID_CF.slice(-4) });
+  assert.deepEqual(probada, [ID_CF, TOKEN_CF]);
+  const n = await store.getNegocio("n1");
+  assert.deepEqual(n?.iaPropia, { cuentaFin: ID_CF.slice(-4), conectada: AHORA });
+  const doc = await store.leerClaveIA("n1");
+  assert.ok(doc);
+  assert.deepEqual(descifrarClave(doc, LLAVE), { accountId: ID_CF, token: TOKEN_CF });
+  assert.ok(!JSON.stringify(r).includes(TOKEN_CF));
+});
+
+test("conectarClaveIA: prueba fallida → 400 con checks y nada guardado", async () => {
+  const store = conEquipo();
+  const r = await conectarClaveIA("u1", { accountId: ID_CF, token: TOKEN_CF }, { store, now: AHORA, llave: LLAVE, probar: probarMal });
+  assert.deepEqual(r, { ok: false, status: 400, error: "La clave no pasó la prueba.", checks: ROJO });
+  assert.equal(await store.leerClaveIA("n1"), null);
+  assert.equal((await store.getNegocio("n1"))?.iaPropia, undefined);
+});
+
+test("conectarClaveIA y desconectarClaveIA: un miembro → 403 y nada cambia", async () => {
+  const store = conEquipo();
+  await conectarClaveIA("u1", { accountId: ID_CF, token: TOKEN_CF }, { store, now: AHORA, llave: LLAVE, probar: probarOk });
+  let probo = false;
+  const c = await conectarClaveIA("u2", { accountId: ID_CF, token: TOKEN_CF }, {
+    store, now: AHORA, llave: LLAVE, probar: async () => ((probo = true), { ok: true, checks: VERDE }),
+  });
+  assert.deepEqual(c, { ok: false, status: 403, error: "Solo el dueño del negocio puede conectar la cuenta de Cloudflare." });
+  assert.equal(probo, false);
+  const d = await desconectarClaveIA("u2", { store, now: AHORA });
+  assert.deepEqual(d, { ok: false, status: 403, error: "Solo el dueño del negocio puede desconectar la cuenta de Cloudflare." });
+  assert.ok(await store.leerClaveIA("n1"));
+  assert.ok((await store.getNegocio("n1"))?.iaPropia);
+});
+
+test("conectarClaveIA: sin llave configurada → 503 con la copia exacta", async () => {
+  const store = conEquipo();
+  const r = await conectarClaveIA("u1", { accountId: ID_CF, token: TOKEN_CF }, { store, now: AHORA, llave: null, probar: probarOk });
+  assert.deepEqual(r, { ok: false, status: 503, error: "Falta configurar el guardado seguro de claves. Avísale a InnovationTECH." });
+  assert.equal(await store.leerClaveIA("n1"), null);
+});
+
+test("conectarClaveIA: datos que no son texto → 400 sin probar", async () => {
+  const store = conEquipo();
+  let probo = false;
+  const probar = async () => ((probo = true), { ok: true, checks: VERDE });
+  const r = await conectarClaveIA("u1", { accountId: 123, token: { x: 1 } }, { store, now: AHORA, llave: LLAVE, probar });
+  assert.ok(!r.ok && r.status === 400);
+  assert.equal(probo, false);
+});
+
+test("desconectarClaveIA: borra el documento cifrado y iaPropia; ok aunque no hubiera nada", async () => {
+  const store = conEquipo();
+  await conectarClaveIA("u1", { accountId: ID_CF, token: TOKEN_CF }, { store, now: AHORA, llave: LLAVE, probar: probarOk });
+  assert.deepEqual(await desconectarClaveIA("u1", { store, now: AHORA }), { ok: true });
+  assert.equal(await store.leerClaveIA("n1"), null);
+  const n = await store.getNegocio("n1");
+  assert.equal(n?.iaPropia, undefined);
+  assert.ok(!("iaPropia" in (n ?? {})));
+  assert.deepEqual(await desconectarClaveIA("u1", { store, now: AHORA }), { ok: true });
+});
+
+test("obtenerCuenta: iaPropia legible para dueño y miembro, sin el token ni el Account ID", async () => {
+  const store = conEquipo();
+  await conectarClaveIA("u1", { accountId: ID_CF, token: TOKEN_CF }, { store, now: AHORA, llave: LLAVE, probar: probarOk });
+  for (const uid of ["u1", "u2"]) {
+    const c = await cuenta(uid, `${uid}@x.com`, true, { store, now: AHORA, llave: LLAVE });
+    assert.deepEqual(c.iaPropia, { cuentaFin: ID_CF.slice(-4), conectada: AHORA, legible: true });
+    const texto = JSON.stringify(c);
+    assert.ok(!texto.includes(TOKEN_CF), "el token no debe salir");
+    assert.ok(!texto.includes(ID_CF), "el Account ID completo no debe salir");
+  }
+});
+
+test("obtenerCuenta: legible false con llave distinta o sin llave; null sin clave conectada", async () => {
+  const store = conEquipo();
+  assert.equal((await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA, llave: LLAVE })).iaPropia, null);
+  await store.guardarClaveIA("n1", cifrarClave({ accountId: ID_CF, token: TOKEN_CF }, LLAVE));
+  await store.modificarNegocio("n1", () => ({ iaPropia: { cuentaFin: ID_CF.slice(-4), conectada: AHORA } }));
+  const otra = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA, llave: randomBytes(32) });
+  assert.equal(otra.iaPropia?.legible, false);
+  const sin = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA, llave: null });
+  assert.equal(sin.iaPropia?.legible, false);
 });

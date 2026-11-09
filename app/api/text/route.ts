@@ -9,7 +9,7 @@ type Gen = { system: string; user: string; maxTokens: number };
 // Llama al proveedor elegido (Cloudflare gratis o Claude de pago) y devuelve el texto.
 async function generate(req: Request, acceso: Extract<Acceso, { ok: true }>, provider: string, model: string | undefined, g: Gen): Promise<string> {
   if (provider === "cloudflare") {
-    const c = getCreds(req, "text");
+    const c = getCreds(req, "text", 1, acceso.cfGuardada);
     if ("error" in c) {
       await acceso.devolver();
       throw Object.assign(new Error(c.error), { status: c.status });
@@ -100,6 +100,7 @@ export async function POST(req: Request) {
     herramienta: "textos",
     contador: "textos",
     clavePropia: provider !== "cloudflare" ? !!req.headers.get("x-anthropic-key") : clavePropiaCF(req),
+    cloudflare: provider === "cloudflare", // solo así cuenta la clave guardada del negocio
   });
   if (!acceso.ok) return jsonAcceso(acceso);
 
