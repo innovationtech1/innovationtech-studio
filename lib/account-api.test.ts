@@ -6,6 +6,7 @@ import { cifrarClave, descifrarClave } from "./cifrado";
 import type { Check } from "./probar-cloudflare";
 import type { Usuario } from "./account-store";
 import { memoryStore } from "./account-store-memory";
+import { VERSION_LEGAL } from "./legal";
 import { mesChicago, type Negocio } from "./plans";
 
 const AHORA = Date.parse("2026-11-07T18:00:00Z");
@@ -55,7 +56,7 @@ test("usuario nuevo: obtenerCuenta devuelve usuario null", async () => {
 
 test("usuario nuevo crea negocio en prueba con pruebaHasta = ahora + 600000", async () => {
   const store = memoryStore();
-  const r = await crearCuenta("u9", "Nuevo@X.com", true, "  Mi Negocio  ", { store, now: AHORA });
+  const r = await crearCuenta("u9", "Nuevo@X.com", true, "  Mi Negocio  ", true, { store, now: AHORA });
   assert.equal(r.ok, true);
   const n = await store.getNegocio((await store.getUsuario("u9"))!.negocioId);
   assert.equal(n?.nombre, "Mi Negocio");
@@ -70,22 +71,22 @@ test("usuario nuevo crea negocio en prueba con pruebaHasta = ahora + 600000", as
 
 test("segunda llamada no crea otro negocio", async () => {
   const store = memoryStore();
-  const a = await crearCuenta("u9", "a@x.com", true, "Uno", { store, now: AHORA });
-  const b = await crearCuenta("u9", "a@x.com", true, "Dos", { store, now: AHORA });
+  const a = await crearCuenta("u9", "a@x.com", true, "Uno", true, { store, now: AHORA });
+  const b = await crearCuenta("u9", "a@x.com", true, "Dos", true, { store, now: AHORA });
   assert.ok(a.ok && b.ok);
   assert.equal(a.ok && b.ok && a.usuario.negocioId, b.ok && b.usuario.negocioId);
 });
 
 test("llamadas simultáneas crean un solo negocio", async () => {
   const store = memoryStore();
-  const rs = await Promise.all([1, 2, 3].map(() => crearCuenta("u9", "a@x.com", true, "Uno", { store, now: AHORA })));
+  const rs = await Promise.all([1, 2, 3].map(() => crearCuenta("u9", "a@x.com", true, "Uno", true, { store, now: AHORA })));
   const ids = new Set(rs.map((r) => (r.ok ? r.usuario.negocioId : "")));
   assert.equal(ids.size, 1);
 });
 
 test("nombre inválido", async () => {
   for (const nombre of ["", "   ", "x".repeat(81)]) {
-    const r = await crearCuenta("u9", "a@x.com", true, nombre, { store: memoryStore(), now: AHORA });
+    const r = await crearCuenta("u9", "a@x.com", true, nombre, true, { store: memoryStore(), now: AHORA });
     assert.deepEqual(r, { ok: false, status: 400, error: "Escribe el nombre de tu negocio (máximo 80 caracteres)." });
   }
 });
@@ -94,7 +95,7 @@ test("invitación Ana@Gmail.com y registro como ana@gmail.com se une como miembr
   const store = memoryStore({ usuarios: [dueno], negocios: [negocio()] });
   const inv = await invitar("u1", "Ana@Gmail.com", { store, now: AHORA });
   assert.equal(inv.ok, true);
-  const r = await crearCuenta("u2", "ana@gmail.com", true, "", { store, now: AHORA });
+  const r = await crearCuenta("u2", "ana@gmail.com", true, "", true, { store, now: AHORA });
   assert.ok(r.ok);
   const u = await store.getUsuario("u2");
   assert.equal(u?.rol, "miembro");
@@ -109,7 +110,7 @@ test("invitación con negocio lleno: no se une y crea el suyo", async () => {
     negocios: [negocio({ miembros: ["u1", "u2", "u3"] })],
   });
   await store.crearInvitacion("ana@gmail.com", { negocioId: "n1", invitadoPor: "u1", creado: AHORA });
-  const r = await crearCuenta("u4", "ana@gmail.com", true, "Mío", { store, now: AHORA });
+  const r = await crearCuenta("u4", "ana@gmail.com", true, "Mío", true, { store, now: AHORA });
   assert.ok(r.ok);
   assert.notEqual((await store.getUsuario("u4"))?.negocioId, "n1");
   assert.equal((await store.getNegocio("n1"))?.miembros.length, 3);
@@ -231,7 +232,7 @@ test("obtenerCuenta con prueba vencida: sin herramientas y límites en cero", as
 test("invitado sin correo confirmado: rechazado con VERIFICAR_CORREO y no se crea nada", async () => {
   const store = memoryStore({ usuarios: [dueno], negocios: [negocio()] });
   await invitar("u1", "ana@gmail.com", { store, now: AHORA });
-  const r = await crearCuenta("u2", "ana@gmail.com", false, "Mío", { store, now: AHORA });
+  const r = await crearCuenta("u2", "ana@gmail.com", false, "Mío", true, { store, now: AHORA });
   assert.deepEqual(r, {
     ok: false,
     status: 403,
@@ -248,7 +249,7 @@ test("invitado sin correo confirmado: rechazado con VERIFICAR_CORREO y no se cre
 
 test("sin invitación, un correo sin confirmar no crea negocio: VERIFICAR_CORREO", async () => {
   const store = memoryStore();
-  const r = await crearCuenta("u9", "a@x.com", false, "Mío", { store, now: AHORA });
+  const r = await crearCuenta("u9", "a@x.com", false, "Mío", true, { store, now: AHORA });
   assert.deepEqual(r, {
     ok: false,
     status: 403,
@@ -260,15 +261,15 @@ test("sin invitación, un correo sin confirmar no crea negocio: VERIFICAR_CORREO
 });
 
 test("sin confirmar y con nombre inválido: primero se pide el nombre (400)", async () => {
-  const r = await crearCuenta("u9", "a@x.com", false, "  ", { store: memoryStore(), now: AHORA });
+  const r = await crearCuenta("u9", "a@x.com", false, "  ", true, { store: memoryStore(), now: AHORA });
   assert.deepEqual(r, { ok: false, status: 400, error: "Escribe el nombre de tu negocio (máximo 80 caracteres)." });
 });
 
 test("después de confirmar el correo, la prueba empieza desde esa llamada", async () => {
   const store = memoryStore();
-  await crearCuenta("u9", "a@x.com", false, "Mío", { store, now: AHORA });
+  await crearCuenta("u9", "a@x.com", false, "Mío", true, { store, now: AHORA });
   const despues = AHORA + 7 * MIN;
-  const r = await crearCuenta("u9", "a@x.com", true, "Mío", { store, now: despues });
+  const r = await crearCuenta("u9", "a@x.com", true, "Mío", true, { store, now: despues });
   assert.ok(r.ok);
   const cfg = await store.getConfig();
   const n = await store.getNegocio((await store.getUsuario("u9"))!.negocioId);
@@ -278,7 +279,63 @@ test("después de confirmar el correo, la prueba empieza desde esa llamada", asy
 
 test("quien ya tiene cuenta entra aunque su correo no esté confirmado", async () => {
   const store = memoryStore({ usuarios: [dueno], negocios: [negocio()] });
-  const r = await crearCuenta("u1", "dueno@ejemplo.com", false, "", { store, now: AHORA });
+  const r = await crearCuenta("u1", "dueno@ejemplo.com", false, "", true, { store, now: AHORA });
+  assert.deepEqual(r, { ok: true, usuario: dueno });
+});
+
+/* ---------- Aceptar los Términos y la Política de privacidad ---------- */
+
+const SIN_TERMINOS = {
+  ok: false,
+  status: 400,
+  error: "Acepta los Términos de servicio y la Política de privacidad para continuar.",
+  codigo: "ACEPTAR_TERMINOS",
+};
+
+test("negocio propio sin aceptar los términos: 400 ACEPTAR_TERMINOS y no se crea nada", async () => {
+  const store = memoryStore();
+  const r = await crearCuenta("u9", "a@x.com", true, "Mío", false, { store, now: AHORA });
+  assert.deepEqual(r, SIN_TERMINOS);
+  assert.equal(await store.getUsuario("u9"), null);
+  assert.equal(store.cantidadNegocios(), 0);
+});
+
+test("negocio propio aceptando los términos: el usuario guarda la versión y la fecha", async () => {
+  const store = memoryStore();
+  const r = await crearCuenta("u9", "a@x.com", true, "Mío", true, { store, now: AHORA });
+  assert.ok(r.ok);
+  assert.deepEqual(r.usuario.terminos, { version: VERSION_LEGAL, fecha: AHORA });
+  assert.deepEqual((await store.getUsuario("u9"))?.terminos, { version: VERSION_LEGAL, fecha: AHORA });
+});
+
+test("sin confirmar el correo se pide primero confirmarlo (antes que los términos)", async () => {
+  const r = await crearCuenta("u9", "a@x.com", false, "Mío", false, { store: memoryStore(), now: AHORA });
+  assert.equal(r.ok === false && r.codigo, "VERIFICAR_CORREO");
+});
+
+test("unirse por invitación sin aceptar los términos: 400 y no se une", async () => {
+  const store = memoryStore({ usuarios: [dueno], negocios: [negocio()] });
+  await invitar("u1", "ana@gmail.com", { store, now: AHORA });
+  const r = await crearCuenta("u2", "ana@gmail.com", true, "", false, { store, now: AHORA });
+  assert.deepEqual(r, SIN_TERMINOS);
+  assert.equal(await store.getUsuario("u2"), null);
+  assert.deepEqual((await store.getNegocio("n1"))?.miembros, ["u1"]);
+  assert.ok(await store.getInvitacion("ana@gmail.com"));
+});
+
+test("unirse por invitación aceptando los términos: el miembro guarda la versión y la fecha", async () => {
+  const store = memoryStore({ usuarios: [dueno], negocios: [negocio()] });
+  await invitar("u1", "ana@gmail.com", { store, now: AHORA });
+  const r = await crearCuenta("u2", "ana@gmail.com", true, "", true, { store, now: AHORA });
+  assert.ok(r.ok);
+  const u = await store.getUsuario("u2");
+  assert.equal(u?.rol, "miembro");
+  assert.deepEqual(u?.terminos, { version: VERSION_LEGAL, fecha: AHORA });
+});
+
+test("quien ya tiene cuenta no tiene que aceptar de nuevo (sin bloqueo)", async () => {
+  const store = memoryStore({ usuarios: [dueno], negocios: [negocio()] });
+  const r = await crearCuenta("u1", "dueno@ejemplo.com", true, "", false, { store, now: AHORA });
   assert.deepEqual(r, { ok: true, usuario: dueno });
 });
 
@@ -310,7 +367,7 @@ test("invitar a alguien que ya tiene su propia cuenta", async () => {
 
 test("dos crearCuenta a la vez del mismo uid dejan un solo negocio", async () => {
   const store = memoryStore();
-  await Promise.all([1, 2].map(() => crearCuenta("u9", "a@x.com", true, "Uno", { store, now: AHORA })));
+  await Promise.all([1, 2].map(() => crearCuenta("u9", "a@x.com", true, "Uno", true, { store, now: AHORA })));
   assert.equal(store.cantidadNegocios(), 1);
   assert.equal((await store.getUsuario("u9"))?.negocioId, "n_u9");
 });
@@ -346,7 +403,7 @@ test("si pierde la carrera al unirse, deshace el lugar tomado sin tocar su usuar
     },
   };
   let calls = 0;
-  const r = await crearCuenta("u2", "ana@gmail.com", true, "x", { store, now: AHORA });
+  const r = await crearCuenta("u2", "ana@gmail.com", true, "x", true, { store, now: AHORA });
   assert.ok(r.ok);
   assert.deepEqual((await base.getNegocio("n1"))?.miembros, ["u1"]);
   assert.equal((await base.getUsuario("u2"))?.negocioId, "n2");
@@ -381,7 +438,7 @@ test("obtenerCuenta sin equipo=1 no consulta las invitaciones", async () => {
 test("invitación de un negocio que bajó a Básico: no se une y crea el suyo", async () => {
   const store = memoryStore({ usuarios: [dueno], negocios: [negocio({ plan: "basico" })] });
   await store.crearInvitacion("ana@gmail.com", { negocioId: "n1", invitadoPor: "u1", creado: AHORA });
-  const r = await crearCuenta("u2", "ana@gmail.com", true, "Lo mío", { store, now: AHORA });
+  const r = await crearCuenta("u2", "ana@gmail.com", true, "Lo mío", true, { store, now: AHORA });
   assert.ok(r.ok);
   const u = await store.getUsuario("u2");
   assert.equal(u?.rol, "dueno");
@@ -395,7 +452,7 @@ test("invitación de un negocio en prueba no cuenta como Pro: no se une", async 
     negocios: [negocio({ estado: "prueba", origen: null, pagadoHasta: undefined, pruebaHasta: AHORA + 5 * MIN })],
   });
   await store.crearInvitacion("ana@gmail.com", { negocioId: "n1", invitadoPor: "u1", creado: AHORA });
-  const r = await crearCuenta("u2", "ana@gmail.com", true, "Lo mío", { store, now: AHORA });
+  const r = await crearCuenta("u2", "ana@gmail.com", true, "Lo mío", true, { store, now: AHORA });
   assert.ok(r.ok);
   assert.notEqual((await store.getUsuario("u2"))?.negocioId, "n1");
 });
