@@ -1,5 +1,5 @@
 import type Stripe from "stripe";
-import { esPaquete, sumarSaldo, SUSCRIPCION_VIVA, type Negocio, type PaqueteId, type PlanesConfig } from "./plans";
+import { esPaquete, sumarSaldo, SUSCRIPCION_VIVA, type CambiosNegocio, type Negocio, type PaqueteId, type PlanesConfig } from "./plans";
 
 // Qué le pasa a un negocio cuando llega un aviso (evento) de Stripe.
 // Todo aquí es "puro": no lee ni guarda nada, solo calcula. Así se puede probar sin Stripe.
@@ -122,7 +122,8 @@ function pagoDePaquete(
 }
 
 // Calcula los cambios del negocio para un aviso. Devuelve null si no hay que cambiar nada.
-export function aplicarEvento(evento: Stripe.Event, negocio: Negocio, cfg: PlanesConfig): Partial<Negocio> | null {
+// `manualSiguiente: null` en los cambios quiere decir «borrar el campo» (ver CAMPOS_BORRABLES).
+export function aplicarEvento(evento: Stripe.Event, negocio: Negocio, cfg: PlanesConfig): CambiosNegocio | null {
   // Los pagos de paquetes van aparte: no tocan la suscripción ni su reloj
   if (evento.type === "checkout.session.async_payment_succeeded") return pagoDePaquete(evento, evento.data.object, negocio, cfg);
   if (evento.type === "checkout.session.completed" && evento.data.object.mode === "payment") {
@@ -185,8 +186,28 @@ export function aplicarEvento(evento: Stripe.Event, negocio: Negocio, cfg: Plane
       // Una suscripción cancelada no revive (protege contra avisos del mismo segundo en otro orden)
       if (!borrada && sub.id === actual && previo.status === "canceled" && status !== "canceled") return null;
 
-      const precio = sub.items?.data?.[0]?.price;
+      const item = sub.items?.data?.[0];
+      const precio = item?.price;
       const priceId = precio?.id;
+      // Fin del mes ya pagado con tarjeta (Stripe lo manda en segundos)
+      const finSeg = borrada ? undefined : item?.current_period_end;
+      const finPeriodo = typeof finSeg === "number" ? finSeg * 1000 : previo.finPeriodo;
+
+      // De tarjeta a pago a mano pendiente (manualSiguiente): solo cuenta la suscripción actual
+      const siguiente = sub.id === actual ? negocio.manualSiguiente : undefined;
+      // ¿Volvió a renovar? (alguien quitó la cancelación al final del periodo): queda marcado para revisar
+      // (solo el aviso «updated»: un «created» viejo que llega tarde no dice nada de esto)
+      const actualizada = evento.type === "customer.subscription.updated";
+      let renovoConManual = siguiente ? previo.renovoConManual : undefined;
+      if (siguiente && actualizada && sub.cancel_at_period_end === true) renovoConManual = undefined;
+      else if (siguiente && actualizada && sub.cancel_at_period_end === false) {
+        renovoConManual = true;
+        console.error(
+          `Stripe: la suscripción ${sub.id} (negocio ${negocio.id}) volvió a renovar y tiene un pago a mano pendiente. ` +
+            "Revísalo en /admin para que no se cobre dos veces.",
+        );
+      }
+
       const stripe = limpio({
         ...previo,
         customerId: idDe(sub.customer) ?? previo.customerId,
@@ -195,10 +216,26 @@ export function aplicarEvento(evento: Stripe.Event, negocio: Negocio, cfg: Plane
         priceId: priceId ?? previo.priceId,
         ultimoEvento: Math.max(reloj, cuando),
         livemode,
+        finPeriodo,
+        renovoConManual: borrada ? undefined : renovoConManual,
       });
 
+      // Terminó la suscripción con un pago a mano pendiente: si su fecha sigue vigente, pasa a pago a mano.
+      // Si ya venció, se pausa como siempre. En los dos casos el pendiente se borra.
+      if (borrada && siguiente && siguiente.hasta > cuando) {
+        return {
+          stripe,
+          origen: "manual",
+          plan: siguiente.plan,
+          pagadoHasta: siguiente.hasta,
+          estado: "activo",
+          manualSiguiente: null,
+        };
+      }
+      const borrarSiguiente = borrada && siguiente ? { manualSiguiente: null } : {};
+
       // Sin el primer pago, o con un pago a mano vigente en el negocio: solo se anota lo de Stripe
-      if (SIN_PRIMER_PAGO.has(status) || (conPagoManual && !AL_DIA.has(status))) return { stripe };
+      if (SIN_PRIMER_PAGO.has(status) || (conPagoManual && !AL_DIA.has(status))) return { stripe, ...borrarSiguiente };
 
       // Un precio que no es de los nuestros nunca da Pro: queda en Básico (y se avisa en el registro)
       let plan = planDePrecio(priceId, cfg, precio?.lookup_key);
@@ -211,6 +248,7 @@ export function aplicarEvento(evento: Stripe.Event, negocio: Negocio, cfg: Plane
         origen: "stripe",
         plan,
         estado: AL_DIA.has(status) ? "activo" : "pausado",
+        ...borrarSiguiente,
       };
     }
 

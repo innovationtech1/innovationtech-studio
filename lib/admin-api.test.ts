@@ -343,3 +343,21 @@ test("obtenerNegocio incluye los movimientos", async () => {
   assert.ok(r.ok);
   if (r.ok) assert.equal(r.movimientos.length, 1);
 });
+
+test("listar: finTarjeta solo cuando hay manualSiguiente (de stripe.finPeriodo)", async () => {
+  const fin = AHORA + 20 * DIA;
+  const st = { subscriptionId: "sub_1", status: "active", finPeriodo: fin };
+  const store = memoryStore({
+    negocios: [
+      negocio({ id: "n1", origen: "stripe", estado: "activo", plan: "basico", stripe: st, manualSiguiente: { plan: "basico", hasta: fin + 30 * DIA } }),
+      negocio({ id: "n2", origen: "stripe", estado: "activo", plan: "basico", stripe: st, creado: AHORA }),
+    ],
+    usuarios: [dueno],
+  });
+  const r = await listar(ADMIN, true, { store, now: AHORA, stripeLive: false });
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  assert.equal(r.negocios.find((x) => x.negocio.id === "n1")!.finTarjeta, fin);
+  const n2 = r.negocios.find((x) => x.negocio.id === "n2")!;
+  assert.equal("finTarjeta" in n2, false);
+});

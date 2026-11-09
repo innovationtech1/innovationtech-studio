@@ -2,6 +2,7 @@ import "server-only";
 import Stripe from "stripe";
 import { firestoreStore, type AccountStore } from "./account-store";
 import { esCorreoAdmin, type Falla } from "./account-api";
+import { validarDatosActivar, type DatosActivar } from "./admin-api";
 import { estadoEfectivo, esPaquete, quedaMargenParaTarjeta, type Negocio, type PaqueteId } from "./plans";
 import { aplicarEvento, EVENTOS_STRIPE, idDe, LOOKUP_PAQUETES, LOOKUP_PLANES, referenciasDeEvento, SUSCRIPCION_VIVA } from "./stripe-events";
 import { SIN_CONFIGURAR, stripe, stripeConfigurado, stripeModoLive } from "./stripe-server";
@@ -490,6 +491,87 @@ export async function abrirPortal(
     console.error("Stripe: no se pudo abrir el portal:", mensaje(e));
     return ERROR_STRIPE();
   }
+}
+
+/* ---------------- De tarjeta a pago a mano (administrador) ---------------- */
+
+const SIN_TARJETA_AL_DIA = "Este negocio no tiene una suscripción con tarjeta al día.";
+
+// «Pasar a pago a mano»: el cliente paga con tarjeta y ahora pagará a mano.
+// No se cobra dos veces ni se pausa: la suscripción se cancela al final del mes ya pagado con
+// tarjeta (cancel_at_period_end) y el pago a mano queda pendiente (manualSiguiente). Cuando Stripe
+// avise que la suscripción terminó (customer.subscription.deleted), el webhook lo pasa a pago a mano.
+// La fecha «hasta» debe ser después de ese fin de mes. Si Stripe falla no se guarda nada.
+export async function pasarAManual(
+  adminEmail: string,
+  emailVerified: boolean,
+  negocioId: string,
+  datos: DatosActivar,
+  deps: DepsStripe = {},
+): Promise<{ ok: true; finTarjeta: number } | Falla> {
+  if (!esCorreoAdmin(adminEmail, emailVerified)) {
+    return falla(403, "No tienes permiso para el panel de administrador.", "NO_ADMIN");
+  }
+  const store = deps.store ?? firestoreStore();
+  const ahora = deps.now ?? Date.now();
+  const live = deps.stripeLive ?? stripeModoLive();
+  const invalido = validarDatosActivar(datos, ahora);
+  if (invalido) return invalido;
+
+  const guardado = await store.getNegocio(negocioId);
+  if (!guardado) return falla(404, "No encontramos ese negocio.");
+  const cliente = clienteDe(deps);
+  if (!cliente) return NO_CONFIGURADO();
+  // Solo una suscripción de tarjeta de este modo de Stripe (la del otro modo no cobra aquí)
+  const negocio = vistaDelModo(guardado, live);
+  const subId = negocio.origen === "stripe" ? negocio.stripe?.subscriptionId : undefined;
+  if (!subId) return falla(400, SIN_TARJETA_AL_DIA);
+
+  let finTarjeta: number;
+  try {
+    let sub: Stripe.Subscription;
+    try {
+      sub = await cliente.subscriptions.retrieve(subId);
+    } catch (e) {
+      if (noExiste(e)) return falla(400, SIN_TARJETA_AL_DIA);
+      throw e;
+    }
+    // Solo al día de verdad: en prueba (trialing) o con un pago pendiente no hay «mes pagado»
+    if (sub.status !== "active") return falla(400, SIN_TARJETA_AL_DIA);
+    const fin = sub.items?.data?.[0]?.current_period_end;
+    if (typeof fin !== "number") {
+      console.error(`Stripe: la suscripción ${subId} no trae el fin del periodo; no se pasa a pago a mano.`);
+      return ERROR_STRIPE();
+    }
+    finTarjeta = fin * 1000;
+    if (datos.hasta <= finTarjeta) {
+      return falla(400, `La fecha debe ser después del ${fechaCorta(finTarjeta)}, cuando termina el mes pagado con tarjeta.`);
+    }
+    // Deja de cobrar al final del mes ya pagado (no cancela hoy: el cliente sigue con su plan)
+    await cliente.subscriptions.update(subId, { cancel_at_period_end: true });
+  } catch (e) {
+    console.error("Stripe: no se pudo pasar a pago a mano:", mensaje(e));
+    return ERROR_STRIPE();
+  }
+
+  const nota = typeof datos.nota === "string" ? datos.nota.trim().slice(0, 300) : "";
+  await store.registrarPagoManual({
+    id: crypto.randomUUID(),
+    negocioId,
+    plan: datos.plan,
+    monto: datos.monto,
+    metodo: datos.metodo,
+    hasta: datos.hasta,
+    ...(nota ? { nota } : {}),
+    registradoPor: adminEmail.trim().toLowerCase(),
+    fecha: ahora,
+  });
+  await store.modificarNegocio(negocioId, (n) => ({
+    manualSiguiente: { plan: datos.plan, hasta: datos.hasta },
+    stripe: { ...n.stripe, finPeriodo: finTarjeta },
+    actualizado: ahora,
+  }));
+  return { ok: true, finTarjeta };
 }
 
 /* ---------------- Avisos de Stripe (webhook) ---------------- */

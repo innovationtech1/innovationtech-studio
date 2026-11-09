@@ -3,10 +3,12 @@ import { FieldValue } from "firebase-admin/firestore";
 import { colecciones } from "./colecciones";
 import { db } from "./firebase-server";
 import {
+  CAMPOS_BORRABLES,
   cantidadSegura,
   mezclarConfig,
   repartirReserva,
   sumarSaldo,
+  type CambiosNegocio,
   type Contador,
   type Negocio,
   type PaqueteConfig,
@@ -81,7 +83,8 @@ export interface AccountStore {
   // Devuelve "duplicado" si ese aviso ya estaba marcado y "no_existe" si no hay negocio.
   modificarNegocio(
     id: string,
-    fn: (n: Negocio) => Partial<Negocio> | null,
+    // null en un campo borrable (p. ej. manualSiguiente) lo borra (ver CAMPOS_BORRABLES)
+    fn: (n: Negocio) => CambiosNegocio | null,
     opciones?: { eventoId?: string },
   ): Promise<ResultadoModificar>;
 }
@@ -127,11 +130,14 @@ export type Invitacion = { negocioId: string; invitadoPor: string; creado: numbe
 
 export const idUso = (negocioId: string, mes: string) => `${negocioId}_${mes}`;
 
-// Firestore no acepta undefined: se quitan (también dentro de stripe).
-function sinIndefinidos(c: Partial<Negocio>): Record<string, unknown> {
+// Lo que se manda a Firestore en un update: no acepta undefined (se quitan, también dentro de
+// stripe), y null en un campo borrable (CAMPOS_BORRABLES) se convierte en FieldValue.delete().
+// La base en memoria hace lo mismo con aplicarCambios.
+export function datosParaFirestore(c: CambiosNegocio): Record<string, unknown> {
   const fuera = (o: object) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
   const limpio = fuera(c);
   if (c.stripe) limpio.stripe = fuera(c.stripe);
+  for (const k of CAMPOS_BORRABLES) if (limpio[k] === null) limpio[k] = FieldValue.delete();
   return limpio;
 }
 
@@ -389,7 +395,7 @@ export function firestoreStore(): AccountStore {
         if (cambios) {
           const { id: _id, ...datos } = cambios; // el id nunca se guarda dentro del documento
           void _id;
-          t.update(ref, sinIndefinidos(datos));
+          t.update(ref, datosParaFirestore(datos));
         }
         return "ok";
       });

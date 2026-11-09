@@ -94,10 +94,31 @@ export type Negocio = {
     ultimaFactura?: number; // reloj de los avisos de factura (ms)
     checkoutPendiente?: string; // id de la última sesión de pago abierta (para no cobrar dos veces)
     livemode?: boolean; // true = cobro real; false = modo de prueba de Stripe (tarjetas de prueba)
+    finPeriodo?: number; // fin del mes ya pagado con tarjeta (ms), de items.data[0].current_period_end
+    // La suscripción volvió a renovar (cancel_at_period_end: false) con un pago a mano pendiente: revisar
+    renovoConManual?: boolean;
   };
+  // De tarjeta a pago a mano: cuando termine el mes pagado con tarjeta (aviso de suscripción
+  // borrada), el negocio pasa a pago a mano con este plan hasta esta fecha (ms).
+  manualSiguiente?: { plan: "basico" | "pro"; hasta: number };
   creado: number;
   actualizado: number;
 };
+
+// Campos que se pueden borrar del negocio: en los cambios, null quiere decir «borrar el campo».
+// (En los demás campos null es un valor normal, p. ej. plan: null.)
+export const CAMPOS_BORRABLES = ["manualSiguiente"] as const;
+type Borrable = (typeof CAMPOS_BORRABLES)[number];
+
+// Cambios para guardar en un negocio (como Partial<Negocio>, pero null borra los campos borrables).
+export type CambiosNegocio = Omit<Partial<Negocio>, Borrable> & { [K in Borrable]?: Negocio[K] | null };
+
+// Aplica los cambios a una copia del negocio (así lo hace la base en memoria y las pruebas).
+export function aplicarCambios(n: Negocio, c: CambiosNegocio): Negocio {
+  const r = { ...n, ...c } as Record<string, unknown>;
+  for (const k of CAMPOS_BORRABLES) if (r[k] === null) delete r[k];
+  return r as Negocio;
+}
 
 export type Efectivo = {
   estado: "prueba" | "activo" | "pausado" | "sin_plan";
