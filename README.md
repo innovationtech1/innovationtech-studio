@@ -333,6 +333,8 @@ Todo en **una sola publicación**: el sitio principal nunca debe tener las cuent
 
 **Antes del lanzamiento:** revisar los Términos y la Política de privacidad (`lib/legal.ts`) con un abogado o contador antes de cobrar en modo real; si cambias el fondo, sube `VERSION_LEGAL`. Se leen sin iniciar sesión en `/terminos` y `/privacidad` (por ejemplo `https://innovationtech-studio.netlify.app/terminos` y `https://innovationtech-studio.netlify.app/privacidad`): Stripe pide esas dos direcciones al activar el modo real. Las cuentas nuevas aceptan los dos documentos al crear su negocio o unirse a un equipo, y guardan la versión que aceptaron.
 
+**Reglas de Firestore:** el proyecto de Firebase (compartido con NOVA) debe negar todo acceso desde el navegador (`match /{document=**} { allow read, write: if false; }`). Studio solo lee y escribe desde el servidor; la Política de privacidad lo afirma. Revisado y publicado el 8 de noviembre de 2026.
+
 1. En Stripe, cambia a **modo real** y crea el webhook real (mismos siete eventos, incluido `checkout.session.async_payment_succeeded`, misma versión de la API) con la URL `https://innovationtech-studio.netlify.app/api/stripe/webhook`. Si antes creaste un webhook de prueba con esa misma URL, bórralo.
 2. En Netlify, en el contexto **Production**, pon a la vez: `STRIPE_SECRET_KEY` = `sk_live_...`, `STRIPE_WEBHOOK_SECRET` = el *Signing secret* del webhook real, `STUDIO_CUENTAS=on` y `NEXT_PUBLIC_STUDIO_CUENTAS=on`. No pongas `STUDIO_COLECCION_PREFIJO` en Production.
 3. **Vuelve a publicar** el sitio (*Deploys → Trigger deploy*). Las variables que empiezan con `NEXT_PUBLIC_` se fijan al construir el sitio; si solo las cambias, no pasa nada hasta la nueva publicación.

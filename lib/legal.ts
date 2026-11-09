@@ -38,13 +38,13 @@ export const TERMINOS: Record<"es" | "en", DocumentoLegal> = {
         titulo: "4. Cuentas y equipo",
         parrafos: [
           "Necesitas una cuenta con un correo confirmado o con Google. Eres responsable de lo que pase en tu cuenta y de mantener tu acceso seguro.",
-          "El dueño de la cuenta puede invitar miembros según su plan (Básico: 1 persona; Pro: hasta 3) y es responsable del uso que hagan de Studio.",
+          "El plan Básico es para una sola persona (el dueño). En el plan Pro, el dueño puede invitar a otras personas hasta el número de lugares indicado en la app, y es responsable del uso que hagan de Studio.",
         ],
       },
       {
         titulo: "5. Planes, prueba gratis y límites",
         parrafos: [
-          "Studio se ofrece con planes mensuales (Básico y Pro) con los precios publicados en la app al momento de contratar. Al registrarte tienes una prueba gratis de 10 minutos del plan Pro.",
+          "Studio se ofrece con planes mensuales (Básico y Pro) con los precios publicados en la app al momento de contratar. Al registrarte tienes una prueba gratis del plan Pro, con la duración indicada en la app.",
           "Cada plan incluye una cantidad de usos por mes (textos, imágenes, voces y subtítulos) que se reinicia el día 1 de cada mes, hora de Texas. Lo que no uses en el mes no se acumula.",
           "Puedes comprar paquetes extra de pago único. El saldo de un paquete no vence, se usa después de lo incluido en el mes y solo sirve mientras tu cuenta esté activa y con un plan que incluya esas herramientas.",
           "Si conectas tu propia cuenta de Cloudflare, el uso de la IA corre en tu cuenta (con sus propias condiciones y límites) y no se cuenta en los límites del mes. Igual necesitas un plan activo.",
@@ -137,13 +137,13 @@ export const TERMINOS: Record<"es" | "en", DocumentoLegal> = {
         titulo: "4. Accounts and team",
         parrafos: [
           "You need an account with a confirmed email or Google. You are responsible for activity in your account and for keeping your access secure.",
-          "The account owner can invite members according to their plan (Basic: 1 person; Pro: up to 3) and is responsible for how they use Studio.",
+          "The Basic plan is for one person (the owner). On the Pro plan, the owner can invite other people up to the number of seats shown in the app, and is responsible for how they use Studio.",
         ],
       },
       {
         titulo: "5. Plans, free trial and limits",
         parrafos: [
-          "Studio is offered in monthly plans (Basic and Pro) at the prices shown in the app when you subscribe. When you sign up you get a free 10-minute trial of the Pro plan.",
+          "Studio is offered in monthly plans (Basic and Pro) at the prices shown in the app when you subscribe. When you sign up you get a free trial of the Pro plan, for the length shown in the app.",
           "Each plan includes a number of uses per month (copy, images, voices and subtitles) that resets on the 1st of each month, Texas time. Unused amounts do not carry over.",
           "You can buy one-time extra packs. A pack balance does not expire, is used after your monthly allowance, and only works while your account is active and on a plan that includes those tools.",
           "If you connect your own Cloudflare account, AI usage runs on your account (with its own terms and limits) and does not count toward the monthly limits. You still need an active plan.",
@@ -227,6 +227,7 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
           "Datos de tu negocio: el nombre que escribas, tu plan y su estado, los miembros e invitaciones de tu equipo, tu uso del mes, tu saldo de paquetes, y el historial de pagos a mano (monto, método, fechas y notas).",
           "Si pagas con tarjeta: el identificador de cliente y de suscripción en Stripe. Los datos de tu tarjeta los guarda Stripe; nosotros nunca los vemos ni los guardamos.",
           "Si conectas tu cuenta de Cloudflare: tu Account ID y tu token, guardados cifrados. Solo nuestro servidor puede leerlos para usar la IA; en la app solo se muestran los últimos 4 caracteres de la cuenta.",
+          "El registro de que aceptaste estos documentos (versión y fecha) y el historial de paquetes agregados o quitados de tu saldo.",
           "Datos técnicos que generan los servicios de hospedaje (por ejemplo, dirección IP y registros de errores) para mantener Studio funcionando y seguro.",
         ],
       },
@@ -248,7 +249,7 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
       {
         titulo: "5. Con quién los compartimos",
         parrafos: [
-          "Solo con los proveedores que hacen funcionar Studio: Google Firebase (cuentas y base de datos), Stripe (pagos), Cloudflare (IA), Netlify (hospedaje) y, si tú lo eliges, Replicate o Anthropic. También si la ley nos lo exige.",
+          "Solo con los proveedores que hacen funcionar Studio: Google Firebase (cuentas y base de datos), Stripe (pagos), Cloudflare (IA), Netlify (hospedaje) y, si tú lo eliges, Replicate o Anthropic. Además, al abrir la app tu navegador descarga tipografías de Google Fonts y, si usas «quitar fondo», un modelo desde jsDelivr; esos servicios reciben datos técnicos como tu dirección IP. También compartimos datos si la ley nos lo exige.",
         ],
       },
       {
@@ -260,7 +261,7 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
       {
         titulo: "7. Tus derechos",
         parrafos: [
-          `Puedes pedirnos ver, corregir o borrar tus datos, o desconectar tu cuenta de Cloudflare en cualquier momento desde Mi cuenta. Escríbenos a ${CONTACTO_LEGAL}; te responderemos en un plazo razonable.`,
+          `Puedes pedirnos ver, corregir o borrar tus datos. El dueño del negocio puede desconectar la cuenta de Cloudflare en cualquier momento desde Mi cuenta. Escríbenos a ${CONTACTO_LEGAL}; te responderemos en un plazo razonable.`,
           "Si al cerrar sesión usas un dispositivo compartido, Studio borra de ese navegador tus claves guardadas.",
         ],
       },
@@ -301,6 +302,7 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
           "Business data: the name you enter, your plan and its status, your team members and invitations, your monthly usage, your pack balance, and the history of manual payments (amount, method, dates and notes).",
           "If you pay by card: your Stripe customer and subscription IDs. Your card details are stored by Stripe; we never see or store them.",
           "If you connect your Cloudflare account: your Account ID and token, stored encrypted. Only our server can read them to use the AI; the app only shows the last 4 characters of the account.",
+          "The record that you accepted these documents (version and date) and the history of packs added to or removed from your balance.",
           "Technical data generated by hosting services (for example, IP address and error logs) to keep Studio working and secure.",
         ],
       },
@@ -322,7 +324,7 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
       {
         titulo: "5. Who we share it with",
         parrafos: [
-          "Only with the providers that run Studio: Google Firebase (accounts and database), Stripe (payments), Cloudflare (AI), Netlify (hosting) and, if you choose, Replicate or Anthropic. Also when required by law.",
+          "Only with the providers that run Studio: Google Firebase (accounts and database), Stripe (payments), Cloudflare (AI), Netlify (hosting) and, if you choose, Replicate or Anthropic. In addition, when you open the app your browser downloads fonts from Google Fonts and, if you use “remove background”, a model from jsDelivr; those services receive technical data such as your IP address. We also share data when required by law.",
         ],
       },
       {
@@ -334,7 +336,7 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
       {
         titulo: "7. Your rights",
         parrafos: [
-          `You can ask us to access, correct or delete your data, or disconnect your Cloudflare account at any time from My account. Write to ${CONTACTO_LEGAL}; we will reply within a reasonable time.`,
+          `You can ask us to access, correct or delete your data. The business owner can disconnect the Cloudflare account at any time from My account. Write to ${CONTACTO_LEGAL}; we will reply within a reasonable time.`,
           "When you sign out on a shared device, Studio deletes your saved keys from that browser.",
         ],
       },
