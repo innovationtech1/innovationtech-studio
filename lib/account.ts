@@ -2,6 +2,7 @@ import "server-only";
 import { firestoreStore, type AccountStore } from "./account-store";
 import { stripeModoLive } from "./stripe-server";
 import { verifyIdToken } from "./verify-token";
+import { descifrarClave, llaveDeEntorno, type ClaveIA } from "./cifrado";
 import {
   estadoEfectivo,
   inicioMesSiguienteChicago,
@@ -32,6 +33,9 @@ export type Acceso =
       plan: Plan | null;
       contado: boolean;
       devolver: () => Promise<void>;
+      // La clave de Cloudflare guardada del negocio, ya descifrada (solo si la ruta usa Cloudflare
+      // y el pedido no trae la del navegador). Pásala a getCreds. Nunca se devuelve al navegador.
+      cfGuardada?: ClaveIA;
     }
   | { ok: false; status: number; codigo: CodigoAcceso; mensaje: string };
 
@@ -40,6 +44,8 @@ export type OpcionesAcceso = {
   contador?: Contador;
   unidades?: number;
   clavePropia: boolean;
+  // La ruta va a usar Cloudflare (no Replicate ni Anthropic): solo así cuenta la clave guardada del negocio.
+  cloudflare?: boolean;
 };
 
 export type DepsAcceso = {
@@ -47,6 +53,7 @@ export type DepsAcceso = {
   verify?: (token: string) => Promise<{ uid: string; email: string; emailVerified: boolean }>;
   now?: number;
   stripeLive?: boolean; // modo de las claves de Stripe (si no se pasa, se mira STRIPE_SECRET_KEY)
+  llave?: Buffer | null; // llave de cifrado de las claves (si no se pasa, STUDIO_CLAVES_SECRETO; null = no hay)
 };
 
 const NOMBRE_CONTADOR: Record<Contador, string> = {
@@ -73,6 +80,22 @@ function tokenDe(req: Request): string | null {
   const h = req.headers.get("authorization") ?? "";
   const m = /^Bearer\s+(\S+)\s*$/i.exec(h);
   return m ? m[1] : null;
+}
+
+// Descifra la clave guardada del negocio. null (con un aviso sin datos sensibles) si falta la llave,
+// no hay documento o no se puede leer.
+async function leerGuardada(store: AccountStore, negocioId: string, llave: Buffer | null): Promise<ClaveIA | null> {
+  try {
+    const doc = llave ? await store.leerClaveIA(negocioId) : null;
+    const clave = llave && doc ? descifrarClave(doc, llave) : null;
+    if (clave) return clave;
+    console.error(
+      `Clave de Cloudflare del negocio ${negocioId} no disponible (${!llave ? "SIN_LLAVE" : !doc ? "SIN_DOCUMENTO" : "ILEGIBLE"}): se usa la cuenta de InnovationTECH.`,
+    );
+  } catch {
+    console.error(`Clave de Cloudflare del negocio ${negocioId} no disponible (ERROR_LECTURA): se usa la cuenta de InnovationTECH.`);
+  }
+  return null;
 }
 
 export async function requireAccess(
@@ -128,9 +151,17 @@ export async function requireAccess(
     return falla(403, "PLAN", "Esta herramienta es del plan Pro. Mejora a Pro para usarla.");
   }
 
-  // 5) Límite del mes y saldo (con clave propia no se cuenta)
-  if (!o.contador || o.clavePropia) {
-    return { ok: true, uid, negocio, plan, contado: false, devolver: nada };
+  // 5) Clave de Cloudflare guardada del negocio (después del plan: la clave propia no salta el plan).
+  // Los encabezados del navegador ganan; si no se puede leer, sigue con la cuenta de InnovationTECH y límites.
+  let cfGuardada: ClaveIA | undefined;
+  if (o.cloudflare && !o.clavePropia && negocio.iaPropia) {
+    cfGuardada = (await leerGuardada(store, negocio.id, deps.llave !== undefined ? deps.llave : llaveDeEntorno())) ?? undefined;
+  }
+  const clavePropia = o.clavePropia || !!cfGuardada;
+
+  // 6) Límite del mes y saldo (con clave propia no se cuenta)
+  if (!o.contador || clavePropia) {
+    return { ok: true, uid, negocio, plan, contado: false, devolver: nada, ...(cfGuardada ? { cfGuardada } : {}) };
   }
   const contador = o.contador;
   // Entero de 1 o más: nunca un número negativo que bajaría el contador

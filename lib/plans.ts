@@ -110,7 +110,7 @@ export type Negocio = {
 
 // Campos que se pueden borrar del negocio: en los cambios, null quiere decir «borrar el campo».
 // (En los demás campos null es un valor normal, p. ej. plan: null.)
-export const CAMPOS_BORRABLES = ["manualSiguiente"] as const;
+export const CAMPOS_BORRABLES = ["manualSiguiente", "iaPropia"] as const;
 type Borrable = (typeof CAMPOS_BORRABLES)[number];
 
 // Cambios para guardar en un negocio (como Partial<Negocio>, pero null borra los campos borrables).
