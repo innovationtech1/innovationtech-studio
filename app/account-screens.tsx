@@ -8,6 +8,7 @@ import { textoPaquete } from "@/lib/aviso-uso";
 import { confirmacionCambio, confirmacionPasarATarjeta, type DatosCambio } from "@/lib/confirmar-plan";
 import type { PaqueteId } from "@/lib/plans";
 import type { PersonaEquipo } from "@/lib/account-api";
+import { CloudflareCuenta } from "./setup-wizard";
 
 // Pantallas de la cuenta: bienvenida, crear negocio, elegir plan, pago manual y Mi cuenta.
 // No importan Firebase: reciben sus funciones (fb) desde AccountGate, que lo carga solo con las cuentas encendidas.
@@ -596,6 +597,8 @@ export function MiCuenta({
   const [errorQuitar, setErrorQuitar] = useState("");
   const [aTarjeta, setATarjeta] = useState(false); // pregunta «¿pasar a tarjeta?» abierta
   const [errorTarjeta, setErrorTarjeta] = useState("");
+  const [desconectando, setDesconectando] = useState(false); // pregunta «¿desconectar Cloudflare?» abierta
+  const [errorDesconectar, setErrorDesconectar] = useState("");
   const { negocio, efectivo, uso, limites, saldo, equipo } = cuenta;
   // Pagado a mano y con tiempo de sobra: puede poner su tarjeta y el primer cobro es al vencer lo pagado
   const pasarATarjeta = confirmacionPasarATarjeta(cuenta.pasarATarjeta);
@@ -667,6 +670,17 @@ export function MiCuenta({
       setQuitando(null);
       await onRefrescar();
     } else setErrorQuitar(errorDe(r));
+    setOcupado(false);
+  }
+
+  async function desconectar() {
+    setOcupado(true);
+    setErrorDesconectar("");
+    const r = await api("/api/cuenta/clave-ia", "DELETE");
+    if (r.ok) {
+      setDesconectando(false);
+      await onRefrescar();
+    } else setErrorDesconectar(errorDe(r));
     setOcupado(false);
   }
 
@@ -761,6 +775,21 @@ export function MiCuenta({
             </>
           )}
 
+          <CloudflareCuenta
+            iaPropia={cuenta.iaPropia}
+            esDueno={cuenta.esDueno}
+            titulo={(t) => <h3 className="acct-sub">{t}</h3>}
+            acciones={
+              <button
+                className="btn ghost small"
+                disabled={ocupado}
+                onClick={() => (setErrorDesconectar(""), setDesconectando(true))}
+              >
+                Desconectar
+              </button>
+            }
+          />
+
           {cuenta.esDueno && equipo && (planPro || restosEnBasico) && (
             <>
               <h3 className="acct-sub">Mi equipo</h3>
@@ -852,6 +881,18 @@ export function MiCuenta({
           onNo={() => (setATarjeta(false), setErrorTarjeta(""))}
         >
           {pasarATarjeta.mensaje}
+        </Confirmar>
+      )}
+      {desconectando && (
+        <Confirmar
+          etiqueta="Desconectar Cloudflare"
+          boton={ocupado ? "Desconectando…" : "Sí, desconectar"}
+          ocupado={ocupado}
+          error={errorDesconectar}
+          onSi={() => void desconectar()}
+          onNo={() => (setDesconectando(false), setErrorDesconectar(""))}
+        >
+          ¿Desconectar tu cuenta de Cloudflare? Studio volverá a usar la IA de InnovationTECH con los límites de tu plan.
         </Confirmar>
       )}
       {quitando && (
