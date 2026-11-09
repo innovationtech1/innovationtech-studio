@@ -184,7 +184,7 @@ function PrepararStripe() {
 
 function Fila({ fila, onCambio }: { fila: FilaNegocio; onCambio: () => Promise<void> }) {
   const { negocio, efectivo } = fila;
-  const [abierto, setAbierto] = useState<"" | "activar" | "a_mano" | "paquete" | "quitar" | "historial">("");
+  const [abierto, setAbierto] = useState<"" | "activar" | "a_mano" | "quitar_pendiente" | "paquete" | "quitar" | "historial">("");
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState("");
 
@@ -224,6 +224,11 @@ function Fila({ fila, onCambio }: { fila: FilaNegocio; onCambio: () => Promise<v
         {puedePasarAMano && (
           <button className="btn small ghost" disabled={ocupado} onClick={() => alternar("a_mano")}>Pasar a pago a mano</button>
         )}
+        {negocio.manualSiguiente && (
+          <button className="btn small ghost" disabled={ocupado} onClick={() => alternar("quitar_pendiente")}>
+            Quitar pago a mano pendiente
+          </button>
+        )}
         <button className="btn small ghost" disabled={ocupado} onClick={() => void accion({ accion: "pausar" })}>Pausar</button>
         <button className="btn small ghost" disabled={ocupado} onClick={() => void accion({ accion: "reactivar" })}>Reactivar</button>
         <button className="btn small ghost" disabled={ocupado} onClick={() => alternar("paquete")}>Agregar paquete</button>
@@ -244,6 +249,28 @@ function Fila({ fila, onCambio }: { fila: FilaNegocio; onCambio: () => Promise<v
         <p className="adm-error adm-ancho" role="alert">Revisar: esta suscripción volvió a renovar con un pago a mano pendiente</p>
       )}
       {error && <p className="adm-error adm-ancho" role="alert">{error}</p>}
+      {abierto === "quitar_pendiente" && negocio.manualSiguiente && (
+        // Pregunta dentro de la página (sin window.confirm); los errores salen arriba, en `error`
+        <div className="adm-form adm-ancho" role="alertdialog" aria-label="Quitar pago a mano pendiente">
+          <p className="adm-ancho">
+            ¿Quitar el pago a mano pendiente? La suscripción con tarjeta no cambia: si sigue cancelada, la cuenta se pausará al terminar el mes.
+          </p>
+          <div className="adm-acciones">
+            <button
+              className="btn small"
+              disabled={ocupado}
+              onClick={async () => {
+                if (await accion({ accion: "quitar_manual_pendiente" })) setAbierto("");
+              }}
+            >
+              {ocupado ? "Quitando…" : "Sí, quitar"}
+            </button>
+            <button className="btn small ghost" disabled={ocupado} onClick={() => setAbierto("")} autoFocus>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
       {abierto === "a_mano" && (
         <FormActivar
           titulo="Pasar a pago a mano"

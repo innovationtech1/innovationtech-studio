@@ -202,6 +202,37 @@ export async function reactivar(
   return { ok: true };
 }
 
+// Borra el pago a mano pendiente (manualSiguiente) y el aviso «Revisar» (stripe.renovoConManual).
+// Para cuando el cliente decide seguir con tarjeta o se registró mal la fecha o el monto.
+// No toca Stripe: si la suscripción sigue con la cancelación al final del mes, la cuenta se pausa ese día.
+// No se anota en el historial de pagos (no es un pago: el renglón del pago a mano original se queda);
+// queda en el registro del servidor.
+export async function quitarManualPendiente(
+  adminEmail: string,
+  emailVerified: boolean,
+  negocioId: string,
+  deps: DepsAdmin = {},
+): Promise<{ ok: true } | Falla> {
+  if (!esCorreoAdmin(adminEmail, emailVerified)) return NO_ADMIN();
+  const store = deps.store ?? firestoreStore();
+  const ahora = deps.now ?? Date.now();
+  let quitado: Negocio["manualSiguiente"];
+  const r = await store.modificarNegocio(negocioId, (n) => {
+    quitado = n.manualSiguiente; // se asigna en cada vuelta: Firestore puede repetir la transacción
+    if (!quitado) return null;
+    const { renovoConManual: _r, ...stripe } = n.stripe ?? {};
+    void _r;
+    return { manualSiguiente: null, ...(n.stripe ? { stripe } : {}), actualizado: ahora };
+  });
+  if (r === "no_existe") return NO_NEGOCIO();
+  if (!quitado) return falla(400, "Este negocio no tiene un pago a mano pendiente.");
+  console.info(
+    `Admin ${adminEmail.trim().toLowerCase()} quitó el pago a mano pendiente del negocio ${negocioId} ` +
+      `(plan ${quitado.plan}, hasta ${new Date(quitado.hasta).toISOString()}).`,
+  );
+  return { ok: true };
+}
+
 const CONTADORES: Contador[] = ["textos", "imagenes", "voces", "subtitulos"];
 const notaLimpia = (n: unknown) => (typeof n === "string" ? n.trim().slice(0, 300) : "");
 

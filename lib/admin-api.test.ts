@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { activarManual, agregarPaquete, finDelDiaChicago, listar, obtenerNegocio, pausar, quitarSaldo, reactivar } from "./admin-api";
+import { activarManual, agregarPaquete, finDelDiaChicago, listar, obtenerNegocio, pausar, quitarManualPendiente, quitarSaldo, reactivar } from "./admin-api";
 import type { Usuario } from "./account-store";
 import { memoryStore } from "./account-store-memory";
 import { diaChicago, estadoEfectivo, mesChicago, type Negocio } from "./plans";
@@ -360,4 +360,57 @@ test("listar: finTarjeta solo cuando hay manualSiguiente (de stripe.finPeriodo)"
   assert.equal(r.negocios.find((x) => x.negocio.id === "n1")!.finTarjeta, fin);
   const n2 = r.negocios.find((x) => x.negocio.id === "n2")!;
   assert.equal("finTarjeta" in n2, false);
+});
+
+/* ---------- Quitar el pago a mano pendiente (manualSiguiente) ---------- */
+
+const conPendiente = () =>
+  nuevo({
+    plan: "pro",
+    estado: "activo",
+    origen: "stripe",
+    stripe: { customerId: "cus_1", subscriptionId: "sub_1", status: "active", finPeriodo: AHORA + 10 * DIA, renovoConManual: true },
+    manualSiguiente: { plan: "pro", hasta: AHORA + 40 * DIA },
+  });
+
+test("quitarManualPendiente: borra el pendiente y el aviso «Revisar», sin tocar lo demás de Stripe", async () => {
+  const store = conPendiente();
+  const r = await quitarManualPendiente(ADMIN, true, "n1", { store, now: AHORA });
+  assert.deepEqual(r, { ok: true });
+  const n = (await store.getNegocio("n1"))!;
+  assert.equal("manualSiguiente" in n, false);
+  assert.equal(n.stripe?.renovoConManual, undefined);
+  assert.equal(n.stripe?.subscriptionId, "sub_1");
+  assert.equal(n.stripe?.status, "active");
+  assert.equal(n.origen, "stripe");
+  assert.equal(n.actualizado, AHORA);
+  // No se anota como pago a mano en el historial (no es un pago)
+  assert.deepEqual(await store.listarPagosManuales("n1"), []);
+});
+
+test("quitarManualPendiente: sin pendiente (p. ej. segunda vez) → 400", async () => {
+  const store = conPendiente();
+  await quitarManualPendiente(ADMIN, true, "n1", { store, now: AHORA });
+  const r = await quitarManualPendiente(ADMIN, true, "n1", { store, now: AHORA });
+  assert.equal(r.ok, false);
+  if (!r.ok) {
+    assert.equal(r.status, 400);
+    assert.equal(r.error, "Este negocio no tiene un pago a mano pendiente.");
+  }
+});
+
+test("quitarManualPendiente: no admin → 403 sin cambios; negocio que no existe → 404", async () => {
+  const store = conPendiente();
+  const r = await quitarManualPendiente("otro@x.com", true, "n1", { store, now: AHORA });
+  assert.equal(r.ok, false);
+  if (!r.ok) {
+    assert.equal(r.status, 403);
+    assert.equal(r.codigo, "NO_ADMIN");
+  }
+  assert.ok((await store.getNegocio("n1"))!.manualSiguiente);
+  const r2 = await quitarManualPendiente(ADMIN, false, "n1", { store, now: AHORA }); // correo sin verificar
+  assert.equal(r2.ok, false);
+  const r3 = await quitarManualPendiente(ADMIN, true, "nada", { store, now: AHORA });
+  assert.equal(r3.ok, false);
+  if (!r3.ok) assert.equal(r3.status, 404);
 });

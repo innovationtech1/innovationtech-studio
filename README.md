@@ -215,8 +215,11 @@ Si faltan menos de 2 días, Studio le dice que podrá poner su tarjeta el día e
 **Si aparece «Revisar» en rojo** («Revisar: esta suscripción volvió a renovar con un pago a mano pendiente»): la tarjeta del cliente se volvió a activar para cobrar (por ejemplo, el cliente reactivó su suscripción desde el portal de Stripe) aunque tú ya habías registrado su pago a mano. Así podría pagar dos veces. Qué hacer:
 
 1. Entra al panel de **Stripe → Clientes**, busca al cliente y revisa su suscripción: si dice que **se va a renovar** (no dice «se cancela el…»), cobrará de nuevo.
-2. Si el cliente quiere seguir pagando **en efectivo**, cancela la renovación en Stripe (*Cancelar suscripción → al final del periodo*). Si no estás seguro de qué quiere, **contáctalo** antes de cambiar nada.
-3. Si quiere seguir con **tarjeta**, deja la suscripción como está y habla con él sobre el pago a mano que ya hizo (por ejemplo, devolvérselo).
+2. Si no estás seguro de qué quiere el cliente, **contáctalo** antes de cambiar nada. Luego elige una de estas dos opciones:
+   - **Si el cliente quiere seguir pagando a mano:** en Stripe, en su suscripción, vuelve a programar la cancelación **al final del periodo** (*Cancelar suscripción → al final del periodo*). No la canceles de inmediato, para no quitarle días que ya pagó con tarjeta.
+   - **Si el cliente prefiere seguir con tarjeta:** en `/admin` presiona **Quitar pago a mano pendiente** y acuerda con él qué hacer con el pago a mano que ya te dio (por ejemplo, tomarlo como pago de otro mes). No toques Stripe.
+
+**Si te equivocaste** en la fecha o el monto al pasar a pago a mano: presiona **Quitar pago a mano pendiente** y vuelve a hacer **Pasar a pago a mano** con los datos correctos. Quitar el pendiente no cambia la suscripción de Stripe (si sigue cancelada, la cuenta se pausará al terminar el mes si no vuelves a registrar el pago) y **no se anota en el Historial**: el renglón del pago original se queda ahí, así que escribe en la **Nota** del nuevo registro por qué lo corregiste.
 
 **Cambiar de plan al mismo tiempo** (por ejemplo, de Básico en efectivo a Pro con tarjeta) no se hace desde Studio: el cliente tiene que **escribir a InnovationTECH** y tú lo ayudas a mano.
 

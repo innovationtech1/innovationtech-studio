@@ -1,4 +1,4 @@
-import { activarManual, agregarPaquete, finDelDiaChicago, obtenerNegocio, pausar, quitarSaldo, reactivar } from "@/lib/admin-api";
+import { activarManual, agregarPaquete, finDelDiaChicago, obtenerNegocio, pausar, quitarManualPendiente, quitarSaldo, reactivar } from "@/lib/admin-api";
 import type { PaqueteId, Saldo } from "@/lib/plans";
 import { pasarAManual } from "@/lib/stripe-api";
 import { cuerpoJson, errorJson, json, sesionDe, sinSesion } from "@/lib/cuenta-ruta";
@@ -19,6 +19,7 @@ export async function GET(req: Request, ctx: Ctx) {
 // Acciones: { accion: "activar", plan, fecha | hasta, monto, metodo, nota? } | { accion: "pausar" } | { accion: "reactivar" }
 //   | { accion: "paquete", paquete, metodo, nota? } | { accion: "quitar_saldo", cantidades, nota? }
 //   | { accion: "pasar_a_manual", plan, fecha, monto, metodo, nota? } (de tarjeta a pago a mano al final del mes)
+//   | { accion: "quitar_manual_pendiente" } (borra el pago a mano pendiente; no toca Stripe)
 export async function POST(req: Request, ctx: Ctx) {
   const s = await sesionDe(req);
   if (!s) return sinSesion();
@@ -46,6 +47,8 @@ export async function POST(req: Request, ctx: Ctx) {
       nota: typeof b.nota === "string" ? b.nota : undefined,
     });
     return p.ok ? json({ ok: true, finTarjeta: p.finTarjeta }) : errorJson(p);
+  } else if (b.accion === "quitar_manual_pendiente") {
+    r = await quitarManualPendiente(s.email, s.emailVerified, id);
   } else if (b.accion === "pausar") {
     r = await pausar(s.email, s.emailVerified, id);
   } else if (b.accion === "reactivar") {
