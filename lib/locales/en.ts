@@ -233,6 +233,7 @@ export const EN: Record<string, string> = {
   "Cuadrado 1:1 (post)": "Square 1:1 (post)",
   "Cuadrado 1:1 · post": "Square 1:1 · post",
   "Cuenta conectada": "Account connected",
+  "Cloudflare conectado": "Cloudflare connected",
   "Cuéntale a la IA de tu negocio y tu objetivo: te arma un mes de publicaciones con el texto y la idea de imagen de cada día.": "Tell the AI about your business and your goal: it plans a month of posts with the text and image idea for each day.",
   "Cálido": "Warm",
   "Círculo": "Circle",

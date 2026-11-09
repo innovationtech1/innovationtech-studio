@@ -161,6 +161,9 @@ export default function Home() {
   const usesCf = settings.textProvider === "cloudflare" || settings.imageProvider === "cloudflare";
   const textKeysMissing = settings.textProvider === "anthropic" && !settings.anthropicKey;
   const hasOwnCf = !!(settings.cfAccountId && settings.cfToken);
+  // Con cuentas: la clave de Cloudflare guardada en la cuenta del negocio también cuenta como «conectada».
+  const { cuenta: cuentaRail } = useCuenta();
+  const cfEnCuenta = CUENTAS_ON && !!(cuentaRail && cuentaRail.usuario && cuentaRail.iaPropia?.legible);
   const demoActive = !!demo?.demo && usesCf && !hasOwnCf;
   // Con cuentas encendidas no hay modo demo ni avisos de «conecta Cloudflare»: el plan de cada negocio los reemplaza
   const missingKeys =
@@ -202,7 +205,9 @@ export default function Home() {
     setTab(id);
     window.scrollTo({ top: 0 });
   };
-  const estado = hasOwnCf
+  const estado = cfEnCuenta
+    ? { cls: "on", text: "Cloudflare conectado" }
+    : hasOwnCf
     ? { cls: "on", text: "Cuenta conectada" }
     : demoActive
       ? { cls: "demo", text: "Modo demo" }
@@ -228,7 +233,7 @@ export default function Home() {
         </nav>
         <div className="rail-foot">
           <BotonCuenta />
-          {(!CUENTAS_ON || hasOwnCf) && (
+          {(!CUENTAS_ON || hasOwnCf || cfEnCuenta) && (
             <button className={`status-chip ${estado.cls}`} onClick={() => go("config")} title="Ver configuración">
               <i aria-hidden />
               {estado.text}
