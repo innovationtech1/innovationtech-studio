@@ -11,9 +11,9 @@ export async function POST(req: Request) {
   const { text, lang, voice: voiceId } = await req.json().catch(() => ({}));
   if (!text || typeof text !== "string") return jsonError("Escribe el texto de la voz en off.");
   // Guardián: sesión, plan y límite diario, antes de llamar a Cloudflare.
-  const acceso = await requireAccess(req, { herramienta: "voz", contador: "voces", clavePropia: clavePropiaCF(req) });
+  const acceso = await requireAccess(req, { herramienta: "voz", contador: "voces", clavePropia: clavePropiaCF(req), cloudflare: true });
   if (!acceso.ok) return jsonAcceso(acceso);
-  const c = getCreds(req, "voice");
+  const c = getCreds(req, "voice", 1, acceso.cfGuardada);
   if ("error" in c) {
     await acceso.devolver();
     return jsonError(c.error, c.status);

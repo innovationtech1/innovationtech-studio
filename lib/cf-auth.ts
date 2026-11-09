@@ -8,6 +8,7 @@
 // Opcional: DEMO_LIMIT_TEXT, DEMO_LIMIT_IMAGE, DEMO_LIMIT_VOICE (usos por persona al día), DEMO_MODE=off para apagarlo.
 
 import { cuentasActivas } from "./account";
+import type { ClaveIA } from "./cifrado";
 
 export type Kind = "text" | "image" | "voice";
 
@@ -60,10 +61,18 @@ export function clavePropiaCF(req: Request): boolean {
   return !!req.headers.get("x-cf-account")?.trim() && !!req.headers.get("x-cf-token")?.trim();
 }
 
-export function getCreds(req: Request, kind: Kind, units = 1): Creds | { error: string; status: number } {
+// Orden: 1) encabezados del navegador, 2) `guardada` (la clave del negocio que ya descifró requireAccess),
+// 3) la cuenta de InnovationTECH (entorno) o el modo demo.
+export function getCreds(
+  req: Request,
+  kind: Kind,
+  units = 1,
+  guardada?: ClaveIA,
+): Creds | { error: string; status: number } {
   const accountId = req.headers.get("x-cf-account")?.trim();
   const token = req.headers.get("x-cf-token")?.trim();
   if (accountId && token) return { accountId, token, demo: false };
+  if (guardada) return { accountId: guardada.accountId, token: guardada.token, demo: false };
 
   // Con cuentas activas el límite lo lleva el guardián (requireAccess), no el conteo por IP:
   // se usan las credenciales del dueño de la plataforma, sin modo demo.

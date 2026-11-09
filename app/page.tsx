@@ -15,14 +15,15 @@ import { getLang, installLangHeader, locale, setLang, startDomTranslation } from
 import { Bug, Languages, MessagesSquare } from "lucide-react";
 import MicButton from "./mic-button";
 import { Bot, CalendarDays, GalleryHorizontal, Clapperboard, Download, Eraser, Film, FolderOpen, ImageIcon, ImagePlus, Images, Palette, Pencil, PenLine, Plug, RefreshCw, Rocket, Scissors, Settings as SettingsIcon, Shapes, Trash2, type LucideIcon, Wand2 } from "lucide-react";
-import { CheckList, CloudflareWizard, testCloudflare, Welcome } from "./setup-wizard";
+import { CheckList, CloudflareCuenta, CloudflareWizard, testCloudflare, Welcome } from "./setup-wizard";
+import { EVENTO_AJUSTES } from "@/lib/limpiar-dispositivo";
 import { formatBytes, storageUsage, toDataUrl } from "@/lib/media-store";
 import type { Item, Settings } from "@/lib/types";
 import ReelStudio from "./reel-studio";
 import ContentCalendar from "./content-calendar";
 import AssistantChat from "./assistant-chat";
 import { extract, phrases } from "@/lib/phrases";
-import { BotonCuenta, CUENTAS_ON, MejorarPro, ProTag } from "./account-context";
+import { BotonCuenta, CUENTAS_ON, MejorarPro, ProTag, useCuenta } from "./account-context";
 
 type Tab = "texto" | "imagen" | "editor" | "video" | "galeria" | "marca" | "config";
 
@@ -147,6 +148,10 @@ export default function Home() {
     const t = new URLSearchParams(window.location.search).get("tab");
     if (t && ["texto", "imagen", "editor", "video", "galeria", "marca", "config"].includes(t)) setTimeout(() => setTab(t as Tab), 0);
     setReady(true);
+    // Al guardar la clave de Cloudflare en la cuenta se borra la del navegador: se vuelven a leer los ajustes
+    const releer = () => setSettings(load("its-settings", defaultSettings));
+    window.addEventListener(EVENTO_AJUSTES, releer);
+    return () => window.removeEventListener(EVENTO_AJUSTES, releer);
   }, []);
 
   const addToGallery = (items: Item[]) =>
@@ -1384,6 +1389,8 @@ function Config({
   const [s, setS] = useState(settings);
   const [saved, setSaved] = useState(false);
   const [showWizard, setShowWizard] = useState(wizardOpen);
+  const { cuenta } = useCuenta();
+  const conNegocio = CUENTAS_ON && cuenta && cuenta.usuario ? cuenta : null;
   const [checks, setChecks] = useState<{ ok: boolean; label: string; help?: string }[] | null>(null);
   const [testing, setTesting] = useState(false);
   useEffect(() => setShowWizard((v) => v || wizardOpen), [wizardOpen]);
@@ -1395,6 +1402,18 @@ function Config({
 
   return (
     <>
+    {/* Con las cuentas encendidas la clave de Cloudflare se guarda en la cuenta del negocio (solo el dueño) */}
+    {CUENTAS_ON && conNegocio && (conNegocio.esDueno || conNegocio.iaPropia) && (
+      <section className="card">
+        <CloudflareCuenta
+          iaPropia={conNegocio.iaPropia}
+          esDueno={conNegocio.esDueno}
+          titulo={(t) => <h2>{t}</h2>}
+          onFinish={onFinish}
+        />
+      </section>
+    )}
+    {!CUENTAS_ON && (
     <section className="card">
       <div className="card-head">
         <h2>Conecta tu cuenta gratis de Cloudflare</h2>
@@ -1414,11 +1433,16 @@ function Config({
       {showWizard && (
         <CloudflareWizard
           settings={settings}
-          onSave={(n) => (onSave(n), setS(n))}
+          onSave={(cfAccountId, cfToken) => {
+            const n: Settings = { ...settings, cfAccountId, cfToken, textProvider: "cloudflare", imageProvider: "cloudflare" };
+            onSave(n);
+            setS(n);
+          }}
           onFinish={() => (setShowWizard(false), onFinish())}
         />
       )}
     </section>
+    )}
     <section className="card">
       <h2>Configuración avanzada</h2>
       <p className="hint">

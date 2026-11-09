@@ -32,6 +32,56 @@ export function borrarClavesPropias() {
   }
 }
 
+// La clave de Cloudflare que quedó guardada en el navegador (si hay una completa).
+export function claveCfDe(raw: string | null): { accountId: string; token: string } | null {
+  if (!raw) return null;
+  try {
+    const a = JSON.parse(raw);
+    if (!a || typeof a !== "object" || typeof a.cfAccountId !== "string" || typeof a.cfToken !== "string") return null;
+    const accountId = a.cfAccountId.trim();
+    const token = a.cfToken.trim();
+    return accountId && token ? { accountId, token } : null;
+  } catch {
+    return null;
+  }
+}
+
+// Quita solo la clave de Cloudflare (al guardarla en la cuenta); las otras claves se quedan.
+export function quitarClaveCf(raw: string | null): string | null {
+  if (!raw) return raw;
+  try {
+    const ajustes = JSON.parse(raw);
+    if (!ajustes || typeof ajustes !== "object") return raw;
+    ajustes.cfAccountId = "";
+    ajustes.cfToken = "";
+    return JSON.stringify(ajustes);
+  } catch {
+    return raw;
+  }
+}
+
+// Aviso para que la app vuelva a leer sus ajustes después de cambiarlos aquí
+export const EVENTO_AJUSTES = "studio:ajustes";
+
+export function leerClaveCfLocal(): { accountId: string; token: string } | null {
+  try {
+    return claveCfDe(localStorage.getItem(AJUSTES));
+  } catch {
+    return null;
+  }
+}
+
+export function borrarClaveCfLocal() {
+  try {
+    const raw = localStorage.getItem(AJUSTES);
+    const limpio = quitarClaveCf(raw);
+    if (limpio !== null && limpio !== raw) localStorage.setItem(AJUSTES, limpio);
+    window.dispatchEvent(new Event(EVENTO_AJUSTES));
+  } catch {
+    /* sin almacenamiento */
+  }
+}
+
 export async function borrarGaleriaYMarca() {
   try {
     for (const k of MARCA) localStorage.removeItem(k);

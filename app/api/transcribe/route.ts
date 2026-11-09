@@ -14,9 +14,9 @@ export async function POST(req: Request) {
   if (audio.length > 4_000_000) return jsonError("El audio es muy largo. Usa fragmentos de menos de 90 segundos.", 413);
   // Guardián: los subtítulos tienen su propio contador. En el modo demo (cuentas apagadas)
   // sigue contando como "voz", igual que antes.
-  const acceso = await requireAccess(req, { herramienta: "subtitulos", contador: "subtitulos", clavePropia: clavePropiaCF(req) });
+  const acceso = await requireAccess(req, { herramienta: "subtitulos", contador: "subtitulos", clavePropia: clavePropiaCF(req), cloudflare: true });
   if (!acceso.ok) return jsonAcceso(acceso);
-  const c = getCreds(req, "voice");
+  const c = getCreds(req, "voice", 1, acceso.cfGuardada);
   if ("error" in c) {
     await acceso.devolver();
     return jsonError(c.error, c.status);

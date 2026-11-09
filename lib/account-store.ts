@@ -1,6 +1,7 @@
 import "server-only";
 import { FieldValue } from "firebase-admin/firestore";
 import { colecciones } from "./colecciones";
+import type { Cifrado } from "./cifrado";
 import { db } from "./firebase-server";
 import {
   CAMPOS_BORRABLES,
@@ -87,6 +88,11 @@ export interface AccountStore {
     fn: (n: Negocio) => CambiosNegocio | null,
     opciones?: { eventoId?: string },
   ): Promise<ResultadoModificar>;
+
+  // Clave de Cloudflare del negocio, ya cifrada (ver lib/cifrado.ts). Un documento por negocio.
+  guardarClaveIA(negocioId: string, x: Cifrado): Promise<void>;
+  leerClaveIA(negocioId: string): Promise<Cifrado | null>;
+  borrarClaveIA(negocioId: string): Promise<void>;
 }
 
 // De dónde salió lo reservado: del contador del mes o del saldo de paquetes.
@@ -177,6 +183,7 @@ export function firestoreStore(): AccountStore {
   const COL_PAGOS_MANUALES = C.pagosManuales;
   const COL_STRIPE_EVENTOS = C.stripeEventos;
   const COL_MOVIMIENTOS = C.movimientosPaquetes;
+  const COL_CLAVES_IA = C.clavesIa;
   return {
     async getUsuario(uid) {
       const s = await db().collection(COL_USUARIOS).doc(uid).get();
@@ -399,6 +406,19 @@ export function firestoreStore(): AccountStore {
         }
         return "ok";
       });
+    },
+
+    async guardarClaveIA(negocioId, x) {
+      await db().collection(COL_CLAVES_IA).doc(negocioId).set(x); // reemplaza la anterior
+    },
+
+    async leerClaveIA(negocioId) {
+      const s = await db().collection(COL_CLAVES_IA).doc(negocioId).get();
+      return s.exists ? (s.data() as Cifrado) : null;
+    },
+
+    async borrarClaveIA(negocioId) {
+      await db().collection(COL_CLAVES_IA).doc(negocioId).delete();
     },
   };
 }

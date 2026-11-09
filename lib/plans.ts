@@ -101,13 +101,16 @@ export type Negocio = {
   // De tarjeta a pago a mano: cuando termine el mes pagado con tarjeta (aviso de suscripción
   // borrada), el negocio pasa a pago a mano con este plan hasta esta fecha (ms).
   manualSiguiente?: { plan: "basico" | "pro"; hasta: number };
+  // Cuenta de Cloudflare propia del negocio. Solo datos para mostrar: la clave va cifrada aparte
+  // (colección claves_ia); aquí nunca el token ni el Account ID completo.
+  iaPropia?: { cuentaFin: string; conectada: number };
   creado: number;
   actualizado: number;
 };
 
 // Campos que se pueden borrar del negocio: en los cambios, null quiere decir «borrar el campo».
 // (En los demás campos null es un valor normal, p. ej. plan: null.)
-export const CAMPOS_BORRABLES = ["manualSiguiente"] as const;
+export const CAMPOS_BORRABLES = ["manualSiguiente", "iaPropia"] as const;
 type Borrable = (typeof CAMPOS_BORRABLES)[number];
 
 // Cambios para guardar en un negocio (como Partial<Negocio>, pero null borra los campos borrables).

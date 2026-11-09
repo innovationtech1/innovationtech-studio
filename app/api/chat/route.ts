@@ -34,6 +34,7 @@ export async function POST(req: Request) {
     herramienta: "asistente",
     contador: "textos",
     clavePropia: provider === "anthropic" ? !!req.headers.get("x-anthropic-key") : clavePropiaCF(req),
+    cloudflare: provider !== "anthropic", // solo así cuenta la clave guardada del negocio
   });
   if (!acceso.ok) return jsonAcceso(acceso);
 
@@ -41,7 +42,7 @@ export async function POST(req: Request) {
 
   // ---------- Cloudflare Workers AI (gratis) ----------
   if (provider !== "anthropic") {
-    const c = getCreds(req, "text");
+    const c = getCreds(req, "text", 1, acceso.cfGuardada);
     if ("error" in c) {
       await acceso.devolver();
       return jsonError(c.error, c.status);

@@ -248,6 +248,7 @@ Entra a Netlify → proyecto **innovationtech-studio** → *Project configuratio
 | `STRIPE_SECRET_KEY` | Clave secreta de Stripe (`sk_test_...` en pruebas) |
 | `STRIPE_WEBHOOK_SECRET` | Secreto de firma del webhook (se obtiene en el Paso 3) |
 | `CF_API_TOKEN` | Token de Workers AI de Cloudflare |
+| `STUDIO_CLAVES_SECRETO` | Llave para guardar cifradas las claves de Cloudflare de los clientes (ver «Conectar la cuenta de Cloudflare del cliente») |
 
 **No secretas** (son datos públicos o ajustes; no son claves):
 
@@ -337,6 +338,27 @@ Todo en **una sola publicación**: el sitio principal nunca debe tener las cuent
 5. Haz una prueba rápida: entra, crea un negocio y revisa `/admin`.
 6. **El día del lanzamiento (no antes):** en Cloudflare activa **Workers Paid** (esto sí tiene costo: lo pagas tú, revisa el precio en Cloudflare antes de activarlo) y crea una **alerta de gasto** (*Billing → Notifications*), para enterarte si el uso crece. Antes del lanzamiento no hace falta.
 7. Para **apagar** todo: pon `STUDIO_CUENTAS` y `NEXT_PUBLIC_STUDIO_CUENTAS` en `off` (o bórralas) y publica de nuevo.
+
+### Conectar la cuenta de Cloudflare del cliente (opcional)
+
+Cada negocio puede conectar **su propia cuenta gratis de Cloudflare** una sola vez. Desde ese momento Studio usa la IA de esa cuenta para todo el equipo del negocio, **sin los límites del mes** y sin gastar sus paquetes.
+
+- **Quién la conecta:** solo el dueño del negocio. En **Mi cuenta → Tu cuenta de Cloudflare (opcional)** presiona **Conectar Cloudflare**: se abre el mismo asistente de siempre (crear la cuenta, copiar el Account ID y crear el token). Al final, Studio prueba la clave y la guarda **cifrada** (con un candado digital) en la cuenta, no en el navegador.
+- **Si ya tenía la clave en su dispositivo:** Mi cuenta muestra **Guardar en tu cuenta**. La sube a la cuenta y la borra del navegador.
+- **Las demás personas del equipo** no tienen que hacer nada: ven «Tu negocio usa su propia cuenta de Cloudflare.».
+- **Desconectar:** en Mi cuenta, **Desconectar**. Studio vuelve a usar la IA de InnovationTECH con los límites del plan.
+- Studio nunca muestra el token; solo los últimos 4 caracteres del Account ID (por ejemplo, «cuenta …a1b2»).
+
+**Lo que tienes que hacer tú una vez:** crear en Netlify la variable `STUDIO_CLAVES_SECRETO` (es la llave del candado). Créala para **todas las publicaciones** (Production, Deploy Previews y Branch deploys) y marca **Contains secret values**. Para inventar el valor, abre **PowerShell** en tu computadora (menú Inicio → escribe «PowerShell»), pega este comando y presiona Enter:
+
+```powershell
+$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
+```
+
+Copia el texto que aparece (termina en `=`) y pégalo como valor de la variable. No lo compartas con nadie. Puedes usar un valor distinto para las versiones de prueba y para el sitio principal. Después, vuelve a publicar el sitio.
+
+- **Si falta la variable:** los clientes no pueden conectar su Cloudflare (verán «Falta configurar el guardado seguro de claves. Avísale a InnovationTECH.»). Todo lo demás sigue funcionando.
+- **Si la cambias después:** las claves que ya estaban guardadas **dejan de poder leerse**. Esos clientes vuelven a usar la IA de InnovationTECH con los límites del plan y en Mi cuenta ven «Tu Cloudflare conectado ya no se puede leer. Conéctalo otra vez.». Tienen que conectarla de nuevo. Por eso, cámbiala solo si crees que alguien la vio.
 
 ### Cómo usar `/admin`
 

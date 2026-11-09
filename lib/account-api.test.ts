@@ -1,6 +1,9 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { cancelarInvitacion, crearCuenta, invitar, obtenerCuenta as obtener, quitarMiembro, type EstadoCuenta } from "./account-api";
+import { cancelarInvitacion, conectarClaveIA, crearCuenta, desconectarClaveIA, invitar, obtenerCuenta as obtener, quitarMiembro, type EstadoCuenta } from "./account-api";
+import { randomBytes } from "node:crypto";
+import { cifrarClave, descifrarClave } from "./cifrado";
+import type { Check } from "./probar-cloudflare";
 import type { Usuario } from "./account-store";
 import { memoryStore } from "./account-store-memory";
 import { mesChicago, type Negocio } from "./plans";
@@ -526,4 +529,104 @@ test("obtenerCuenta con equipo en Básico: el dueño igual ve personas e invitac
       { uid: "u2", email: "u2@x.com", esDueno: false },
     ],
   });
+});
+
+// ---------- Clave de Cloudflare en la cuenta ----------
+// Datos falsos y aleatorios: nunca un secreto real
+const LLAVE = randomBytes(32);
+const ID_CF = randomBytes(16).toString("hex");
+const TOKEN_CF = `tok-${randomBytes(12).toString("hex")}`;
+const VERDE: Check[] = [{ ok: true, label: "Todo bien" }];
+const ROJO: Check[] = [{ ok: false, label: "Token válido y activo", help: "El token no es válido." }];
+const probarOk = async () => ({ ok: true, checks: VERDE });
+const probarMal = async () => ({ ok: false, checks: ROJO });
+const conEquipo = () =>
+  memoryStore({ usuarios: [dueno, miembro("u2")], negocios: [negocio({ miembros: ["u1", "u2"] })] });
+
+test("conectarClaveIA: el dueño la conecta → iaPropia con los últimos 4 y documento cifrado legible", async () => {
+  const store = conEquipo();
+  let probada: [string, string] | null = null;
+  const probar = async (a: string, t: string) => ((probada = [a, t]), { ok: true, checks: VERDE });
+  const r = await conectarClaveIA("u1", { accountId: ` ${ID_CF} `, token: ` ${TOKEN_CF} ` }, { store, now: AHORA, llave: LLAVE, probar });
+  assert.deepEqual(r, { ok: true, cuentaFin: ID_CF.slice(-4) });
+  assert.deepEqual(probada, [ID_CF, TOKEN_CF]);
+  const n = await store.getNegocio("n1");
+  assert.deepEqual(n?.iaPropia, { cuentaFin: ID_CF.slice(-4), conectada: AHORA });
+  const doc = await store.leerClaveIA("n1");
+  assert.ok(doc);
+  assert.deepEqual(descifrarClave(doc, LLAVE), { accountId: ID_CF, token: TOKEN_CF });
+  assert.ok(!JSON.stringify(r).includes(TOKEN_CF));
+});
+
+test("conectarClaveIA: prueba fallida → 400 con checks y nada guardado", async () => {
+  const store = conEquipo();
+  const r = await conectarClaveIA("u1", { accountId: ID_CF, token: TOKEN_CF }, { store, now: AHORA, llave: LLAVE, probar: probarMal });
+  assert.deepEqual(r, { ok: false, status: 400, error: "La clave no pasó la prueba.", checks: ROJO });
+  assert.equal(await store.leerClaveIA("n1"), null);
+  assert.equal((await store.getNegocio("n1"))?.iaPropia, undefined);
+});
+
+test("conectarClaveIA y desconectarClaveIA: un miembro → 403 y nada cambia", async () => {
+  const store = conEquipo();
+  await conectarClaveIA("u1", { accountId: ID_CF, token: TOKEN_CF }, { store, now: AHORA, llave: LLAVE, probar: probarOk });
+  let probo = false;
+  const c = await conectarClaveIA("u2", { accountId: ID_CF, token: TOKEN_CF }, {
+    store, now: AHORA, llave: LLAVE, probar: async () => ((probo = true), { ok: true, checks: VERDE }),
+  });
+  assert.deepEqual(c, { ok: false, status: 403, error: "Solo el dueño del negocio puede conectar la cuenta de Cloudflare." });
+  assert.equal(probo, false);
+  const d = await desconectarClaveIA("u2", { store, now: AHORA });
+  assert.deepEqual(d, { ok: false, status: 403, error: "Solo el dueño del negocio puede desconectar la cuenta de Cloudflare." });
+  assert.ok(await store.leerClaveIA("n1"));
+  assert.ok((await store.getNegocio("n1"))?.iaPropia);
+});
+
+test("conectarClaveIA: sin llave configurada → 503 con la copia exacta", async () => {
+  const store = conEquipo();
+  const r = await conectarClaveIA("u1", { accountId: ID_CF, token: TOKEN_CF }, { store, now: AHORA, llave: null, probar: probarOk });
+  assert.deepEqual(r, { ok: false, status: 503, error: "Falta configurar el guardado seguro de claves. Avísale a InnovationTECH." });
+  assert.equal(await store.leerClaveIA("n1"), null);
+});
+
+test("conectarClaveIA: datos que no son texto → 400 sin probar", async () => {
+  const store = conEquipo();
+  let probo = false;
+  const probar = async () => ((probo = true), { ok: true, checks: VERDE });
+  const r = await conectarClaveIA("u1", { accountId: 123, token: { x: 1 } }, { store, now: AHORA, llave: LLAVE, probar });
+  assert.ok(!r.ok && r.status === 400);
+  assert.equal(probo, false);
+});
+
+test("desconectarClaveIA: borra el documento cifrado y iaPropia; ok aunque no hubiera nada", async () => {
+  const store = conEquipo();
+  await conectarClaveIA("u1", { accountId: ID_CF, token: TOKEN_CF }, { store, now: AHORA, llave: LLAVE, probar: probarOk });
+  assert.deepEqual(await desconectarClaveIA("u1", { store, now: AHORA }), { ok: true });
+  assert.equal(await store.leerClaveIA("n1"), null);
+  const n = await store.getNegocio("n1");
+  assert.equal(n?.iaPropia, undefined);
+  assert.ok(!("iaPropia" in (n ?? {})));
+  assert.deepEqual(await desconectarClaveIA("u1", { store, now: AHORA }), { ok: true });
+});
+
+test("obtenerCuenta: iaPropia legible para dueño y miembro, sin el token ni el Account ID", async () => {
+  const store = conEquipo();
+  await conectarClaveIA("u1", { accountId: ID_CF, token: TOKEN_CF }, { store, now: AHORA, llave: LLAVE, probar: probarOk });
+  for (const uid of ["u1", "u2"]) {
+    const c = await cuenta(uid, `${uid}@x.com`, true, { store, now: AHORA, llave: LLAVE });
+    assert.deepEqual(c.iaPropia, { cuentaFin: ID_CF.slice(-4), conectada: AHORA, legible: true });
+    const texto = JSON.stringify(c);
+    assert.ok(!texto.includes(TOKEN_CF), "el token no debe salir");
+    assert.ok(!texto.includes(ID_CF), "el Account ID completo no debe salir");
+  }
+});
+
+test("obtenerCuenta: legible false con llave distinta o sin llave; null sin clave conectada", async () => {
+  const store = conEquipo();
+  assert.equal((await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA, llave: LLAVE })).iaPropia, null);
+  await store.guardarClaveIA("n1", cifrarClave({ accountId: ID_CF, token: TOKEN_CF }, LLAVE));
+  await store.modificarNegocio("n1", () => ({ iaPropia: { cuentaFin: ID_CF.slice(-4), conectada: AHORA } }));
+  const otra = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA, llave: randomBytes(32) });
+  assert.equal(otra.iaPropia?.legible, false);
+  const sin = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA, llave: null });
+  assert.equal(sin.iaPropia?.legible, false);
 });
