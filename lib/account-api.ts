@@ -101,7 +101,11 @@ export async function obtenerCuenta(
     esDueno,
     precios: { basico: cfg.precios.basico.monto, pro: cfg.precios.pro.monto },
     pasarATarjeta:
-      esDueno && negocio.plan && negocio.pagadoHasta !== undefined && pasarATarjetaDisponible(negocio, ahora)
+      esDueno &&
+      negocio.plan &&
+      negocio.pagadoHasta !== undefined &&
+      cfg.precios[negocio.plan].stripePriceId && // sin precio de Stripe no se puede pagar con tarjeta
+      pasarATarjetaDisponible(negocio, ahora)
         ? { fecha: negocio.pagadoHasta, precio: cfg.precios[negocio.plan].monto }
         : null,
   };

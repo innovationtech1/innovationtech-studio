@@ -136,7 +136,11 @@ export function estadoEfectivo(n: Negocio, ahora: number, opts: OpcionesEfectivo
       return { estado: "sin_plan", plan: null };
     }
     const ok = n.stripe?.status === "active" || n.stripe?.status === "trialing";
-    return { estado: ok ? "activo" : "pausado", plan: n.plan };
+    if (ok) return { estado: "activo", plan: n.plan };
+    // Lo pagado a mano sigue cubriendo hasta su fecha aunque ya haya pasado a tarjeta
+    // (p. ej. status todavía sin llegar después del Checkout, o canceló la prueba).
+    if (n.pagadoHasta !== undefined && n.pagadoHasta > ahora) return { estado: "activo", plan: n.plan };
+    return { estado: "pausado", plan: n.plan };
   }
 
   // 5) En cualquier otro caso, el estado guardado.
@@ -144,7 +148,10 @@ export function estadoEfectivo(n: Negocio, ahora: number, opts: OpcionesEfectivo
 }
 
 // Margen mínimo para pasar de pago a mano a tarjeta: con menos, mejor esperar a que venza.
+// Stripe exige que trial_end quede al menos 48 h después según su propio reloj y después de
+// nuestras llamadas, así que se piden 10 minutos de más.
 export const VENTANA_PASAR_A_TARJETA = 48 * 60 * 60 * 1000;
+export const MARGEN_RELOJ_STRIPE = 10 * 60 * 1000;
 
 // ¿Puede el negocio pasar de pago a mano a tarjeta ahora? (el primer cobro sería al vencer lo pagado)
 export function pasarATarjetaDisponible(n: Negocio, ahora: number): boolean {
@@ -152,7 +159,7 @@ export function pasarATarjetaDisponible(n: Negocio, ahora: number): boolean {
     n.origen === "manual" &&
     n.estado !== "pausado" &&
     n.pagadoHasta !== undefined &&
-    n.pagadoHasta - ahora >= VENTANA_PASAR_A_TARJETA
+    n.pagadoHasta - ahora >= VENTANA_PASAR_A_TARJETA + MARGEN_RELOJ_STRIPE
   );
 }
 

@@ -852,8 +852,25 @@ test("pago a mano vigente pero pausado → 400 sin tocar Stripe", async () => {
   const store = nuevoStore(aMano({ estado: "pausado" }));
   const r = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(store, f.cliente));
   assert.equal(r.ok, false);
-  if (!r.ok) assert.equal(r.status, 400);
+  if (!r.ok) {
+    assert.equal(r.status, 400);
+    assert.equal(r.error, "Tu plan está pagado a mano hasta 7 de diciembre de 2026. Escríbenos si quieres pasarte a tarjeta.");
+  }
   assert.equal(f.llamadas.length, 0);
+});
+
+test("pago a mano que vence en 48 h + 9 min → 400 (margen para el reloj de Stripe); 48 h + 10 min → Checkout", async () => {
+  const f = stripeFalso();
+  const casi = AHORA + 48 * HORA + 9 * 60 * 1000;
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(nuevoStore(aMano({ pagadoHasta: casi })), f.cliente));
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.match(r.error, /Ese día podrás poner tu tarjeta\.$/);
+  assert.equal(f.llamadas.length, 0);
+  const justo = AHORA + 48 * HORA + 10 * 60 * 1000;
+  const r2 = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(nuevoStore(aMano({ pagadoHasta: justo })), f.cliente));
+  assert.equal(r2.ok, true);
+  const p = f.llamadas.find((l) => l.metodo === "checkout.sessions.create")!.args[0] as { subscription_data: { trial_end: number } };
+  assert.equal(p.subscription_data.trial_end, Math.floor(justo / 1000));
 });
 
 test("pasar a tarjeta dos veces seguidas: la segunda vence la sesión abierta (nunca dos a la vez)", async () => {

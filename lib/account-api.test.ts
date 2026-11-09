@@ -429,24 +429,40 @@ test("obtenerCuenta: un negocio pausado no ofrece paquetes", async () => {
 
 /* ---------- Pasar de pago a mano a tarjeta ---------- */
 
+// Con los precios de Stripe preparados (sin ellos no se puede pagar con tarjeta)
+const CON_PRECIOS = { precios: { basico: { monto: 19, stripePriceId: "price_b" }, pro: { monto: 39, stripePriceId: "price_p" } } };
+
 test("obtenerCuenta: dueño con pago a mano vigente (≥ 48 h) puede pasar a tarjeta", async () => {
   const hasta = AHORA + 30 * 24 * 60 * MIN;
-  const store = memoryStore({ usuarios: [dueno], negocios: [negocio({ plan: "basico", pagadoHasta: hasta })] });
+  const store = memoryStore({ usuarios: [dueno], negocios: [negocio({ plan: "basico", pagadoHasta: hasta })], config: CON_PRECIOS });
   const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA });
   assert.deepEqual(r.pasarATarjeta, { fecha: hasta, precio: 19 });
+});
+
+test("obtenerCuenta: sin el precio de Stripe del plan preparado → sin pasar a tarjeta", async () => {
+  const store = memoryStore({ usuarios: [dueno], negocios: [negocio({ plan: "basico" })] });
+  const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA });
+  assert.equal(r.pasarATarjeta, null);
+  const soloPro = memoryStore({
+    usuarios: [dueno],
+    negocios: [negocio({ plan: "basico" })],
+    config: { precios: { basico: { monto: 19 }, pro: { monto: 39, stripePriceId: "price_p" } } },
+  });
+  assert.equal((await cuenta("u1", "dueno@ejemplo.com", true, { store: soloPro, now: AHORA })).pasarATarjeta, null);
 });
 
 test("obtenerCuenta: un miembro no ve pasar a tarjeta", async () => {
   const store = memoryStore({
     usuarios: [dueno, miembro("u2")],
     negocios: [negocio({ plan: "basico", miembros: ["u1", "u2"] })],
+    config: CON_PRECIOS,
   });
   const r = await cuenta("u2", "u2@x.com", true, { store, now: AHORA });
   assert.equal(r.pasarATarjeta, null);
 });
 
 test("obtenerCuenta: pago a mano que vence en menos de 48 h → sin pasar a tarjeta", async () => {
-  const store = memoryStore({ usuarios: [dueno], negocios: [negocio({ plan: "basico", pagadoHasta: AHORA + 47 * 60 * MIN })] });
+  const store = memoryStore({ usuarios: [dueno], negocios: [negocio({ plan: "basico", pagadoHasta: AHORA + 47 * 60 * MIN })], config: CON_PRECIOS });
   const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA });
   assert.equal(r.pasarATarjeta, null);
 });
