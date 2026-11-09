@@ -1,5 +1,5 @@
 import type Stripe from "stripe";
-import { esPaquete, sumarSaldo, type Negocio, type PaqueteId, type PlanesConfig } from "./plans";
+import { esPaquete, sumarSaldo, SUSCRIPCION_VIVA, type Negocio, type PaqueteId, type PlanesConfig } from "./plans";
 
 // Qué le pasa a un negocio cuando llega un aviso (evento) de Stripe.
 // Todo aquí es "puro": no lee ni guarda nada, solo calcula. Así se puede probar sin Stripe.
@@ -10,8 +10,8 @@ import { esPaquete, sumarSaldo, type Negocio, type PaqueteId, type PlanesConfig 
 //  - la suscripción de una factura está en invoice.parent.subscription_details.subscription
 //    (ya no existe invoice.subscription; se lee también por si llega un aviso con versión vieja).
 
-// Suscripciones que todavía pueden cobrar: no se debe abrir otra encima.
-export const SUSCRIPCION_VIVA = new Set(["active", "trialing", "past_due", "unpaid", "paused"]);
+// Suscripciones que todavía pueden cobrar (vive en plans.ts; se sigue exportando desde aquí).
+export { SUSCRIPCION_VIVA };
 // Las únicas que dan acceso (igual que estadoEfectivo en plans.ts).
 const AL_DIA = new Set(["active", "trialing"]);
 // Todavía sin el primer pago: no cambian el estado del negocio (no cortan una prueba vigente).

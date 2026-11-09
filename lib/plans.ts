@@ -153,13 +153,30 @@ export function estadoEfectivo(n: Negocio, ahora: number, opts: OpcionesEfectivo
 export const VENTANA_PASAR_A_TARJETA = 48 * 60 * 60 * 1000;
 export const MARGEN_RELOJ_STRIPE = 10 * 60 * 1000;
 
-// ¿Puede el negocio pasar de pago a mano a tarjeta ahora? (el primer cobro sería al vencer lo pagado)
+// Suscripciones de Stripe que todavía pueden cobrar: no se debe abrir otra encima.
+export const SUSCRIPCION_VIVA: ReadonlySet<string> = new Set(["active", "trialing", "past_due", "unpaid", "paused"]);
+
+// ¿Queda tiempo para que Stripe acepte la prueba (trial_end) hasta que vence lo pagado en efectivo?
+export function quedaMargenParaTarjeta(pagadoHasta: number, ahora: number): boolean {
+  return pagadoHasta - ahora >= VENTANA_PASAR_A_TARJETA + MARGEN_RELOJ_STRIPE;
+}
+
+// ¿Lo pagado en efectivo sigue cubriendo y no hay una suscripción que cobre?
+// (pago a mano, o ya pasó a tarjeta pero la suscripción no sigue viva, p. ej. canceló la prueba).
+// Con tarjeta se mira el status guardado; pagarPlan además le pregunta a Stripe.
+export function cubiertoPorEfectivo(n: Negocio, ahora: number): boolean {
+  if (n.pagadoHasta === undefined || n.pagadoHasta <= ahora) return false;
+  if (n.origen === "manual") return true;
+  return n.origen === "stripe" && !SUSCRIPCION_VIVA.has(n.stripe?.status ?? "");
+}
+
+// ¿Puede el negocio pasar (o volver) a tarjeta ahora? El primer cobro sería al vencer lo pagado.
 export function pasarATarjetaDisponible(n: Negocio, ahora: number): boolean {
   return (
-    n.origen === "manual" &&
+    cubiertoPorEfectivo(n, ahora) &&
     n.estado !== "pausado" &&
     n.pagadoHasta !== undefined &&
-    n.pagadoHasta - ahora >= VENTANA_PASAR_A_TARJETA + MARGEN_RELOJ_STRIPE
+    quedaMargenParaTarjeta(n.pagadoHasta, ahora)
   );
 }
 

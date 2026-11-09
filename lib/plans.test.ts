@@ -255,8 +255,15 @@ test("estadoEfectivo: suscripción del otro modo sigue sin plan aunque haya pago
   assert.deepEqual(estadoEfectivo(n, AHORA, { stripeLive: true }), { estado: "sin_plan", plan: null });
 });
 
-test("pasarATarjetaDisponible: ya paga con tarjeta → no", () => {
-  assert.equal(pasarATarjetaDisponible(aMano({ origen: "stripe" }), AHORA), false);
+test("pasarATarjetaDisponible: ya paga con tarjeta (suscripción viva) → no", () => {
+  for (const status of ["active", "trialing", "past_due", "unpaid", "paused"]) {
+    assert.equal(pasarATarjetaDisponible(aMano({ origen: "stripe", stripe: { status } }), AHORA), false, status);
+  }
+});
+
+test("pasarATarjetaDisponible: tarjeta sin suscripción viva (canceló) y efectivo vigente → sí", () => {
+  assert.equal(pasarATarjetaDisponible(aMano({ origen: "stripe", stripe: { status: "canceled" } }), AHORA), true);
+  assert.equal(pasarATarjetaDisponible(aMano({ origen: "stripe", stripe: { status: "canceled" }, pagadoHasta: AHORA - 1 }), AHORA), false);
 });
 
 test("pasarATarjetaDisponible: pausado → no", () => {

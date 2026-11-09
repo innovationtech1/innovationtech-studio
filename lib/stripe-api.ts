@@ -2,7 +2,7 @@ import "server-only";
 import Stripe from "stripe";
 import { firestoreStore, type AccountStore } from "./account-store";
 import { esCorreoAdmin, type Falla } from "./account-api";
-import { estadoEfectivo, esPaquete, pasarATarjetaDisponible, type Negocio, type PaqueteId } from "./plans";
+import { estadoEfectivo, esPaquete, quedaMargenParaTarjeta, type Negocio, type PaqueteId } from "./plans";
 import { aplicarEvento, EVENTOS_STRIPE, idDe, LOOKUP_PAQUETES, LOOKUP_PLANES, referenciasDeEvento, SUSCRIPCION_VIVA } from "./stripe-events";
 import { SIN_CONFIGURAR, stripe, stripeConfigurado, stripeModoLive } from "./stripe-server";
 
@@ -306,12 +306,29 @@ export function crearCheckout(
   });
 }
 
+// Pagado en efectivo y vigente (sin suscripción que cobre): solo el mismo plan y sin cobrar hoy.
+// Devuelve el trial_end (segundos) para el Checkout, o la falla que hay que mostrar.
+function reglaEfectivo(negocio: Negocio, plan: PlanPagado, hasta: number, ahora: number): number | Falla {
+  if (negocio.estado === "pausado") {
+    // Pausado a mano: lo decide el equipo, no se cambia desde aquí
+    return falla(400, `Tu plan está pagado a mano hasta ${fechaLarga(hasta)}. Escríbenos si quieres pasarte a tarjeta.`);
+  }
+  if (plan !== negocio.plan) {
+    return falla(400, `Tu plan está pagado a mano hasta ${fechaLarga(hasta)}. Para cambiar de plan, escríbenos.`);
+  }
+  if (!quedaMargenParaTarjeta(hasta, ahora)) {
+    return falla(400, `Tu plan está pagado a mano hasta el ${fechaCorta(hasta)}. Ese día podrás poner tu tarjeta.`);
+  }
+  return Math.floor(hasta / 1000);
+}
+
 // «Elegir Básico / Pro»: devuelve la URL a donde mandar al dueño.
 //  - Sin suscripción viva: Checkout nuevo.
 //  - Con suscripción al día y otro plan: se cambia esa misma suscripción (con prorrateo).
 //  - Con el mismo plan o con un pago pendiente: portal de Stripe (actualizar tarjeta o pagar).
-//  - Pagado a mano y vigente: solo el mismo plan, con ≥ 48 h de margen; Checkout con prueba
-//    (trial_end) hasta que vence lo pagado, así hoy no se cobra nada.
+//  - Pagado en efectivo y vigente sin suscripción viva (pago a mano, o pasó a tarjeta y canceló):
+//    solo el mismo plan, con ≥ 48 h de margen; Checkout con prueba (trial_end) hasta que vence
+//    lo pagado, así no se cobran días ya pagados.
 export async function pagarPlan(
   uid: string,
   email: string,
@@ -332,22 +349,15 @@ export async function pagarPlan(
   const cfg = await store.getConfig();
   const priceId = cfg.precios[plan].stripePriceId;
   if (!priceId) return NO_CONFIGURADO();
-  // Pagado a mano y vigente: solo se puede pasar a tarjeta con el mismo plan y sin cobrar hoy
-  // (la suscripción empieza en prueba y el primer cobro es cuando vence lo pagado a mano).
+  // Lo pagado en efectivo que sigue vigente: la suscripción nueva empieza en prueba y el primer
+  // cobro es cuando vence (así no se cobra dos veces). Con pago a mano se revisa antes de ir a
+  // Stripe; si ya pasó a tarjeta, después de confirmar con Stripe que no hay una suscripción viva.
+  const hasta = negocio.pagadoHasta !== undefined && negocio.pagadoHasta > ahora ? negocio.pagadoHasta : undefined;
   let trialEnd: number | undefined;
-  if (negocio.origen === "manual" && negocio.pagadoHasta !== undefined && negocio.pagadoHasta > ahora) {
-    const hasta = negocio.pagadoHasta;
-    if (negocio.estado === "pausado") {
-      // Pausado a mano: lo decide el equipo, no se cambia desde aquí
-      return falla(400, `Tu plan está pagado a mano hasta ${fechaLarga(hasta)}. Escríbenos si quieres pasarte a tarjeta.`);
-    }
-    if (plan !== negocio.plan) {
-      return falla(400, `Tu plan está pagado a mano hasta ${fechaLarga(hasta)}. Para cambiar de plan, escríbenos.`);
-    }
-    if (!pasarATarjetaDisponible(negocio, ahora)) {
-      return falla(400, `Tu plan está pagado a mano hasta el ${fechaCorta(hasta)}. Ese día podrás poner tu tarjeta.`);
-    }
-    trialEnd = Math.floor(hasta / 1000);
+  if (hasta !== undefined && negocio.origen === "manual") {
+    const r = reglaEfectivo(negocio, plan, hasta, ahora);
+    if (typeof r !== "number") return r;
+    trialEnd = r;
   }
 
   try {
@@ -366,6 +376,13 @@ export async function pagarPlan(
     if (pendiente) {
       const deSesion = await revisarPendiente(cliente, pendiente);
       if (deSesion) return await usarSuscripcion(cliente, deSesion, negocio, priceId, origin);
+    }
+
+    // Pasó a tarjeta y la suscripción ya no sigue (p. ej. canceló la prueba): el efectivo sigue cubriendo
+    if (hasta !== undefined && negocio.origen === "stripe") {
+      const r = reglaEfectivo(negocio, plan, hasta, ahora);
+      if (typeof r !== "number") return r;
+      trialEnd = r;
     }
 
     const sesion = await crearCheckout(cliente, negocio, email, priceId, origin, { trialEnd });

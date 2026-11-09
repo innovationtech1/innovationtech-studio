@@ -873,6 +873,64 @@ test("pago a mano que vence en 48 h + 9 min → 400 (margen para el reloj de Str
   assert.equal(p.subscription_data.trial_end, Math.floor(justo / 1000));
 });
 
+// Pasó a tarjeta y canceló la prueba: lo pagado en efectivo sigue cubriendo hasta FIN_MANUAL
+const cancelada = (extra: Partial<Negocio> = {}, status = "canceled") =>
+  conStripe({ customerId: "cus_1", subscriptionId: "sub_1", status }, { pagadoHasta: FIN_MANUAL, ...extra });
+
+test("volver a tarjeta (canceló) con efectivo vigente, mismo plan → Checkout con trial_end (no cobra días pagados)", async () => {
+  const f = stripeFalso({ suscripciones: [subViva("canceled", PRECIO_B)] });
+  const store = nuevoStore(cancelada());
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r.ok, true);
+  const p = f.llamadas.find((l) => l.metodo === "checkout.sessions.create")!.args[0] as Record<string, unknown>;
+  assert.equal(p.customer, "cus_1");
+  assert.deepEqual(p.subscription_data, { metadata: { negocioId: "n1" }, trial_end: Math.floor(FIN_MANUAL / 1000) });
+});
+
+test("volver a tarjeta: status guardado atrasado (active) pero Stripe dice canceled → igual con trial_end", async () => {
+  const f = stripeFalso({ suscripciones: [subViva("canceled", PRECIO_B)] });
+  const store = nuevoStore(cancelada({}, "active"));
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r.ok, true);
+  const p = f.llamadas.find((l) => l.metodo === "checkout.sessions.create")!.args[0] as { subscription_data: { trial_end?: number } };
+  assert.equal(p.subscription_data.trial_end, Math.floor(FIN_MANUAL / 1000));
+});
+
+test("volver a tarjeta con efectivo vigente, otro plan → 400 «Para cambiar de plan, escríbenos.» sin Checkout", async () => {
+  const f = stripeFalso({ suscripciones: [subViva("canceled", PRECIO_B)] });
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "pro", ORIGEN, depsP(nuevoStore(cancelada()), f.cliente));
+  assert.equal(r.ok, false);
+  if (!r.ok) {
+    assert.equal(r.status, 400);
+    assert.equal(r.error, "Tu plan está pagado a mano hasta 7 de diciembre de 2026. Para cambiar de plan, escríbenos.");
+  }
+  assert.equal(f.metodos().includes("checkout.sessions.create"), false);
+});
+
+test("volver a tarjeta con efectivo que vence en 24 h → 400 «Ese día podrás poner tu tarjeta.» sin Checkout", async () => {
+  const f = stripeFalso({ suscripciones: [subViva("canceled", PRECIO_B)] });
+  const store = nuevoStore(cancelada({ pagadoHasta: AHORA + 24 * HORA }));
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r.ok, false);
+  if (!r.ok) {
+    assert.equal(r.status, 400);
+    assert.equal(r.error, "Tu plan está pagado a mano hasta el 8 de noviembre. Ese día podrás poner tu tarjeta.");
+  }
+  assert.equal(f.metodos().includes("checkout.sessions.create"), false);
+});
+
+test("tarjeta con suscripción viva y efectivo vigente → camino de siempre (portal / cambio de plan)", async () => {
+  const f = stripeFalso({ suscripciones: [subViva("active", PRECIO_B)] });
+  const store = nuevoStore(cancelada({}, "active"));
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "basico", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r.ok, true);
+  if (r.ok) assert.equal(r.url, "https://billing.stripe.com/p/session/bps_1");
+  assert.equal(f.metodos().includes("checkout.sessions.create"), false);
+  const r2 = await pagarPlan("u1", "dueno@ejemplo.com", "pro", ORIGEN, depsP(store, f.cliente));
+  assert.equal(r2.ok, true);
+  assert.equal(f.llamadas.find((l) => l.metodo === "subscriptions.update")?.args[0], "sub_1");
+});
+
 test("pasar a tarjeta dos veces seguidas: la segunda vence la sesión abierta (nunca dos a la vez)", async () => {
   const f = stripeFalso({ registrarSesiones: true });
   const store = nuevoStore(aMano());

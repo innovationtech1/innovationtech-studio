@@ -467,6 +467,17 @@ test("obtenerCuenta: pago a mano que vence en menos de 48 h → sin pasar a tarj
   assert.equal(r.pasarATarjeta, null);
 });
 
+test("obtenerCuenta: canceló la tarjeta con efectivo vigente → vuelve a ofrecer pasar a tarjeta", async () => {
+  const hasta = AHORA + 30 * 24 * 60 * MIN;
+  const store = memoryStore({
+    usuarios: [dueno],
+    negocios: [negocio({ plan: "basico", origen: "stripe", pagadoHasta: hasta, stripe: { status: "canceled" } })],
+    config: CON_PRECIOS,
+  });
+  const r = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA });
+  assert.deepEqual(r.pasarATarjeta, { fecha: hasta, precio: 19 });
+});
+
 test("obtenerCuenta: con tarjeta (Stripe) → sin pasar a tarjeta", async () => {
   const store = memoryStore({
     usuarios: [dueno],
