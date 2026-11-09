@@ -293,7 +293,7 @@ export function CloudflareCuenta({
     return () => window.removeEventListener(EVENTO_AJUSTES, leer);
   }, []);
 
-  if (!esDueno) return iaPropia ? <p className="muted">Tu negocio usa su propia cuenta de Cloudflare.</p> : null;
+  if (!esDueno) return iaPropia?.legible ? <p className="muted">Tu negocio usa su propia cuenta de Cloudflare.</p> : null;
 
   const conectada = !!iaPropia?.legible;
 
@@ -330,9 +330,14 @@ export function CloudflareCuenta({
             {ocupado ? "Guardando…" : "Guardar en tu cuenta"}
           </button>
         )}
-        {conectada && !abierto && acciones}
+        {iaPropia && !abierto && acciones}
       </div>
-      {fallo && (fallo.checks ? <CheckList checks={fallo.checks} /> : <div className="error">{fallo.error}</div>)}
+      {fallo && (
+        <>
+          <div className="error">{fallo.error}</div>
+          {fallo.checks && <CheckList checks={fallo.checks} />}
+        </>
+      )}
       {abierto && (
         <>
           <CloudflareWizard
