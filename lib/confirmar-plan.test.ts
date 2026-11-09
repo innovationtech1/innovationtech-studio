@@ -105,3 +105,29 @@ test("pasar a tarjeta: el mensaje y los avisos del servidor tienen traducción a
   assert.match(traducir("Tu plan está pagado a mano hasta 8 de diciembre de 2026. Para cambiar de plan, escríbenos."), /^Your plan is paid by hand until 8 de diciembre de 2026\. To change plans, write to us\.$/);
   assert.match(traducir("Tu plan está pagado a mano hasta 8 de diciembre de 2026. Escríbenos si quieres pasarte a tarjeta."), /^Your plan is paid by hand until/);
 });
+
+/* ---------- Pago a mano que todavía cubre: el cambio de plan no se cobra al momento ---------- */
+
+const AHORA = Date.parse("2026-11-07T18:00:00Z");
+const DIA = 24 * 60 * 60 * 1000;
+
+test("tarjeta en su prueba gratis mientras cubre el pago a mano: no promete cobro prorrateado", () => {
+  const prueba = con("basico", {
+    negocio: { origen: "stripe", stripe: { subscriptionId: "sub_1", status: "trialing" }, pagadoHasta: AHORA + 10 * DIA },
+  });
+  assert.equal(confirmacionCambio(prueba, "pro", AHORA), null);
+  // Ya venció lo pagado a mano: es un cambio normal, sí pregunta
+  assert.notEqual(confirmacionCambio(prueba, "pro", AHORA + 11 * DIA), null);
+});
+
+test("con un pago a mano pendiente (pasará a pago a mano): no promete cobro prorrateado", () => {
+  const pendiente = con("basico", {
+    negocio: {
+      origen: "stripe",
+      stripe: { subscriptionId: "sub_1", status: "active" },
+      manualSiguiente: { plan: "basico", hasta: AHORA + 40 * DIA },
+    },
+  });
+  assert.equal(confirmacionCambio(pendiente, "pro", AHORA), null);
+  assert.equal(confirmacionCambio({ ...pendiente, efectivo: { estado: "activo", plan: "pro" } }, "basico", AHORA), null);
+});

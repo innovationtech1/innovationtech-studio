@@ -323,6 +323,31 @@ function reglaEfectivo(negocio: Negocio, plan: PlanPagado, hasta: number, ahora:
   return Math.floor(hasta / 1000);
 }
 
+// Cambiar de plan en una suscripción viva no se hace aquí si lo pagado a mano sigue en juego:
+//  - en la prueba que cubre lo pagado a mano (camino A) el cambio saldría gratis hasta esa fecha;
+//  - con un pago a mano pendiente (camino B) el plan ya quedó acordado con el equipo.
+// Devuelve la falla que hay que mostrar, o null si se puede seguir.
+function cambioDePlanBloqueado(viva: Stripe.Subscription, negocio: Negocio, priceId: string, ahora: number): Falla | null {
+  const item = viva.items?.data?.[0];
+  if (!item || item.price?.id === priceId) return null;
+  const hasta = negocio.pagadoHasta;
+  if (viva.status === "trialing" && hasta !== undefined && hasta > ahora) {
+    return falla(400, `Tu plan está pagado a mano hasta ${fechaLarga(hasta)}. Para cambiar de plan, escríbenos.`);
+  }
+  const siguiente = negocio.manualSiguiente;
+  if (siguiente) {
+    const finSeg = item.current_period_end;
+    const fin = typeof finSeg === "number" ? finSeg * 1000 : negocio.stripe?.finPeriodo;
+    return falla(
+      400,
+      fin !== undefined
+        ? `Este negocio pasará a pago a mano el ${fechaCorta(fin)}. Para cambiar de plan, escríbenos.`
+        : `Tu plan está pagado a mano hasta ${fechaLarga(siguiente.hasta)}. Para cambiar de plan, escríbenos.`,
+    );
+  }
+  return null;
+}
+
 // «Elegir Básico / Pro»: devuelve la URL a donde mandar al dueño.
 //  - Sin suscripción viva: Checkout nuevo.
 //  - Con suscripción al día y otro plan: se cambia esa misma suscripción (con prorrateo).
@@ -330,6 +355,8 @@ function reglaEfectivo(negocio: Negocio, plan: PlanPagado, hasta: number, ahora:
 //  - Pagado en efectivo y vigente sin suscripción viva (pago a mano, o pasó a tarjeta y canceló):
 //    solo el mismo plan, con ≥ 48 h de margen; Checkout con prueba (trial_end) hasta que vence
 //    lo pagado, así no se cobran días ya pagados.
+//  - En la prueba que cubre lo pagado a mano, o con un pago a mano pendiente: no cambia de plan
+//    (400 «Para cambiar de plan, escríbenos.»).
 export async function pagarPlan(
   uid: string,
   email: string,
@@ -363,7 +390,7 @@ export async function pagarPlan(
 
   try {
     const { viva, ajeno } = await suscripcionViva(cliente, negocio);
-    if (viva) return await usarSuscripcion(cliente, viva, negocio, priceId, origin);
+    if (viva) return cambioDePlanBloqueado(viva, negocio, priceId, ahora) ?? (await usarSuscripcion(cliente, viva, negocio, priceId, origin));
     // Stripe no conoce lo guardado (datos viejos de otro modo, sin marca): se sigue como cliente nuevo
     // y se marca como del otro modo para que ya no cuente (ni dé plan) en este.
     const marcarAjeno = ajeno && negocio.stripe?.livemode === undefined;
@@ -376,7 +403,9 @@ export async function pagarPlan(
     const pendiente = negocio.stripe?.checkoutPendiente;
     if (pendiente) {
       const deSesion = await revisarPendiente(cliente, pendiente);
-      if (deSesion) return await usarSuscripcion(cliente, deSesion, negocio, priceId, origin);
+      if (deSesion) {
+        return cambioDePlanBloqueado(deSesion, negocio, priceId, ahora) ?? (await usarSuscripcion(cliente, deSesion, negocio, priceId, origin));
+      }
     }
 
     // Pasó a tarjeta y la suscripción ya no sigue (p. ej. canceló la prueba): el efectivo sigue cubriendo

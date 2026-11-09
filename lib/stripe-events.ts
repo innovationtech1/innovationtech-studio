@@ -198,8 +198,10 @@ export function aplicarEvento(evento: Stripe.Event, negocio: Negocio, cfg: Plane
       // ¿Volvió a renovar? (alguien quitó la cancelación al final del periodo): queda marcado para revisar
       // (solo el aviso «updated»: un «created» viejo que llega tarde no dice nada de esto)
       const actualizada = evento.type === "customer.subscription.updated";
+      // (una cancelación programada con cancel_at tampoco es renovación)
       let renovoConManual = siguiente ? previo.renovoConManual : undefined;
-      if (siguiente && actualizada && sub.cancel_at_period_end === true) renovoConManual = undefined;
+      const seCancela = sub.cancel_at_period_end === true || sub.cancel_at != null;
+      if (siguiente && actualizada && seCancela) renovoConManual = undefined;
       else if (siguiente && actualizada && sub.cancel_at_period_end === false) {
         renovoConManual = true;
         console.error(
@@ -228,20 +230,42 @@ export function aplicarEvento(evento: Stripe.Event, negocio: Negocio, cfg: Plane
           origen: "manual",
           plan: siguiente.plan,
           pagadoHasta: siguiente.hasta,
-          estado: "activo",
+          // Si el administrador lo pausó, sigue pausado
+          estado: negocio.estado === "pausado" ? "pausado" : "activo",
           manualSiguiente: null,
         };
       }
       const borrarSiguiente = borrada && siguiente ? { manualSiguiente: null } : {};
 
-      // Sin el primer pago, o con un pago a mano vigente en el negocio: solo se anota lo de Stripe
-      if (SIN_PRIMER_PAGO.has(status) || (conPagoManual && !AL_DIA.has(status))) return { stripe, ...borrarSiguiente };
+      // ¿Lo pagado a mano sigue cubriendo? (p. ej. pasó a tarjeta con prueba hasta esa fecha)
+      const cubre = negocio.pagadoHasta !== undefined && negocio.pagadoHasta > cuando;
+
+      // Con un pago a mano vigente, la tarjeta que no está al día (canceló la prueba, etc.) no quita
+      // lo pagado: solo se anota lo de Stripe. Si ya había pasado a tarjeta, vuelve a pago a mano
+      // (mismo plan, mismo «pagado hasta»).
+      if (!AL_DIA.has(status) && (conPagoManual || cubre)) {
+        const volver = cubre && negocio.origen === "stripe"
+          ? { origen: "manual" as const, estado: negocio.estado === "pausado" ? ("pausado" as const) : ("activo" as const) }
+          : {};
+        return { stripe, ...borrarSiguiente, ...volver };
+      }
+      // Sin el primer pago: solo se anota lo de Stripe
+      if (SIN_PRIMER_PAGO.has(status)) return { stripe, ...borrarSiguiente };
 
       // Un precio que no es de los nuestros nunca da Pro: queda en Básico (y se avisa en el registro)
       let plan = planDePrecio(priceId, cfg, precio?.lookup_key);
       if (!plan) {
         console.warn(`Stripe: la suscripción ${sub.id} tiene un precio desconocido (${priceId ?? "sin precio"}); se toma como Básico.`);
         plan = "basico";
+      }
+      // En la prueba que cubre lo pagado a mano no se da otro plan gratis (p. ej. cambió a Pro en el
+      // portal): sigue el plan pagado a mano y el nuevo empieza con el primer cobro de la tarjeta.
+      if (status === "trialing" && cubre && negocio.plan && plan !== negocio.plan) {
+        console.warn(
+          `Stripe: la suscripción ${sub.id} (negocio ${negocio.id}) cambió de plan durante la prueba pagada a mano; ` +
+            "el plan nuevo empieza con el primer cobro.",
+        );
+        plan = negocio.plan;
       }
       return {
         stripe,

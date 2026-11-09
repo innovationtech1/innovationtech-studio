@@ -6,7 +6,12 @@ import type { Efectivo, Negocio } from "./plans";
 // «Elige tu plan» y se prueba sin pantalla.
 
 export type DatosCambio = {
-  negocio: { origen: Negocio["origen"]; stripe?: { subscriptionId?: string } };
+  negocio: {
+    origen: Negocio["origen"];
+    stripe?: { subscriptionId?: string; status?: string };
+    pagadoHasta?: number;
+    manualSiguiente?: Negocio["manualSiguiente"];
+  };
   efectivo: Pick<Efectivo, "estado" | "plan">;
   precios: { basico: number; pro: number };
 };
@@ -14,6 +19,7 @@ export type DatosCambio = {
 export function confirmacionCambio(
   cuenta: DatosCambio,
   planNuevo: "basico" | "pro",
+  ahora = Date.now(),
 ): { mensaje: string; boton: string } | null {
   const { negocio, efectivo, precios } = cuenta;
   // Primer pago (Stripe muestra el monto), pago a mano, pausado o sin plan (abre el portal o
@@ -21,6 +27,10 @@ export function confirmacionCambio(
   if (negocio.origen !== "stripe" || !negocio.stripe?.subscriptionId) return null;
   if (efectivo.estado !== "activo") return null;
   if (efectivo.plan === planNuevo) return null;
+  // En la prueba que cubre lo pagado a mano, o con un pago a mano pendiente, el servidor no cambia
+  // el plan (pide escribirle al equipo): no se promete un cobro que no va a pasar
+  const enPruebaPagada = negocio.stripe?.status === "trialing" && negocio.pagadoHasta !== undefined && negocio.pagadoHasta > ahora;
+  if (enPruebaPagada || negocio.manualSiguiente) return null;
 
   if (planNuevo === "pro") {
     return {

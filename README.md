@@ -212,6 +212,8 @@ Si faltan menos de 2 días, Studio le dice que podrá poner su tarjeta el día e
 4. Presiona **Guardar pago a mano**. Studio le pide a Stripe que **no vuelva a cobrar** la tarjeta. El cliente usa lo que ya pagó con tarjeta hasta el fin de ese mes y después sigue con lo que pagó a mano, sin pausa.
 5. En la fila aparece la nota «Pasa a pago a mano el (día) (hasta …)». Al llegar ese día, el negocio queda como pago a mano solo.
 
+**Cambios de plan mientras tanto:** mientras la tarjeta está en su periodo gratis (hasta la fecha del pago a mano) o hay un paso a pago a mano pendiente, el cliente cambia de plan escribiéndole a InnovationTECH. Si lo cambia en el portal de Stripe durante ese tiempo, el plan nuevo empieza con el primer cobro de la tarjeta.
+
 **Si aparece «Revisar» en rojo** («Revisar: esta suscripción volvió a renovar con un pago a mano pendiente»): la tarjeta del cliente se volvió a activar para cobrar (por ejemplo, el cliente reactivó su suscripción desde el portal de Stripe) aunque tú ya habías registrado su pago a mano. Así podría pagar dos veces. Qué hacer:
 
 1. Entra al panel de **Stripe → Clientes**, busca al cliente y revisa su suscripción: si dice que **se va a renovar** (no dice «se cancela el…»), cobrará de nuevo.

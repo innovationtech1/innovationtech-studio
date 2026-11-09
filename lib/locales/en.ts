@@ -1046,6 +1046,7 @@ export const EN_PATTERNS: [RegExp, string][] = [
   [/^Vas a pasar a pago con tarjeta\. Hoy no se te cobra nada: tu primer cobro de \$(\d+(?:\.\d+)?) será el (.+), cuando termina lo que pagaste a mano\. ¿Continuar\?$/, "You're switching to card payment. You won't be charged anything today: your first charge of $$$1 will be on $2, when what you paid by hand ends. Continue?"],
   [/^Tu plan está pagado a mano hasta el (.+)\. Ese día podrás poner tu tarjeta\.$/, "Your plan is paid by hand until $1. On that day you'll be able to add your card."],
   [/^Tu plan está pagado a mano hasta (.+)\. Para cambiar de plan, escríbenos\.$/, "Your plan is paid by hand until $1. To change plans, write to us."],
+  [/^Este negocio pasará a pago a mano el (.+)\. Para cambiar de plan, escríbenos\.$/, "This business will switch to paying by hand on $1. To change plans, write to us."],
   [/^Tu plan está pagado a mano hasta (.+)\. Escríbenos si quieres pasarte a tarjeta\.$/, "Your plan is paid by hand until $1. Write to us if you want to switch to card."],
   [/^Te quedan (\d+) de (\d+) este mes$/, "$1 of $2 left this month"],
   [/^\+(\d+) de paquete$/, "+$1 from packs"],
