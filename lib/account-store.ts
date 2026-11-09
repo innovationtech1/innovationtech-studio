@@ -27,6 +27,9 @@ export type Usuario = {
   negocioId: string;
   rol: "dueno" | "miembro";
   creado: number; // milisegundos
+  // Versión de los Términos y la Política de privacidad (lib/legal.ts) que aceptó al crear su cuenta.
+  // Las cuentas creadas antes de esto no la tienen.
+  terminos?: { version: string; fecha: number };
 };
 
 export type Uso = Record<Contador, number>;
