@@ -1001,6 +1001,8 @@ export const EN: Record<string, string> = {
   "Voces": "Voices",
   "Subtítulos": "Subtitles",
   "Tomas con IA": "AI shots",
+  "Tu plan no incluye tomas con IA. Compra el paquete Video en Mi cuenta para usarlas.": "Your plan doesn't include AI shots. Buy the Video pack in My account to use them.",
+  "Tu plan no incluye tomas con IA. Pídele al dueño de la cuenta que compre el paquete Video.": "Your plan doesn't include AI shots. Ask the account owner to buy the Video pack.",
   "Duración del video": "Video length",
   "Automática": "Automatic",
   "Con IA (movimiento real, 5 s)": "With AI (real motion, 5 s)",

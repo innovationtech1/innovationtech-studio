@@ -181,7 +181,12 @@ export async function requireAccess(
     const mensaje =
       plan === "prueba"
         ? "Llegaste al límite de la prueba. Elige un plan para seguir creando."
-        : negocio.duenoUid === uid
+        : contador === "tomas_ia" && tope === 0
+          ? // Básico no trae tomas al mes: «espera al día 1» no aplica
+            negocio.duenoUid === uid
+            ? "Tu plan no incluye tomas con IA. Compra el paquete Video en Mi cuenta para usarlas."
+            : "Tu plan no incluye tomas con IA. Pídele al dueño de la cuenta que compre el paquete Video."
+          : negocio.duenoUid === uid
           ? `Se acabó lo incluido este mes (${tope} ${NOMBRE_CONTADOR[contador]}). Compra un paquete o espera al ${fecha}.`
           : // Un miembro no puede comprar: solo el dueño paga
             `Se acabó lo incluido este mes (${tope} ${NOMBRE_CONTADOR[contador]}). Pídele al dueño de la cuenta que compre un paquete o espera al ${fecha}.`;

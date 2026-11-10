@@ -171,6 +171,7 @@ export async function crearVideo(
   const nuevas = preparadas.filter((p) => !p.clipKey).length;
   let delMes = 0;
   let mes = "";
+  let devolver = async () => {};
   if (nuevas > 0) {
     const acceso = await requireAccess(
       req,
@@ -180,6 +181,7 @@ export async function crearVideo(
     if (!acceso.ok) return falla(acceso.status, acceso.mensaje, acceso.codigo);
     delMes = acceso.reserva?.delMes ?? 0;
     mes = acceso.mes ?? "";
+    devolver = acceso.devolver;
   }
 
   const costo = costoTomaCentavos(cfg, nivel);
@@ -213,9 +215,20 @@ export async function crearVideo(
       reserva: { mes, delMes: usaSaldo ? 0 : 1, delSaldo: usaSaldo ? 1 : 0 },
     };
   });
-  await m.videos.crearTrabajos(trabajos);
-  if (nuevas > 0) await despacharCon(m);
-  const ahora = await m.videos.listarTrabajos(trabajos.map((t) => t.id));
+  try {
+    await m.videos.crearTrabajos(trabajos);
+  } catch (e) {
+    await devolver(); // no quedó ningún trabajo: lo descontado regresa
+    throw e;
+  }
+  // Los trabajos ya existen: pase lo que pase con el despacho, el navegador recibe sus ids
+  let ahora = trabajos;
+  try {
+    if (nuevas > 0) await despacharCon(m);
+    ahora = await m.videos.listarTrabajos(trabajos.map((t) => t.id));
+  } catch (e) {
+    console.error(`Video con IA: el despacho al crear falló (${motivo(e)}).`);
+  }
   return { ok: true, trabajos: ahora.map((t) => ({ id: t.id, estado: t.estado })) };
 }
 
@@ -366,12 +379,20 @@ export async function consultar(
   const m = mundoDe(deps);
   const usuario = await m.store.getUsuario(uid);
   if (!usuario) return falla(403, "Crea tu cuenta para empezar.");
-  try {
-    await despacharCon(m);
-  } catch (e) {
-    console.error(`Video con IA: el despacho al consultar falló (${motivo(e)}).`);
+  const deEsteNegocio = async () => (await m.videos.listarTrabajos(ids)).filter((t) => t.negocioId === usuario.negocioId);
+  let mios = await deEsteNegocio();
+  // Solo se empuja la fila si alguna de mis tomas espera turno o lleva demasiado sin aviso
+  // (cada empujón cuesta lecturas y escrituras de Firestore, y esto se consulta cada 5 s).
+  const cfgV = (await m.store.getConfig()).videoIa;
+  const viejo = m.ahora - cfgV.minutosAtorado * 60_000;
+  if (mios.some((t) => t.estado === "en_fila" || (t.estado === "enviado" && (t.enviado ?? t.actualizado) <= viejo))) {
+    try {
+      await despacharCon(m);
+      mios = await deEsteNegocio();
+    } catch (e) {
+      console.error(`Video con IA: el despacho al consultar falló (${motivo(e)}).`);
+    }
   }
-  const mios = (await m.videos.listarTrabajos(ids)).filter((t) => t.negocioId === usuario.negocioId);
   const enFila = mios.some((t) => t.estado === "en_fila");
   const fila = enFila ? await m.videos.trabajosEnFila(200) : [];
   let topeHoy = false;

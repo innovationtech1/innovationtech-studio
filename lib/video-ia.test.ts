@@ -379,3 +379,33 @@ test("consultar: solo trabajos del propio negocio, con lugar en la fila; despach
   const muchos = await consultar("u1", Array(11).fill("x"), m.deps);
   assert.ok(!muchos.ok && muchos.status === 400);
 });
+
+// ── Revisión final ───────────────────────────────────────────────────────────
+
+test("si no se pueden guardar los trabajos, la toma descontada se devuelve", async () => {
+  const m = mundo();
+  const roto = { ...m.videos, crearTrabajos: async () => { throw new Error("Firestore caído"); } };
+  await assert.rejects(crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, { ...m.deps, videos: roto }));
+  assert.equal(m.store.uso("n1", MES).tomas_ia, 0);
+});
+
+test("si el despacho truena al crear, igual se devuelven los ids (las tomas quedan en fila)", async () => {
+  const m = mundo();
+  const roto = { ...m.videos, tomarCandado: async () => { throw new Error("Firestore caído"); } };
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, { ...m.deps, videos: roto });
+  assert.ok(r.ok && r.trabajos[0].estado === "en_fila");
+});
+
+test("consultar no empuja la fila si mis tomas ya se están generando (cuida las lecturas de Firestore)", async () => {
+  const m = mundo();
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  assert.ok(r.ok);
+  let candados = 0;
+  const contando = { ...m.videos, tomarCandado: async (...a: Parameters<typeof m.videos.tomarCandado>) => (candados++, m.videos.tomarCandado(...a)) };
+  await consultar("u1", [r.ok ? r.trabajos[0].id : ""], { ...m.deps, videos: contando });
+  assert.equal(candados, 0);
+  // Pero sí cuando lleva más de 15 min sin aviso
+  m.estado.now = AHORA + 16 * MIN;
+  await consultar("u1", [r.ok ? r.trabajos[0].id : ""], { ...m.deps, videos: contando });
+  assert.equal(candados, 1);
+});

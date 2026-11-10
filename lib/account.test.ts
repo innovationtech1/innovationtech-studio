@@ -490,7 +490,7 @@ test("tomas con IA en prueba: 1 incluida sin clave de Replicate; la segunda → 
 test("tomas con IA en básico: sin saldo → 429 con «tomas con IA»; con saldo de paquete → ok", async () => {
   const sin = await requireAccess(req(), TOMA, { store: tienda(), verify, now: AHORA });
   assert.ok(!sin.ok && sin.status === 429);
-  assert.match(!sin.ok ? sin.mensaje : "", /\(0 tomas con IA\)\. Compra un paquete/);
+  assert.equal(!sin.ok ? sin.mensaje : "", "Tu plan no incluye tomas con IA. Compra el paquete Video en Mi cuenta para usarlas.");
   const store = tienda({ paquetes: { tomas_ia: 3 } });
   const con = await requireAccess(req(), { ...TOMA, unidades: 2 }, { store, verify, now: AHORA });
   assert.ok(con.ok && con.contado);

@@ -1,4 +1,5 @@
 import "server-only";
+import { FieldValue } from "firebase-admin/firestore";
 import { colecciones } from "./colecciones";
 import { db } from "./firebase-server";
 import type { NivelModelo, Plan } from "./plans";
@@ -135,7 +136,6 @@ export function firestoreVideoStore(): VideoStore {
     },
     async terminarTrabajo(id, cambios, opciones = {}) {
       const ref = trabajos().doc(id);
-      const { FieldValue } = await import("firebase-admin/firestore");
       return db().runTransaction(async (t) => {
         const s = await t.get(ref);
         if (!s.exists) return false;
