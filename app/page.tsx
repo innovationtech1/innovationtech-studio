@@ -386,7 +386,7 @@ export default function Home() {
               <Scissors size={16} aria-hidden /> Editor de video + música<ProTag h="editor_video" />
             </button>
             <button className={videoMode === "ia" ? "active" : ""} onClick={() => setVideoMode("ia")}>
-              <Bot size={16} aria-hidden /> Video con IA · Replicate (de pago)<ProTag h="video_ia" />
+              <Bot size={16} aria-hidden /> Video con IA · Replicate (de pago)<ProTag h="video_ia" soloPro />
             </button>
           </div>
           <div hidden={videoMode !== "reel"}>
@@ -414,7 +414,7 @@ export default function Home() {
             />
           </div>
           <div hidden={videoMode !== "ia"}>
-            <MejorarPro h="video_ia" />
+            <MejorarPro h="video_ia" soloPro />
             <VideoStudio
               settings={settings}
               brand={brand}

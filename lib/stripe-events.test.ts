@@ -1295,6 +1295,7 @@ const CONFIG_PAQ: Partial<PlanesConfig> = {
   paquetes: {
     creativo: { ...mezclarConfig(null).paquetes.creativo, stripePriceId: PRECIO_CREATIVO },
     voz: { ...mezclarConfig(null).paquetes.voz, stripePriceId: PRECIO_VOZ },
+    video: mezclarConfig(null).paquetes.video,
   },
 };
 const storePaq = (n: Negocio, config: Partial<PlanesConfig> = CONFIG_PAQ) =>

@@ -601,6 +601,7 @@ const CONTADORES: [keyof CuentaConNegocio["uso"], string][] = [
   ["imagenes", "Imágenes"],
   ["voces", "Voces"],
   ["subtitulos", "Subtítulos"],
+  ["tomas_ia", "Tomas con IA"],
 ];
 
 export function MiCuenta({

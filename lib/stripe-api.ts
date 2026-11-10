@@ -58,8 +58,8 @@ const PRODUCTO: Record<PlanPagado, string> = { basico: "Studio Básico", pro: "S
 const CENTAVOS: Record<PlanPagado, number> = { basico: 1900, pro: 3900 };
 const PLANES: PlanPagado[] = ["basico", "pro"];
 const PAQUETES: PaqueteId[] = ["creativo", "voz"];
-const PRODUCTO_PAQUETE: Record<PaqueteId, string> = { creativo: "Studio Paquete Creativo", voz: "Studio Paquete Voz" };
-const CENTAVOS_PAQUETE: Record<PaqueteId, number> = { creativo: 500, voz: 900 };
+const PRODUCTO_PAQUETE: Record<PaqueteId, string> = { creativo: "Studio Paquete Creativo", voz: "Studio Paquete Voz", video: "Studio Paquete Video" };
+const CENTAVOS_PAQUETE: Record<PaqueteId, number> = { creativo: 500, voz: 900, video: 1500 };
 
 // Crea en Stripe (si no existen) los precios mensuales de Básico y Pro y guarda sus ids.
 // Se puede pulsar varias veces: busca primero por lookup_key y solo crea lo que falta.

@@ -334,6 +334,7 @@ export function firestoreStore(): AccountStore {
         imagenes: numero(d.imagenes),
         voces: numero(d.voces),
         subtitulos: numero(d.subtitulos),
+        tomas_ia: numero(d.tomas_ia),
       };
     },
 

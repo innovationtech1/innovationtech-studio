@@ -33,15 +33,16 @@ const origenTexto = (f: FilaNegocio) => (f.negocio.origen === "stripe" ? "Tarjet
 const venceTexto = (f: FilaNegocio) =>
   f.negocio.origen === "manual" && f.negocio.pagadoHasta !== undefined ? fechaCorta(f.negocio.pagadoHasta) : "—";
 const usoTexto = (u: FilaNegocio["usoMes"]) =>
-  `${u.textos} textos · ${u.imagenes} imágenes · ${u.voces} voces · ${u.subtitulos} subtítulos`;
+  `${u.textos} textos · ${u.imagenes} imágenes · ${u.voces} voces · ${u.subtitulos} subtítulos · ${u.tomas_ia ?? 0} tomas con IA`;
 
 const CONTADORES: [Contador, string][] = [
   ["textos", "textos"],
   ["imagenes", "imágenes"],
   ["voces", "voces"],
   ["subtitulos", "subtítulos"],
+  ["tomas_ia", "tomas con IA"],
 ];
-const PAQUETES: Record<PaqueteId, string> = { creativo: "Creativo", voz: "Voz" };
+const PAQUETES: Record<PaqueteId, string> = { creativo: "Creativo", voz: "Voz", video: "Video" };
 // «500 textos · 150 imágenes» (solo lo que tiene); con signo para el historial: «+500 textos, +150 imágenes»
 const saldoTexto = (s: Saldo, signo = "") => {
   const partes = CONTADORES.filter(([c]) => (s[c] ?? 0) > 0).map(([c, n]) => `${signo}${s[c]} ${n}`);
@@ -395,7 +396,7 @@ function FormActivar({
 
 // Suma a mano un paquete pagado en efectivo, Zelle, Cash App u otro (queda en el Historial).
 // Solo se pueden elegir los paquetes del plan guardado del negocio (el servidor también lo revisa).
-const PAQUETE_TEXTO: Record<PaqueteId, string> = { creativo: "Creativo (textos e imágenes)", voz: "Voz (voces y subtítulos)" };
+const PAQUETE_TEXTO: Record<PaqueteId, string> = { creativo: "Creativo (textos e imágenes)", voz: "Voz (voces y subtítulos)", video: "Video (tomas con IA)" };
 const paquetesDelPlan = (plan: Negocio["plan"]) =>
   (Object.keys(PAQUETE_TEXTO) as PaqueteId[]).filter((p) => !!plan && DEFAULT_CONFIG.paquetes[p].planes.includes(plan));
 
@@ -465,7 +466,7 @@ function FormQuitar({
   onCancelar: () => void;
   onEnviar: (c: Record<string, unknown>) => Promise<void>;
 }) {
-  const [cantidades, setCantidades] = useState<Record<Contador, string>>({ textos: "", imagenes: "", voces: "", subtitulos: "" });
+  const [cantidades, setCantidades] = useState<Record<Contador, string>>({ textos: "", imagenes: "", voces: "", subtitulos: "", tomas_ia: "" });
   const [nota, setNota] = useState("");
   const [error, setError] = useState("");
 

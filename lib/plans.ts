@@ -19,13 +19,28 @@ export type Herramienta =
   | "video_ia";
 
 // Cosas que se cuentan por mes.
-export type Contador = "textos" | "imagenes" | "voces" | "subtitulos";
+export type Contador = "textos" | "imagenes" | "voces" | "subtitulos" | "tomas_ia";
+export const CONTADORES: Contador[] = ["textos", "imagenes", "voces", "subtitulos", "tomas_ia"];
 
 // Usos extra comprados (saldo de paquetes). Solo aparecen los contadores con saldo.
 export type Saldo = Partial<Record<Contador, number>>;
 
 // Paquetes prepagados que se compran una sola vez.
-export type PaqueteId = "creativo" | "voz";
+export type PaqueteId = "creativo" | "voz" | "video";
+export const PAQUETES: PaqueteId[] = ["creativo", "voz", "video"];
+
+// Video con IA (tomas de 5 s generadas en fal.ai). Todo editable en la configuración.
+export type NivelModelo = "demo" | "estandar";
+export type ModeloVideo = { id: string; centavosPorSegundo: number };
+export type ConfigVideoIa = {
+  modelos: Record<NivelModelo, ModeloVideo>;
+  segundosToma: number;
+  topeDiarioCentavos: number; // tope de gasto de todo Studio por día (hora de Chicago)
+  umbralDemo: number; // la prueba se pausa al llegar a esta parte del tope (0.8 = 80%)
+  simultaneos: number; // trabajos al mismo tiempo en fal.ai
+  minutosAtorado: number;
+  maxIntentos: number;
+};
 
 export type PaqueteConfig = {
   monto: number; // USD
@@ -41,6 +56,7 @@ export type PlanesConfig = {
   paquetes: Record<PaqueteId, PaqueteConfig>;
   personas: Record<"basico" | "pro", number>;
   pruebaMinutos: number;
+  videoIa: ConfigVideoIa;
 };
 
 const BASE: Herramienta[] = [
@@ -56,21 +72,34 @@ const AVANZADAS: Herramienta[] = ["reels", "editor_video", "voz", "subtitulos"];
 export const DEFAULT_CONFIG: PlanesConfig = {
   precios: { basico: { monto: 19 }, pro: { monto: 39 } }, // USD al mes
   herramientas: {
-    prueba: [...BASE, ...AVANZADAS],
-    basico: [...BASE],
+    prueba: [...BASE, ...AVANZADAS, "video_ia"],
+    basico: [...BASE, "video_ia"],
     pro: [...BASE, ...AVANZADAS, "video_ia"],
   },
   limitesMes: {
-    prueba: { textos: 10, imagenes: 3, voces: 2, subtitulos: 2 },
-    basico: { textos: 1000, imagenes: 300, voces: 0, subtitulos: 0 },
-    pro: { textos: 3000, imagenes: 1000, voces: 250, subtitulos: 250 },
+    prueba: { textos: 10, imagenes: 3, voces: 2, subtitulos: 2, tomas_ia: 1 },
+    basico: { textos: 1000, imagenes: 300, voces: 0, subtitulos: 0, tomas_ia: 0 },
+    pro: { textos: 3000, imagenes: 1000, voces: 250, subtitulos: 250, tomas_ia: 20 },
   },
   paquetes: {
     creativo: { monto: 5, contenido: { textos: 500, imagenes: 150 }, planes: ["basico", "pro"] },
     voz: { monto: 9, contenido: { voces: 100, subtitulos: 100 }, planes: ["pro"] },
+    video: { monto: 15, contenido: { tomas_ia: 20 }, planes: ["basico", "pro"] },
   },
   personas: { basico: 1, pro: 3 },
   pruebaMinutos: 10,
+  videoIa: {
+    modelos: {
+      demo: { id: "fal-ai/wan-25-preview/image-to-video", centavosPorSegundo: 5 },
+      estandar: { id: "fal-ai/kling-video/v2.5-turbo/pro/image-to-video", centavosPorSegundo: 7 },
+    },
+    segundosToma: 5,
+    topeDiarioCentavos: 500,
+    umbralDemo: 0.8,
+    simultaneos: 3,
+    minutosAtorado: 15,
+    maxIntentos: 2,
+  },
 };
 
 // Fechas en milisegundos.
@@ -213,7 +242,28 @@ export function limiteMes(cfg: PlanesConfig, plan: Plan, c: Contador): number {
 }
 
 export function esPaquete(x: unknown): x is PaqueteId {
-  return x === "creativo" || x === "voz";
+  return x === "creativo" || x === "voz" || x === "video";
+}
+
+// Modelo de video según el plan: la prueba usa el económico.
+export function modeloDePlan(plan: Plan): NivelModelo {
+  return plan === "prueba" ? "demo" : "estandar";
+}
+
+// Lugar en la fila: 1 = Pro con lo incluido en el mes, 2 = con saldo de paquete, 3 = prueba.
+export function prioridadToma(plan: Plan, usaSaldo: boolean): 1 | 2 | 3 {
+  if (plan === "prueba") return 3;
+  return plan === "pro" && !usaSaldo ? 1 : 2;
+}
+
+// Lo que cuesta una toma (centavos de dólar), para el control de gasto.
+export function costoTomaCentavos(cfg: PlanesConfig, nivel: NivelModelo): number {
+  return Math.round(cfg.videoIa.modelos[nivel].centavosPorSegundo * cfg.videoIa.segundosToma);
+}
+
+// El movimiento que pide el cliente, parejo para comparar (caché): minúsculas, espacios simples, máx. 300.
+export function normalizarMovimiento(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 300).trim();
 }
 
 // Reparte `unidades` entre lo que queda del mes y el saldo de paquetes (primero el mes).
@@ -341,8 +391,17 @@ export function mezclarConfig(g: Partial<PlanesConfig> | null | undefined): Plan
     paquetes: {
       creativo: mezclarPaquete(d.paquetes.creativo, guardada.paquetes?.creativo),
       voz: mezclarPaquete(d.paquetes.voz, guardada.paquetes?.voz),
+      video: mezclarPaquete(d.paquetes.video, guardada.paquetes?.video),
     },
     personas: { ...d.personas, ...guardada.personas },
     pruebaMinutos: guardada.pruebaMinutos ?? d.pruebaMinutos,
+    videoIa: {
+      ...d.videoIa,
+      ...guardada.videoIa,
+      modelos: {
+        demo: { ...d.videoIa.modelos.demo, ...guardada.videoIa?.modelos?.demo },
+        estandar: { ...d.videoIa.modelos.estandar, ...guardada.videoIa?.modelos?.estandar },
+      },
+    },
   };
 }

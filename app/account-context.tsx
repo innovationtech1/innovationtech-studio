@@ -66,15 +66,17 @@ export function refrescarCuenta(): Promise<void> {
 }
 
 // ¿Puede usar esta herramienta? Con las cuentas apagadas, siempre sí.
-export function usePuede(h: Herramienta): boolean {
+// soloPro: además pide el plan Pro (el video de Replicate: las tomas con IA sí son de todos los planes).
+export function usePuede(h: Herramienta, soloPro = false): boolean {
   const { activo, cuenta } = useCuenta();
   if (!activo || !cuenta || !cuenta.usuario) return true;
+  if (soloPro && cuenta.efectivo?.plan !== "pro") return false;
   return cuenta.herramientas.includes(h);
 }
 
 // Etiqueta «Pro» junto al nombre de una herramienta que el plan no incluye
-export function ProTag({ h }: { h: Herramienta }) {
-  const puede = usePuede(h);
+export function ProTag({ h, soloPro }: { h: Herramienta; soloPro?: boolean }) {
+  const puede = usePuede(h, soloPro);
   if (puede) return null;
   return (
     <>
@@ -85,8 +87,8 @@ export function ProTag({ h }: { h: Herramienta }) {
 }
 
 // Aviso con «Mejorar a Pro» encima de una herramienta que el plan no incluye
-export function MejorarPro({ h }: { h: Herramienta }) {
-  const puede = usePuede(h);
+export function MejorarPro({ h, soloPro }: { h: Herramienta; soloPro?: boolean }) {
+  const puede = usePuede(h, soloPro);
   const { abrirPlanes } = useCuenta();
   if (puede) return null;
   return (

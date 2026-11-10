@@ -206,7 +206,7 @@ test("listar incluye correo del dueño, estado efectivo y uso del mes", async ()
   const n1 = r.negocios.find((x) => x.negocio.id === "n1")!;
   assert.equal(n1.dueno, "dueno@ejemplo.com");
   assert.equal(n1.efectivo.estado, "sin_plan");
-  assert.deepEqual(n1.usoMes, { textos: 12, imagenes: 3, voces: 0, subtitulos: 0 });
+  assert.deepEqual(n1.usoMes, { textos: 12, imagenes: 3, voces: 0, subtitulos: 0, tomas_ia: 0 });
   assert.deepEqual(n1.saldo, { voces: 4 });
   assert.equal(r.negocios.find((x) => x.negocio.id === "n2")!.dueno, "");
 });

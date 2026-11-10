@@ -28,7 +28,7 @@ export type Falla = { ok: false; status: number; error: string; codigo?: string 
 const falla = (status: number, error: string, codigo?: string): Falla =>
   codigo ? { ok: false, status, error, codigo } : { ok: false, status, error };
 
-const CEROS: Record<Contador, number> = { textos: 0, imagenes: 0, voces: 0, subtitulos: 0 };
+const CEROS: Record<Contador, number> = { textos: 0, imagenes: 0, voces: 0, subtitulos: 0, tomas_ia: 0 };
 
 // Solo cuenta como admin quien confirmó su correo: Firebase deja registrar un correo ajeno sin confirmar.
 export function esCorreoAdmin(email: string, emailVerified: boolean): boolean {
