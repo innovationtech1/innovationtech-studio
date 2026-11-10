@@ -176,6 +176,7 @@ Cada plan trae una cantidad de usos **al mes** (no por día). Se reinicia el **d
 | Imágenes | 3 | 300 | 1,000 |
 | Voces | 2 | 0 | 250 |
 | Subtítulos | 2 | 0 | 250 |
+| Tomas con IA (video) | 1 | 0 | 20 |
 
 Quien conecta su **propia clave de Cloudflare** no gasta nada de esto: ese uso no se cuenta.
 
@@ -187,6 +188,7 @@ Si alguien se queda sin usos antes de fin de mes, puede comprar un **paquete** (
 | --- | --- | --- | --- |
 | Creativo | $5 | +500 textos y +150 imágenes | Básico y Pro |
 | Voz | $9 | +100 voces y +100 subtítulos | Solo Pro |
+| Video | $15 | +20 tomas con IA | Básico y Pro |
 
 - El saldo de los paquetes **no vence**.
 - Se gasta **primero lo del mes** y después el saldo del paquete.
@@ -249,6 +251,9 @@ Entra a Netlify → proyecto **innovationtech-studio** → *Project configuratio
 | `STRIPE_WEBHOOK_SECRET` | Secreto de firma del webhook (se obtiene en el Paso 3) |
 | `CF_API_TOKEN` | Token de Workers AI de Cloudflare |
 | `STUDIO_CLAVES_SECRETO` | Llave para guardar cifradas las claves de Cloudflare de los clientes (ver «Conectar la cuenta de Cloudflare del cliente») |
+| `FAL_KEY` | Clave de fal.ai para las tomas con IA (ver «Videos con IA») |
+| `R2_ACCESS_KEY_ID` | Clave de acceso de Cloudflare R2 (ver «Videos con IA») |
+| `R2_SECRET_ACCESS_KEY` | Clave secreta de Cloudflare R2 |
 
 **No secretas** (son datos públicos o ajustes; no son claves):
 
@@ -262,6 +267,9 @@ Entra a Netlify → proyecto **innovationtech-studio** → *Project configuratio
 | `CF_ACCOUNT_ID` | Account ID de Cloudflare |
 | `STUDIO_CUENTAS` | Interruptor de cuentas (ver Paso 5) |
 | `NEXT_PUBLIC_STUDIO_CUENTAS` | El mismo interruptor, para las pantallas |
+| `R2_ACCOUNT_ID` | Account ID de Cloudflare donde está el bucket de R2 |
+| `R2_BUCKET` | Nombre del bucket de R2 (por ejemplo `studio-videos`) |
+| `VIDEO_IA` | Opcional. `off` apaga al instante las tomas con IA (los reels con animación siguen funcionando) |
 | `STUDIO_COLECCION_PREFIJO` | Opcional. Inicio del nombre de las colecciones de Firestore (`studio_` si no la pones). Solo para las versiones de prueba: `prueba_studio_` (ver Paso 4) |
 
 Netlify bloquea la publicación si encuentra en el código un valor igual a una variable. Como las variables no secretas sí aparecen en el sitio, agrega una variable más:
@@ -269,7 +277,7 @@ Netlify bloquea la publicación si encuentra en el código un valor igual a una 
 - `SECRETS_SCAN_OMIT_KEYS` con este valor, **separado por comas y sin espacios**:
 
 ```
-FIREBASE_PROJECT_ID,NEXT_PUBLIC_FIREBASE_API_KEY,NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,NEXT_PUBLIC_FIREBASE_PROJECT_ID,STUDIO_ADMIN_EMAILS,CF_ACCOUNT_ID,STUDIO_CUENTAS,NEXT_PUBLIC_STUDIO_CUENTAS,STUDIO_COLECCION_PREFIJO
+FIREBASE_PROJECT_ID,NEXT_PUBLIC_FIREBASE_API_KEY,NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,NEXT_PUBLIC_FIREBASE_PROJECT_ID,STUDIO_ADMIN_EMAILS,CF_ACCOUNT_ID,STUDIO_CUENTAS,NEXT_PUBLIC_STUDIO_CUENTAS,STUDIO_COLECCION_PREFIJO,R2_ACCOUNT_ID,R2_BUCKET,VIDEO_IA
 ```
 
 Nunca pongas una clave secreta en una variable que empiece con `NEXT_PUBLIC_`.
@@ -295,7 +303,7 @@ Nunca pongas una clave secreta en una variable que empiece con `NEXT_PUBLIC_`.
      - `invoice.payment_failed`
      - `checkout.session.async_payment_succeeded` (acredita los paquetes pagados con banco, que tardan días)
 6. Al crear el webhook, copia el **Signing secret** (`whsec_...`) en `STRIPE_WEBHOOK_SECRET` (Netlify, en el mismo contexto que su clave: el de prueba para las versiones de prueba).
-7. **Preparar Stripe, antes de usar las cuentas:** entra a `/admin` con tu correo de administrador y presiona **Preparar Stripe**. Crea los precios (Básico $19 y Pro $39 al mes) y también los dos precios de los paquetes (Creativo $5 y Voz $9). Si ya lo habías hecho antes de esta actualización, **presiónalo otra vez** para que cree los paquetes. Hay que hacerlo una vez en cada lugar: en la versión de prueba (con la clave de prueba) y en el sitio principal (con la clave real). Si lo olvidas y alguien paga antes, Studio reconoce igual los precios por su nombre interno (`studio_basico_mensual` / `studio_pro_mensual`; los paquetes son `studio_paquete_creativo` / `studio_paquete_voz`); un precio desconocido se toma como Básico.
+7. **Preparar Stripe, antes de usar las cuentas:** entra a `/admin` con tu correo de administrador y presiona **Preparar Stripe**. Crea los precios (Básico $19 y Pro $39 al mes) y también los tres precios de los paquetes (Creativo $5, Voz $9 y Video $15). Si ya lo habías hecho antes de esta actualización, **presiónalo otra vez** para que cree los paquetes que falten (por ejemplo, Video). Hay que hacerlo una vez en cada lugar: en la versión de prueba (con la clave de prueba) y en el sitio principal (con la clave real). Si lo olvidas y alguien paga antes, Studio reconoce igual los precios por su nombre interno (`studio_basico_mensual` / `studio_pro_mensual`; los paquetes son `studio_paquete_creativo` / `studio_paquete_voz` / `studio_paquete_video`); un precio desconocido se toma como Básico.
 
 Tarjetas de prueba (cualquier fecha futura y cualquier CVC):
 
@@ -364,6 +372,53 @@ Copia el texto que aparece (termina en `=`) y pégalo como valor de la variable.
 - **Si falta la variable:** los clientes no pueden conectar su Cloudflare (verán «Falta configurar el guardado seguro de claves. Avísale a InnovationTECH.»). Todo lo demás sigue funcionando.
 - **Si la cambias después:** las claves que ya estaban guardadas **dejan de poder leerse**. Esos clientes vuelven a usar la IA de InnovationTECH con los límites del plan y en Mi cuenta ven «Tu Cloudflare conectado ya no se puede leer. Conéctalo otra vez.». Tienen que conectarla de nuevo. Por eso, cámbiala solo si crees que alguien la vio.
 
+### Videos con IA (fal.ai + Cloudflare R2)
+
+En el **Creador de Reels**, el cliente puede marcar 1 o 2 fotos «Con IA»: cada una se convierte en una **toma de 5 segundos con movimiento real** generada en [fal.ai](https://fal.ai). El resto del video (10, 15, 20 o 30 s) sigue siendo la animación gratis del navegador. La **vista previa es gratis**; solo «Generar con IA» gasta tomas. Necesita las cuentas encendidas.
+
+| | Prueba (demo) | Básico | Pro |
+| --- | --- | --- | --- |
+| Tomas incluidas | 1 | 0 (puede comprar el paquete Video) | 20 al mes |
+| Modelo | Wan 2.5 a 480p | Kling 2.5 Turbo Pro | Kling 2.5 Turbo Pro |
+| Costo para InnovationTECH por toma | ≈ $0.25 | ≈ $0.35 | ≈ $0.35 |
+
+Protecciones que ya vienen puestas (se pueden cambiar en Firestore, documento `studio_config/planes`, campo `videoIa`):
+
+- **Tope de gasto de $5 al día** para todo Studio (hora de Texas). Al llegar, las tomas esperan en fila y salen al día siguiente. El demo se detiene antes, al 80% ($4), para dejar lugar a los clientes que pagan.
+- Máximo **3 tomas al mismo tiempo** en fal.ai; los de Pro pasan primero, luego los de paquete y al final el demo.
+- Si una toma falla, se reintenta **una vez**; si vuelve a fallar, se **devuelve la toma** al cliente y esa foto queda con animación normal.
+- La misma foto con el mismo movimiento no se cobra dos veces (se guarda el clip).
+- **Interruptor:** pon `VIDEO_IA` en `off` en Netlify y vuelve a publicar para apagar la IA de video al instante.
+
+**Cómo prepararlo (una sola vez):**
+
+1. **fal.ai:** crea la cuenta en <https://fal.ai>, agrega crédito de prepago (por ejemplo $10) y deja **apagada la recarga automática**: así el gasto nunca pasa de lo que cargaste. En *API Keys* crea una clave y pégala en Netlify como `FAL_KEY` (secreta).
+2. **Cloudflare R2 (donde se guardan fotos y clips):** en Cloudflare → *R2* → *Create bucket*, nombre `studio-videos` (privado, sin acceso público). Ponlo en `R2_BUCKET` y tu Account ID en `R2_ACCOUNT_ID`.
+3. En *R2 → Manage API tokens* crea un token con permiso **Object Read & Write** solo para ese bucket. Copia *Access Key ID* y *Secret Access Key* en `R2_ACCESS_KEY_ID` y `R2_SECRET_ACCESS_KEY` (secretas).
+4. En el bucket → *Settings → CORS policy*, pega esto (cambia el dominio si usas otro; agrega el de tu versión de prueba si la usas):
+
+   ```json
+   [
+     {
+       "AllowedOrigins": ["https://innovationtech-studio.netlify.app"],
+       "AllowedMethods": ["GET", "PUT"],
+       "AllowedHeaders": ["content-type"],
+       "MaxAgeSeconds": 3600
+     }
+   ]
+   ```
+
+5. En el bucket → *Settings → Object lifecycle rules*, agrega una regla: prefijo `demo/`, **borrar a los 30 días**. Ahí van las fotos y clips de las pruebas gratis.
+6. Vuelve a publicar el sitio y, en `/admin`, presiona **Preparar Stripe** otra vez para que cree el precio del paquete **Video** ($15).
+7. **Prueba:** entra con una cuenta en prueba, sube 2 fotos al Creador de Reels, marca una «Con IA» y toca **Generar con IA**. Debe pasar por «Subiendo…», «En fila», «Toma 1 de 1 · Generando…» y terminar con el video listo (suele tardar de 1 a 3 minutos).
+
+Notas:
+
+- fal.ai avisa a Studio cuando termina cada toma en `/api/video-ia/aviso` (no hay que configurar nada en fal: la dirección va en cada pedido). Studio revisa la firma de fal en cada aviso.
+- Una tarea programada de Netlify (`netlify/functions/video-ia-respaldo.mts`, cada 5 minutos, solo en el sitio principal) empuja la fila por si se pierde un aviso.
+- Los archivos de R2 son privados: el navegador solo recibe enlaces temporales de una hora.
+- Mientras falten `FAL_KEY` o las variables de R2, «Generar con IA» responde que los videos con IA están en pausa y el resto de Studio no cambia.
+
 ### Cómo usar `/admin`
 
 - **Activar a mano:** para quien paga en efectivo o con Cash App. Al vencer la fecha, el negocio se pausa solo.
@@ -380,5 +435,5 @@ Copia el texto que aparece (termina en `=`) y pégalo como valor de la variable.
 - El inicio de sesión con Google por redirección, en la app instalada del iPhone, a veces vuelve sin sesión. En ese caso usa correo y contraseña.
 - El dictado con subtítulos (respaldo cuando el navegador no dicta) es solo del plan Pro.
 - La cuota gratuita diaria de Cloudflare puede acabarse con muchos clientes; por eso, el día del lanzamiento hay que pasar al plan de pago de Workers (ver Paso 5).
-- En el pago de los **paquetes** no actives el **impuesto automático** ni los **códigos de promoción** de Stripe: el sistema solo acredita el saldo si el monto pagado es exactamente el del paquete ($5 o $9).
+- En el pago de los **paquetes** no actives el **impuesto automático** ni los **códigos de promoción** de Stripe: el sistema solo acredita el saldo si el monto pagado es exactamente el del paquete ($5, $9 o $15).
 - Antes del primer cliente: Netlify plan Personal ($9) y consultar a un contador sobre el impuesto de ventas de Texas.

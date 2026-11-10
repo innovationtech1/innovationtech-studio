@@ -3,7 +3,7 @@ import Stripe from "stripe";
 import { firestoreStore, type AccountStore, type PagoManual } from "./account-store";
 import { esCorreoAdmin, type Falla } from "./account-api";
 import { validarDatosActivar, type DatosActivar } from "./admin-api";
-import { estadoEfectivo, esPaquete, quedaMargenParaTarjeta, type Negocio, type PaqueteId } from "./plans";
+import { estadoEfectivo, esPaquete, PAQUETES, quedaMargenParaTarjeta, type Negocio, type PaqueteId } from "./plans";
 import { aplicarEvento, EVENTOS_STRIPE, idDe, LOOKUP_PAQUETES, LOOKUP_PLANES, referenciasDeEvento, SUSCRIPCION_VIVA } from "./stripe-events";
 import { SIN_CONFIGURAR, stripe, stripeConfigurado, stripeModoLive } from "./stripe-server";
 
@@ -57,7 +57,6 @@ const LOOKUP = LOOKUP_PLANES;
 const PRODUCTO: Record<PlanPagado, string> = { basico: "Studio Básico", pro: "Studio Pro" };
 const CENTAVOS: Record<PlanPagado, number> = { basico: 1900, pro: 3900 };
 const PLANES: PlanPagado[] = ["basico", "pro"];
-const PAQUETES: PaqueteId[] = ["creativo", "voz"];
 const PRODUCTO_PAQUETE: Record<PaqueteId, string> = { creativo: "Studio Paquete Creativo", voz: "Studio Paquete Voz", video: "Studio Paquete Video" };
 const CENTAVOS_PAQUETE: Record<PaqueteId, number> = { creativo: 500, voz: 900, video: 1500 };
 
@@ -146,6 +145,7 @@ export async function prepararStripe(
       paquetes: {
         creativo: { stripePriceId: idsPaquetes.creativo },
         voz: { stripePriceId: idsPaquetes.voz },
+        video: { stripePriceId: idsPaquetes.video },
       },
     });
     return { ok: true, precios: ids, paquetes: idsPaquetes };

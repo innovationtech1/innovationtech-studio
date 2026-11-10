@@ -161,9 +161,9 @@ function PrepararStripe() {
     const r = await pedir("/api/admin/stripe", { method: "POST" });
     setOcupado(false);
     const precios = r.datos.precios as { basico?: string; pro?: string } | undefined;
-    const paquetes = r.datos.paquetes as { creativo?: string; voz?: string } | undefined;
+    const paquetes = r.datos.paquetes as { creativo?: string; voz?: string; video?: string } | undefined;
     if (r.ok && precios) {
-      setResultado({ ok: true, texto: `Stripe listo. Básico: ${precios.basico} · Pro: ${precios.pro}${paquetes ? ` · Creativo: ${paquetes.creativo} · Voz: ${paquetes.voz}` : ""}` });
+      setResultado({ ok: true, texto: `Stripe listo. Básico: ${precios.basico} · Pro: ${precios.pro}${paquetes ? ` · Creativo: ${paquetes.creativo} · Voz: ${paquetes.voz} · Video: ${paquetes.video}` : ""}` });
     } else {
       setResultado({ ok: false, texto: String(r.datos.error ?? "No se pudo preparar Stripe.") });
     }

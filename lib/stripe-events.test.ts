@@ -673,7 +673,7 @@ test("prepararStripe: crea los dos precios y guarda los ids; la segunda vez no c
   const r = await prepararStripe(ADMIN, true, { store, stripe: f.cliente });
   assert.equal(r.ok, true);
   const creados = f.llamadas.filter((l) => l.metodo === "prices.create").map((l) => l.args[0] as Record<string, unknown>);
-  assert.equal(creados.length, 4);
+  assert.equal(creados.length, 5);
   const basico = creados.find((c) => c.lookup_key === "studio_basico_mensual")!;
   const pro = creados.find((c) => c.lookup_key === "studio_pro_mensual")!;
   assert.equal(basico.unit_amount, 1900);
@@ -688,6 +688,7 @@ test("prepararStripe: crea los dos precios y guarda los ids; la segunda vez no c
     "studio_pro_mensual",
     "studio_paquete_creativo",
     "studio_paquete_voz",
+    "studio_paquete_video",
   ]);
   // Paquetes: pago único (sin recurring), en dólares
   const creativo = creados.find((c) => c.lookup_key === "studio_paquete_creativo")!;
@@ -700,6 +701,12 @@ test("prepararStripe: crea los dos precios y guarda los ids; la segunda vez no c
   }
   assert.equal((creativo.product_data as { name: string }).name, "Studio Paquete Creativo");
   assert.equal((voz.product_data as { name: string }).name, "Studio Paquete Voz");
+  // Paquete Video: $15, pago único
+  const video = creados.find((c) => c.lookup_key === "studio_paquete_video")!;
+  assert.equal(video.unit_amount, 1500);
+  assert.equal(video.currency, "usd");
+  assert.equal("recurring" in video, false);
+  assert.equal((video.product_data as { name: string }).name, "Studio Paquete Video");
 
   const cfgG = await store.getConfig();
   assert.ok(cfgG.precios.basico.stripePriceId?.startsWith("price_nuevo_"));
@@ -708,6 +715,9 @@ test("prepararStripe: crea los dos precios y guarda los ids; la segunda vez no c
   assert.equal(cfgG.precios.pro.monto, 39);
   assert.ok(cfgG.paquetes.creativo.stripePriceId?.startsWith("price_nuevo_"));
   assert.ok(cfgG.paquetes.voz.stripePriceId?.startsWith("price_nuevo_"));
+  assert.ok(cfgG.paquetes.video.stripePriceId?.startsWith("price_nuevo_"));
+  assert.equal(cfgG.paquetes.video.monto, 15);
+  assert.deepEqual(cfgG.paquetes.video.contenido, { tomas_ia: 20 });
   // Guardar el id no borra monto, contenido ni planes del paquete
   assert.equal(cfgG.paquetes.voz.monto, 9);
   assert.deepEqual(cfgG.paquetes.voz.contenido, { voces: 100, subtitulos: 100 });
@@ -716,12 +726,12 @@ test("prepararStripe: crea los dos precios y guarda los ids; la segunda vez no c
   assert.deepEqual(cfgG.limitesMes, mezclarConfig(null).limitesMes);
   if (r.ok) {
     assert.deepEqual(r.precios, { basico: cfgG.precios.basico.stripePriceId, pro: cfgG.precios.pro.stripePriceId });
-    assert.deepEqual(r.paquetes, { creativo: cfgG.paquetes.creativo.stripePriceId, voz: cfgG.paquetes.voz.stripePriceId });
+    assert.deepEqual(r.paquetes, { creativo: cfgG.paquetes.creativo.stripePriceId, voz: cfgG.paquetes.voz.stripePriceId, video: cfgG.paquetes.video.stripePriceId });
   }
 
   const r2 = await prepararStripe(ADMIN, true, { store, stripe: f.cliente });
   assert.equal(r2.ok, true);
-  assert.equal(f.llamadas.filter((l) => l.metodo === "prices.create").length, 4);
+  assert.equal(f.llamadas.filter((l) => l.metodo === "prices.create").length, 5);
   assert.deepEqual((await store.getConfig()).precios, cfgG.precios);
   assert.deepEqual((await store.getConfig()).paquetes, cfgG.paquetes);
 });
@@ -731,7 +741,7 @@ test("prepararStripe: si ya existe uno, solo crea el que falta", async () => {
   const store = memoryStore();
   const r = await prepararStripe(ADMIN, true, { store, stripe: f.cliente });
   assert.equal(r.ok, true);
-  assert.equal(f.llamadas.filter((l) => l.metodo === "prices.create").length, 3); // pro + 2 paquetes
+  assert.equal(f.llamadas.filter((l) => l.metodo === "prices.create").length, 4); // pro + 3 paquetes
   assert.equal((await store.getConfig()).precios.basico.stripePriceId, "price_b_viejo");
 });
 
@@ -1885,4 +1895,13 @@ test("aviso updated con cancel_at programado (sin cancel_at_period_end) y manual
   );
   assert.equal(r?.stripe?.renovoConManual, undefined);
   assert.deepEqual(errores, []);
+});
+
+test("prepararStripe: si el paquete Video ya existe en Stripe lo encuentra y guarda su id", async () => {
+  const f = stripeFalso({ precios: [{ id: "price_video_viejo", lookup_key: "studio_paquete_video", unit_amount: 1500 }] });
+  const store = memoryStore();
+  const r = await prepararStripe(ADMIN, true, { store, stripe: f.cliente });
+  assert.equal(r.ok, true);
+  assert.equal((await store.getConfig()).paquetes.video.stripePriceId, "price_video_viejo");
+  assert.equal(f.llamadas.filter((l) => l.metodo === "prices.create").some((l) => (l.args[0] as { lookup_key?: string }).lookup_key === "studio_paquete_video"), false);
 });
