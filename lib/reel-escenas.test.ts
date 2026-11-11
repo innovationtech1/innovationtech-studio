@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DURACIONES, SEGUNDOS_TOMA, duracionMinima, maxFotos, planDeEscenas, repartirEscenas } from "./reel-escenas";
+import { DURACIONES, SEGUNDOS_TOMA, duracionMinima, duracionPara, maxFotos, planDeEscenas, repartirEscenas } from "./reel-escenas";
 
 const suma = (e: { segundos: number }[]) => e.reduce((a, x) => a + x.segundos, 0);
 const casi = (a: number, b: number) => assert.ok(Math.abs(a - b) < 1e-9, `${a} ≠ ${b}`);
@@ -78,4 +78,11 @@ test("duracionMinima: la duración más corta donde caben las fotos y las tomas 
   assert.equal(duracionMinima(4, 4, 3), 20);
   assert.equal(duracionMinima(6, 4, 3), 30);
   assert.equal(duracionMinima(20, 4, 3), null); // no cabe en ninguna
+});
+
+test("duracionPara: respeta la elegida si caben; si no (o si es automática), usa la más corta donde caben", () => {
+  assert.equal(duracionPara(0, 2, 1, 3), 10);
+  assert.equal(duracionPara(20, 2, 1, 3), 20);
+  assert.equal(duracionPara(10, 4, 3, 3), 20);
+  assert.throws(() => duracionPara(0, 30, 2, 3), /caben máximo/);
 });

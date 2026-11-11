@@ -1,6 +1,7 @@
 import "server-only";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { cuentasActivas, requireAccess } from "./account";
+import { esCorreoAdmin } from "./account-api";
 import { firestoreStore, type AccountStore } from "./account-store";
 import { entradaDeModelo, enviarAFal, estadoFal, falConfigurado, resultadoFal, verificarFirmaFal, videoDe, type EntradaFal } from "./fal";
 import {
@@ -290,7 +291,7 @@ async function despacharCon(m: Mundo): Promise<{ enviados: number }> {
         enviados += 1;
       } catch (e) {
         console.error(`Video con IA: no se pudo enviar el trabajo ${t.id} (${motivo(e)}).`);
-        await reintentarOFallar(m, cfg, { ...t, estado: "enviado" });
+        await reintentarOFallar(m, cfg, { ...t, estado: "enviado" }, undefined, motivo(e));
       }
     }
     return { enviados };
@@ -301,12 +302,12 @@ async function despacharCon(m: Mundo): Promise<{ enviados: number }> {
 
 // Un envío que falló: vuelve a la fila si le quedan intentos; si no, falla y se devuelve la toma.
 // En los dos casos su costo sale del gasto del día. Devuelve false si otro ya lo había resuelto.
-async function reintentarOFallar(m: Mundo, cfg: PlanesConfig, t: TrabajoVideo, requestId?: string): Promise<boolean> {
+async function reintentarOFallar(m: Mundo, cfg: PlanesConfig, t: TrabajoVideo, requestId?: string, error?: string): Promise<boolean> {
   const intentos = t.intentos + 1;
   const reintenta = intentos < cfg.videoIa.maxIntentos;
   const cambio = await m.videos.terminarTrabajo(
     t.id,
-    { estado: reintenta ? "en_fila" : "fallo", intentos, actualizado: m.ahora },
+    { estado: reintenta ? "en_fila" : "fallo", intentos, actualizado: m.ahora, error },
     { requestId, devolverGasto: true },
   );
   if (cambio && !reintenta && t.reserva.delMes + t.reserva.delSaldo > 0) {
@@ -334,7 +335,7 @@ async function revisarAtorados(m: Mundo, cfg: PlanesConfig): Promise<void> {
       const terminado = t.statusUrl ? (await m.fal.estado(t.statusUrl)) === "COMPLETED" : false;
       const video = terminado && t.responseUrl ? await m.fal.resultado(t.responseUrl) : null;
       if (video) await completar(m, t, video.videoUrl, t.falRequestId);
-      else await reintentarOFallar(m, cfg, t, t.falRequestId);
+      else await reintentarOFallar(m, cfg, t, t.falRequestId, `fal.ai no avisó en ${cfg.videoIa.minutosAtorado} minutos`);
     } catch (e) {
       console.error(`Video con IA: no se pudo revisar el trabajo atorado ${t.id} (${motivo(e)}).`);
     }
@@ -357,7 +358,7 @@ export async function procesarAviso(url: URL, headers: Headers, cuerpo: string, 
   if (!t || !igual(secreto, t.secreto)) return { status: 404 };
   if (!(await m.fal.verificar(headers, cuerpo, m.ahora))) return { status: 401 };
 
-  let aviso: { request_id?: unknown; status?: unknown; payload?: unknown };
+  let aviso: { request_id?: unknown; status?: unknown; payload?: unknown; error?: unknown; payload_error?: unknown };
   try {
     aviso = JSON.parse(cuerpo) as typeof aviso;
   } catch {
@@ -376,7 +377,8 @@ export async function procesarAviso(url: URL, headers: Headers, cuerpo: string, 
       return { status: 500 };
     }
   } else {
-    await reintentarOFallar(m, await m.store.getConfig(), t, requestId);
+    const dicho = typeof aviso.error === "string" ? aviso.error : typeof aviso.payload_error === "string" ? aviso.payload_error : "";
+    await reintentarOFallar(m, await m.store.getConfig(), t, requestId, motivo(new Error(dicho || "fal.ai terminó sin entregar el video")));
   }
   // Se liberó un lugar: que salga el siguiente de la fila
   try {
@@ -434,4 +436,45 @@ export async function consultar(
     return r;
   });
   return { ok: true, trabajos, topeHoy };
+}
+
+// Resumen para el panel de administrador: gasto de hoy, cómo va la fila y los últimos fallos con su motivo.
+export async function resumenVideo(
+  adminEmail: string,
+  emailVerified: boolean,
+  deps: DepsVideo = {},
+): Promise<
+  | {
+      ok: true;
+      encendido: boolean;
+      gastoHoyCentavos: number;
+      topeCentavos: number;
+      enProceso: number;
+      enFila: number;
+      fallos: { fecha: number; negocio: string; motivo: string }[];
+    }
+  | Falla
+> {
+  if (!esCorreoAdmin(adminEmail, emailVerified)) return falla(403, "No tienes permiso para el panel de administrador.", "NO_ADMIN");
+  const m = mundoDe(deps);
+  const cfg = await m.store.getConfig();
+  const SEMANA = 7 * 24 * 60 * 60 * 1000;
+  const [gasto, enProceso, fila, recientes] = await Promise.all([
+    m.videos.getGasto(diaChicago(m.ahora)),
+    m.videos.contarEnviados(),
+    m.videos.trabajosEnFila(200),
+    m.videos.trabajosDesde(m.ahora - SEMANA, 200),
+  ]);
+  const fallidos = recientes.filter((t) => t.estado === "fallo").slice(0, 10);
+  const nombres = new Map<string, string>();
+  for (const id of new Set(fallidos.map((t) => t.negocioId))) nombres.set(id, (await m.store.getNegocio(id))?.nombre ?? id);
+  return {
+    ok: true,
+    encendido: m.encendido && !!m.r2,
+    gastoHoyCentavos: gasto,
+    topeCentavos: cfg.videoIa.topeDiarioCentavos,
+    enProceso,
+    enFila: fila.length,
+    fallos: fallidos.map((t) => ({ fecha: t.actualizado, negocio: nombres.get(t.negocioId) ?? t.negocioId, motivo: t.error ?? "Sin detalle" })),
+  };
 }

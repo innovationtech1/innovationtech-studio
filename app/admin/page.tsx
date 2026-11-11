@@ -130,6 +130,7 @@ function Lista() {
         />
         <button className="btn small ghost" onClick={() => void cargar()}>Actualizar</button>
         <PrepararStripe />
+        <ResumenVideo />
       </div>
       {error && <p className="adm-error" role="alert">{error}</p>}
       {!filas && !error && <p>Cargando negocios…</p>}
@@ -147,6 +148,59 @@ function Lista() {
         </>
       )}
     </main>
+  );
+}
+
+// Video con IA: cuánto se ha gastado hoy en fal.ai, cómo va la fila y por qué fallaron las últimas tomas.
+function ResumenVideo() {
+  type Resumen = {
+    encendido: boolean;
+    gastoHoyCentavos: number;
+    topeCentavos: number;
+    enProceso: number;
+    enFila: number;
+    fallos: { fecha: number; negocio: string; motivo: string }[];
+  };
+  const [datos, setDatos] = useState<Resumen | null>(null);
+  const [error, setError] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+
+  async function ver() {
+    setOcupado(true);
+    setError("");
+    const r = await pedir("/api/admin/video");
+    setOcupado(false);
+    if (r.ok) setDatos(r.datos as unknown as Resumen);
+    else setError(String(r.datos.error ?? "No se pudo leer el resumen de video."));
+  }
+  const dolares = (c: number) => `$${(c / 100).toFixed(2)}`;
+
+  return (
+    <>
+      <button className="btn ghost small" disabled={ocupado} onClick={() => void ver()}>
+        {ocupado ? "Leyendo…" : "Video con IA: ver estado"}
+      </button>
+      {error && <p className="adm-error" role="status">{error}</p>}
+      {datos && (
+        <div className="adm-ok" role="status">
+          <p>
+            {datos.encendido ? "Encendido" : "En pausa (falta configuración o VIDEO_IA=off)"} · Gasto de hoy:{" "}
+            {dolares(datos.gastoHoyCentavos)} de {dolares(datos.topeCentavos)} · Generando: {datos.enProceso} · En fila: {datos.enFila}
+          </p>
+          {datos.fallos.length === 0 ? (
+            <p>Sin fallos en los últimos 7 días.</p>
+          ) : (
+            <ul>
+              {datos.fallos.map((f, i) => (
+                <li key={i} data-no-translate>
+                  {new Date(f.fecha).toLocaleString("es-MX", { timeZone: "America/Chicago", dateStyle: "short", timeStyle: "short" })} · {f.negocio} · {f.motivo}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </>
   );
 }
 

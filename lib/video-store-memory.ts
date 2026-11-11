@@ -32,6 +32,9 @@ export function memoryVideoStore(semilla: { gasto?: Record<string, number> } = {
     async trabajosEnviados() {
       return todos().filter((t) => t.estado === "enviado");
     },
+    async trabajosDesde(ms, limite) {
+      return todos().filter((t) => t.actualizado >= ms).sort((a, b) => b.actualizado - a.actualizado).slice(0, limite);
+    },
     async contarEnviados() {
       return todos().filter((t) => t.estado === "enviado").length;
     },

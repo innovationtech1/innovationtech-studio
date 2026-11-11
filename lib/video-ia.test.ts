@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { baseDePedido, consultar, crearVideo, despachar, procesarAviso, type DepsVideo } from "./video-ia";
+import { baseDePedido, consultar, crearVideo, despachar, procesarAviso, resumenVideo, type DepsVideo } from "./video-ia";
 import type { Usuario } from "./account-store";
 import { memoryStore } from "./account-store-memory";
 import { memoryVideoStore } from "./video-store-memory";
@@ -436,4 +436,48 @@ test("hasta 4 tomas con IA por video; la prueba y los planes de pago no comparte
   const demo = mundo(PRUEBA);
   await crearVideo(req(), { tomas: [{ imagenKey: foto("a", "n1", true), movimiento: "" }] }, demo.deps);
   assert.notEqual(demo.videos.todos()[0].cacheLlave, m.videos.todos()[0].cacheLlave);
+});
+
+// ── Pulido antes del lanzamiento ─────────────────────────────────────────────
+
+test("un fallo guarda su motivo en el trabajo (para verlo en el panel de administrador)", async () => {
+  const m = mundo();
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  await m.aviso(0, m.ERROR);
+  await m.aviso(1, m.ERROR);
+  const t = m.videos.todos()[0];
+  assert.equal(t.estado, "fallo");
+  assert.equal(t.error, "Invalid status code: 500");
+  // Cuando fal ni siquiera acepta el trabajo, queda el motivo del envío
+  const m2 = mundo();
+  m2.estado.falFalla = true;
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m2.deps);
+  await despachar(m2.deps);
+  assert.match(m2.videos.todos()[0].error ?? "", /fal\.ai no aceptó el trabajo \(500\)/);
+});
+
+test("resumenVideo: solo administrador; da el gasto de hoy, el tope y los últimos fallos con su motivo", async () => {
+  const antes = process.env.STUDIO_ADMIN_EMAILS;
+  process.env.STUDIO_ADMIN_EMAILS = "admin@ejemplo.com";
+  try {
+    const m = mundo();
+    await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }, { imagenKey: foto("b"), movimiento: "" }] }, m.deps);
+    await m.aviso(0, m.ERROR); // reintento: sale el envío número 3
+    await m.aviso(2, m.ERROR); // segundo fallo de la misma toma
+    const no = await resumenVideo("otro@x.com", true, m.deps);
+    assert.ok(!no.ok && no.status === 403);
+    const r = await resumenVideo("admin@ejemplo.com", true, m.deps);
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    assert.equal(r.gastoHoyCentavos, COSTO); // solo queda la toma que sigue generándose
+    assert.equal(r.topeCentavos, 500);
+    assert.equal(r.encendido, true);
+    assert.equal(r.enProceso, 1);
+    assert.deepEqual(r.fallos, [{ fecha: AHORA, negocio: "Tortas", motivo: "Invalid status code: 500" }]);
+    // Nada secreto sale al navegador
+    assert.ok(!JSON.stringify(r).includes(m.videos.todos()[0].secreto));
+  } finally {
+    if (antes === undefined) delete process.env.STUDIO_ADMIN_EMAILS;
+    else process.env.STUDIO_ADMIN_EMAILS = antes;
+  }
 });

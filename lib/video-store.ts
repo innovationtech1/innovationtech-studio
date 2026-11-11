@@ -35,6 +35,7 @@ export type TrabajoVideo = {
   reserva: { mes: string; delMes: number; delSaldo: number }; // lo que hay que devolver si falla
   cacheLlave: string;
   desdeCache?: boolean;
+  error?: string; // motivo del último fallo (para el administrador; sin datos secretos)
 };
 
 export type OpcionesEnvio = { costo: number; dia: string; tope: number; simultaneos: number; ahora: number };
@@ -49,6 +50,8 @@ export interface VideoStore {
   // Los que esperan turno: por prioridad y luego del más viejo al más nuevo.
   trabajosEnFila(limite: number): Promise<TrabajoVideo[]>;
   trabajosEnviados(): Promise<TrabajoVideo[]>;
+  // Los actualizados desde `ms`, del más nuevo al más viejo (para el resumen del administrador).
+  trabajosDesde(ms: number, limite: number): Promise<TrabajoVideo[]>;
   contarEnviados(): Promise<number>;
   // Aparta el envío en UNA transacción: el trabajo pasa de en_fila a enviado y su costo se suma al
   // gasto del día. No cambia nada si ya no está en fila, si el gasto pasaría del tope o si ya hay
@@ -111,6 +114,9 @@ export function firestoreVideoStore(): VideoStore {
       return (await porEstado("en_fila")).sort(ordenFila).slice(0, limite);
     },
     trabajosEnviados: () => porEstado("enviado"),
+    async trabajosDesde(ms, limite) {
+      return (await trabajos().where("actualizado", ">=", ms).orderBy("actualizado", "desc").limit(limite).get()).docs.map(deDoc);
+    },
     async contarEnviados() {
       return (await trabajos().where("estado", "==", "enviado").count().get()).data().count;
     },

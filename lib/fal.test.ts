@@ -99,3 +99,12 @@ test("entradaDeModelo: cada familia de modelos recibe los parámetros que acepta
     image_url: "https://img", prompt: "Subtle natural motion, slow cinematic camera move", duration: "5", resolution: "480p",
   });
 });
+
+test("enviarAFal: el error dice el motivo probable (clave, saldo, parámetros) y el detalle de fal", async () => {
+  const con = (status: number, cuerpo: unknown) => (async () => Response.json(cuerpo, { status })) as typeof fetch;
+  const pedir = (f: typeof fetch) => enviarAFal("fal-ai/m", { image_url: "u", prompt: "p" }, "https://w", f, "k");
+  await assert.rejects(pedir(con(401, { detail: "Invalid key" })), /\(401\): la clave FAL_KEY no es válida/);
+  await assert.rejects(pedir(con(403, { detail: "User is locked. Reason: Exhausted balance." })), /\(403\): falta saldo en fal\.ai o la cuenta está bloqueada · User is locked\. Reason: Exhausted balance\./);
+  await assert.rejects(pedir(con(422, { detail: [{ msg: "field required", loc: ["body", "prompt"] }] })), /\(422\): fal\.ai no aceptó la foto o los parámetros del modelo/);
+  await assert.rejects(pedir(con(500, "x")), /\(500\)/);
+});
