@@ -5,7 +5,7 @@ export const DURACIONES = [10, 15, 20, 30] as const;
 export type Duracion = (typeof DURACIONES)[number];
 export const SEGUNDOS_TOMA = 5;
 export const MIN_FOTO = 1.5;
-export const MAX_TOMAS = 2;
+export const MAX_TOMAS = 4;
 
 export type Escena = { tipo: "foto" | "toma"; indice: number; segundos: number };
 
@@ -43,4 +43,18 @@ export function planDeEscenas(duracion: number, fotos: number, tomas: number[], 
     // no cabe con cierre: se intenta sin él
   }
   return { escenas: repartirEscenas(duracion, fotos, tomas), cierre: 0 };
+}
+
+// La duración más corta en la que caben esas fotos (de las cuales `tomas` llevan IA), o null si en ninguna.
+export function duracionMinima(fotos: number, tomas: number, cierre: number): Duracion | null {
+  const indices = Array.from({ length: tomas }, (_, i) => i);
+  for (const d of DURACIONES) {
+    try {
+      planDeEscenas(d, fotos, indices, cierre);
+      return d;
+    } catch {
+      // no cabe: se prueba la siguiente
+    }
+  }
+  return null;
 }

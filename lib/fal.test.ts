@@ -85,11 +85,17 @@ test("estadoFal y resultadoFal: solo consultan a fal.run y leen el video", async
   assert.equal(await resultadoFal("https://queue.fal.run/x/requests/r", sinVideo, "k"), null);
 });
 
-test("entradaDeModelo: 5 s; el modelo Wan del demo pide 480p", () => {
-  assert.deepEqual(entradaDeModelo("fal-ai/kling-video/v2.5-turbo/pro/image-to-video", "https://img", "zoom", 5), {
+test("entradaDeModelo: cada familia de modelos recibe los parámetros que acepta", () => {
+  // MiniMax H3: duración en número, resolución y expansión del texto
+  assert.deepEqual(entradaDeModelo({ id: "minimax/h3-max-turbo/image-to-video", resolucion: "768P" }, "https://img", "zoom", 5), {
+    image_url: "https://img", prompt: "zoom", duration: 5, resolution: "768P", prompt_expansion_mode: "balanced",
+  });
+  // Kling: duración como texto, sin resolución
+  assert.deepEqual(entradaDeModelo({ id: "fal-ai/kling-video/v2.5-turbo/pro/image-to-video" }, "https://img", "zoom", 5), {
     image_url: "https://img", prompt: "zoom", duration: "5",
   });
-  assert.deepEqual(entradaDeModelo("fal-ai/wan-25-preview/image-to-video", "https://img", "", 5), {
+  // Otros (Wan…): duración como texto y la resolución que diga la configuración; sin movimiento va uno genérico
+  assert.deepEqual(entradaDeModelo({ id: "fal-ai/wan-25-preview/image-to-video", resolucion: "480p" }, "https://img", "", 5), {
     image_url: "https://img", prompt: "Subtle natural motion, slow cinematic camera move", duration: "5", resolution: "480p",
   });
 });

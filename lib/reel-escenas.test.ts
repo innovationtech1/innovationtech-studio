@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DURACIONES, SEGUNDOS_TOMA, maxFotos, planDeEscenas, repartirEscenas } from "./reel-escenas";
+import { DURACIONES, SEGUNDOS_TOMA, duracionMinima, maxFotos, planDeEscenas, repartirEscenas } from "./reel-escenas";
 
 const suma = (e: { segundos: number }[]) => e.reduce((a, x) => a + x.segundos, 0);
 const casi = (a: number, b: number) => assert.ok(Math.abs(a - b) < 1e-9, `${a} ≠ ${b}`);
@@ -51,7 +51,8 @@ test("solo fotos con IA: deben llenar justo la duración", () => {
 });
 
 test("tomas inválidas: más de 2, repetidas, fuera de rango o sin fotos", () => {
-  assert.throws(() => repartirEscenas(30, 5, [0, 1, 2]), /máximo 2/);
+  assert.throws(() => repartirEscenas(30, 6, [0, 1, 2, 3, 4]), /máximo 4/);
+  assert.equal(repartirEscenas(30, 5, [0, 1, 2, 3]).filter((e) => e.tipo === "toma").length, 4);
   assert.throws(() => repartirEscenas(30, 5, [1, 1]));
   assert.throws(() => repartirEscenas(30, 5, [5]));
   assert.throws(() => repartirEscenas(10, 0, []), /al menos una/);
@@ -67,4 +68,14 @@ test("planDeEscenas: deja 3 s de cierre con la marca si caben; si no, el video v
   const justo = planDeEscenas(10, 6, [], 3); // 6 fotos necesitan 9 s: no cabe el cierre
   assert.equal(justo.cierre, 0);
   casi(suma(justo.escenas), 10);
+});
+
+test("duracionMinima: la duración más corta donde caben las fotos y las tomas (con o sin cierre)", () => {
+  assert.equal(duracionMinima(2, 1, 3), 10); // 5 de toma + foto + cierre
+  assert.equal(duracionMinima(2, 2, 3), 10); // dos tomas llenan justo 10 s (sin cierre)
+  assert.equal(duracionMinima(3, 3, 3), 15);
+  assert.equal(duracionMinima(4, 3, 3), 20); // 15 de tomas + 1 foto (+ cierre)
+  assert.equal(duracionMinima(4, 4, 3), 20);
+  assert.equal(duracionMinima(6, 4, 3), 30);
+  assert.equal(duracionMinima(20, 4, 3), null); // no cabe en ninguna
 });

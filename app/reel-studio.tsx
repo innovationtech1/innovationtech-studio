@@ -24,7 +24,7 @@ import { DEFAULT_VOICE, findVoice } from "@/lib/voices";
 import { getLang } from "@/lib/i18n";
 import VoicePicker from "./voice-picker";
 import { ProTag, refrescarCuenta, useCuenta } from "./account-context";
-import { DURACIONES, MAX_TOMAS, maxFotos } from "@/lib/reel-escenas";
+import { DURACIONES, MAX_TOMAS, duracionMinima } from "@/lib/reel-escenas";
 import { firmaTomas, terminado, textoEstado, type TrabajoVisto } from "@/lib/estados-video";
 import { consultarTomas, pedirTomas, prepararFoto, subirFoto } from "@/lib/video-ia-cliente";
 
@@ -316,14 +316,16 @@ export default function ReelStudio({
       setVoice(data.audio);
     });
 
-  // Marca o desmarca una foto «con IA» (máximo 2). Las tomas necesitan un video de duración fija.
+  // Marca o desmarca una foto «con IA» (máximo 4). Las tomas necesitan un video de duración fija.
   function marcarIa(i: number, on: boolean) {
     if (on && tomasMarcadas >= MAX_TOMAS) return setError(`Puedes marcar máximo ${MAX_TOMAS} fotos con IA por video.`);
     setError("");
     setScene(i, { ia: on });
-    if (on && !duracion) {
+    if (on) {
+      // Si con una toma más ya no caben en la duración elegida, se pasa a la más corta donde sí caben
       const fotos = scenes.filter((s) => s.image).length;
-      setDuracion(DURACIONES.find((d) => maxFotos(d - 3, tomasMarcadas + 1) >= fotos) ?? 30);
+      const minima = duracionMinima(fotos, tomasMarcadas + 1, 3) ?? DURACIONES[DURACIONES.length - 1];
+      if (!duracion || duracion < minima) setDuracion(minima);
     }
   }
 
@@ -371,7 +373,7 @@ export default function ReelStudio({
     run("Preparando las tomas con IA…", async () => {
       const ready = scenes.filter((s) => s.image);
       const marcadas = ready.flatMap((s, i) => (s.ia ? [{ i, s }] : []));
-      if (marcadas.length === 0) throw new Error("Marca 1 o 2 fotos «con IA».");
+      if (marcadas.length === 0) throw new Error("Marca de 1 a 4 fotos «con IA».");
       if (!duracion) throw new Error("Elige la duración del video (10, 15, 20 o 30 s).");
       setInvitarPlan(false);
       const fotos = await Promise.all(marcadas.map((m) => prepararFoto(m.s.image)));

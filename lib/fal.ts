@@ -7,18 +7,31 @@ import { createHash, createPublicKey, verify } from "node:crypto";
 export const falConfigurado = () => !!(process.env.FAL_KEY ?? "").trim();
 const claveDeEntorno = () => (process.env.FAL_KEY ?? "").trim();
 
-export type EntradaFal = { image_url: string; prompt: string; duration?: string; resolution?: string };
+export type EntradaFal = {
+  image_url: string;
+  prompt: string;
+  duration?: string | number;
+  resolution?: string;
+  prompt_expansion_mode?: string;
+};
 
 const MOVIMIENTO_BASE = "Subtle natural motion, slow cinematic camera move";
 
-// Lo que se le manda al modelo. Los modelos Wan aceptan resolución: el demo usa la más económica (480p).
-export function entradaDeModelo(modelo: string, imagenUrl: string, movimiento: string, segundos: number): EntradaFal {
-  return {
-    image_url: imagenUrl,
-    prompt: movimiento.trim() || MOVIMIENTO_BASE,
-    duration: String(segundos),
-    ...(/(^|\/)wan/i.test(modelo) ? { resolution: "480p" } : {}),
-  };
+// Lo que se le manda al modelo. Cada familia acepta parámetros distintos:
+// - MiniMax (H3): duración en número, resolución ("480P", "768P") y expansión del texto.
+// - Kling: duración como texto ("5"), sin resolución.
+// - Los demás (Wan…): duración como texto y resolución si la configuración la trae.
+export function entradaDeModelo(
+  modelo: { id: string; resolucion?: string },
+  imagenUrl: string,
+  movimiento: string,
+  segundos: number,
+): EntradaFal {
+  const base = { image_url: imagenUrl, prompt: movimiento.trim() || MOVIMIENTO_BASE };
+  const resolucion = modelo.resolucion ? { resolution: modelo.resolucion } : {};
+  if (/^minimax\//i.test(modelo.id)) return { ...base, duration: segundos, ...resolucion, prompt_expansion_mode: "balanced" };
+  if (/kling/i.test(modelo.id)) return { ...base, duration: String(segundos) };
+  return { ...base, duration: String(segundos), ...resolucion };
 }
 
 // Solo ids con forma de modelo (letras, números, guiones, puntos y diagonales): nunca una URL armada por otro.

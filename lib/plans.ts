@@ -31,7 +31,8 @@ export const PAQUETES: PaqueteId[] = ["creativo", "voz", "video"];
 
 // Video con IA (tomas de 5 s generadas en fal.ai). Todo editable en la configuración.
 export type NivelModelo = "demo" | "estandar";
-export type ModeloVideo = { id: string; centavosPorSegundo: number };
+// resolucion: la que se le pide al modelo (si el modelo la acepta); cambia el precio por segundo.
+export type ModeloVideo = { id: string; centavosPorSegundo: number; resolucion?: string };
 export type ConfigVideoIa = {
   modelos: Record<NivelModelo, ModeloVideo>;
   segundosToma: number;
@@ -90,8 +91,9 @@ export const DEFAULT_CONFIG: PlanesConfig = {
   pruebaMinutos: 10,
   videoIa: {
     modelos: {
-      demo: { id: "fal-ai/wan-25-preview/image-to-video", centavosPorSegundo: 5 },
-      estandar: { id: "fal-ai/kling-video/v2.5-turbo/pro/image-to-video", centavosPorSegundo: 7 },
+      // MiniMax H3 Max Turbo en fal.ai: $0.025/s a 480P y $0.04/s a 768P (precio normal desde el 16 nov 2026)
+      demo: { id: "minimax/h3-max-turbo/image-to-video", centavosPorSegundo: 2.5, resolucion: "480P" },
+      estandar: { id: "minimax/h3-max-turbo/image-to-video", centavosPorSegundo: 4, resolucion: "768P" },
     },
     segundosToma: 5,
     topeDiarioCentavos: 500,
