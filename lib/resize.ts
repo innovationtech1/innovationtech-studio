@@ -2,6 +2,25 @@
 // Así las fotos del celular (que pesan varios MB) viajan ligeras y caben
 // en los límites del servidor (Netlify/Vercel) y de los proveedores.
 
+// Reduce una imagen que ya está como data URL (por ejemplo, una foto de la cámara) al lado máximo indicado.
+export async function dataUrlReducida(src: string, maxSide: number, quality = 0.88): Promise<string> {
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("No se pudo leer la imagen."));
+    el.src = src;
+  });
+  const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+  if (scale === 1) return src;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(img.width * scale));
+  canvas.height = Math.max(1, Math.round(img.height * scale));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Tu navegador no permite procesar la imagen.");
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
 export async function fileToResizedDataUrl(
   file: File,
   maxSide: number,

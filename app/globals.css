@@ -176,6 +176,13 @@ footer a { color: var(--paper); }
 .pick { width: 96px; height: 96px; margin: 0; display: flex; align-items: center; justify-content: center; text-align: center; border: 1.5px dashed var(--line); border-radius: var(--radius-ctl); cursor: pointer; color: var(--fog); font-size: 13px; padding: 6px; transition: border-color 0.15s, color 0.15s; }
 .pick:hover { border-color: var(--signal); color: var(--paper); }
 .pick input { display: none; }
+button.pick { background: none; font: inherit; }
+.camara-caja { width: min(560px, 100%); }
+.camara-vista { position: relative; background: #000; border-radius: var(--radius-ctl); overflow: hidden; min-height: 220px; display: grid; place-items: center; }
+.camara-vista video { width: 100%; max-height: 60vh; display: block; object-fit: contain; }
+.camara-vista > .muted { position: absolute; }
+.camara-ultima { position: absolute; right: 10px; bottom: 10px; width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 2px solid var(--paper); }
+.camara-botones { justify-content: center; }
 
 .install-bar {
   position: fixed; left: 50%; transform: translateX(-50%);
