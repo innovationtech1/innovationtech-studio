@@ -1001,6 +1001,8 @@ export const EN: Record<string, string> = {
   "Voces": "Voices",
   "Subtítulos": "Subtitles",
   "Tomas con IA": "AI shots",
+  "El servidor tardó demasiado en responder. Intenta de nuevo; si es la voz, prueba con un guion más corto.": "The server took too long to respond. Try again; if it's the voice, try a shorter script.",
+  "La voz tardó demasiado en generarse y no se descontó. Intenta de nuevo; si se repite, usa un guion más corto.": "The voice took too long to generate and wasn't counted. Try again; if it keeps happening, use a shorter script.",
   "¿Cerrar sesión?": "Sign out?",
   "Tu galería, «Mi marca» y tus ajustes se quedan guardados en este dispositivo para la próxima vez que entres.": "Your gallery, “My brand” and your settings stay saved on this device for the next time you sign in.",
   "Otras personas usan este dispositivo: borrar de aquí mi galería, «Mi marca» y mis claves propias": "Other people use this device: delete my gallery, “My brand” and my own keys from here",
