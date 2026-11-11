@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { consultar, crearVideo, despachar, procesarAviso, type DepsVideo } from "./video-ia";
+import { baseDePedido, consultar, crearVideo, despachar, procesarAviso, type DepsVideo } from "./video-ia";
 import type { Usuario } from "./account-store";
 import { memoryStore } from "./account-store-memory";
 import { memoryVideoStore } from "./video-store-memory";
@@ -408,4 +408,19 @@ test("consultar no empuja la fila si mis tomas ya se están generando (cuida las
   m.estado.now = AHORA + 16 * MIN;
   await consultar("u1", [r.ok ? r.trabajos[0].id : ""], { ...m.deps, videos: contando });
   assert.equal(candados, 1);
+});
+
+test("baseDePedido: el aviso de fal va a la misma versión del sitio que recibió el pedido", () => {
+  const env = { URL: "https://innovationtech-studio.netlify.app" };
+  const pedido = (host: string) => new Request("https://interno.example/api/video-ia", { headers: { "x-forwarded-host": host } });
+  // Versión de prueba: NO debe irse al sitio principal
+  assert.equal(baseDePedido(pedido("pruebas--innovationtech-studio.netlify.app"), env), "https://pruebas--innovationtech-studio.netlify.app");
+  assert.equal(baseDePedido(pedido("innovationtech-studio.netlify.app"), env), "https://innovationtech-studio.netlify.app");
+  // Un host ajeno (encabezado falsificado) no se usa: se queda con el sitio principal
+  assert.equal(baseDePedido(pedido("malo.example"), env), "https://innovationtech-studio.netlify.app");
+  assert.equal(baseDePedido(pedido("x--otro-sitio.netlify.app"), env), "https://innovationtech-studio.netlify.app");
+  // STUDIO_URL manda
+  assert.equal(baseDePedido(pedido("pruebas--innovationtech-studio.netlify.app"), { ...env, STUDIO_URL: "https://studio.mx/" }), "https://studio.mx");
+  // Sin datos de Netlify (computadora local): el origen del pedido
+  assert.equal(baseDePedido(new Request("http://localhost:3000/api/video-ia"), {}), "http://localhost:3000");
 });

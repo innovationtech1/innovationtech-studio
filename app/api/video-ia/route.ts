@@ -1,11 +1,11 @@
 import { cuerpoJson, errorJson, json, sesionDe, sinSesion } from "@/lib/cuenta-ruta";
-import { baseDeEntorno, consultar, crearVideo } from "@/lib/video-ia";
+import { baseDePedido, consultar, crearVideo } from "@/lib/video-ia";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-// Si Netlify no dio la dirección pública, se usa la del propio pedido (para el aviso de fal).
-const base = (req: Request) => baseDeEntorno() ?? new URL(req.url).origin;
+// El aviso de fal debe volver a esta misma versión del sitio.
+const base = (req: Request) => baseDePedido(req);
 
 // Crea las tomas con IA de un video (1 o 2 fotos). Responde con el id y estado de cada toma.
 export async function POST(req: Request) {
