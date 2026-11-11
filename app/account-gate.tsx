@@ -5,13 +5,14 @@ import { usePathname } from "next/navigation";
 import { X } from "lucide-react";
 import { installAuthFetch } from "@/lib/auth-fetch";
 import { mensajeAuth } from "@/lib/auth-mensajes";
-import { guardarUltimoUid, leerUltimoUid, limpiarDispositivo } from "@/lib/limpiar-dispositivo";
+import { guardarUltimoUid, leerUltimoUid, limpiarAlSalir, limpiarDispositivo } from "@/lib/limpiar-dispositivo";
 import { ContextoCuenta, registrarRefresco, type Cuenta, type ValorCuenta, marcarDemoALaVista, useDemoALaVista } from "./account-context";
 import {
   abrirPortal,
   Bienvenida,
   Cargando,
   CrearNegocio,
+  CerrarSesion,
   ElegirPlan,
   ErrorCarga,
   MiCuenta,
@@ -33,10 +34,6 @@ type Aviso = { texto: string; pro?: boolean; paquetes?: boolean };
 // gratis de Firestore, compartidas con NOVA). También al volver a la pestaña y después de cada acción.
 const CADA = 5 * 60_000;
 
-const PREGUNTA_SALIR =
-  "Vamos a cerrar tu sesión y a borrar de este dispositivo tus claves propias (Cloudflare, Anthropic, Replicate).\n\n" +
-  "¿Quieres borrar también la galería y «Mi marca» guardadas en este dispositivo? Hazlo si otras personas lo usan.\n\n" +
-  "Aceptar: borrar también · Cancelar: conservarlas";
 const PREGUNTA_OTRA_PERSONA =
   "Entró otra cuenta en este dispositivo. Borramos las claves propias que había guardadas.\n\n" +
   "¿Quieres borrar también la galería y «Mi marca» de la persona anterior?\n\n" +
@@ -250,19 +247,22 @@ export default function AccountGate({ children }: { children: React.ReactNode })
     [sesion, cuenta, refrescar],
   );
 
-  // «Cerrar sesión» (desde cualquier pantalla): antes se borran del dispositivo las claves propias
-  // y se pregunta si también la galería y «Mi marca»
+  // «Cerrar sesión» (desde cualquier pantalla) abre una confirmación propia. Por defecto no borra nada
+  // del dispositivo; solo si la persona marca que es compartido (ver CerrarSesion).
+  const [confirmarSalida, setConfirmarSalida] = useState(false);
   const fbConLimpieza: FB | null = useMemo(
     () =>
       fb && {
         ...fb,
-        salir: async () => {
-          await limpiarDispositivo(PREGUNTA_SALIR);
-          await fb.salir();
-        },
+        salir: async () => setConfirmarSalida(true),
       },
     [fb],
   );
+  async function salirDeVerdad(compartido: boolean) {
+    await limpiarAlSalir(compartido);
+    await fb?.salir();
+    setConfirmarSalida(false);
+  }
   const salir = () => void fbConLimpieza?.salir();
 
   async function pagarReactivar() {
@@ -376,6 +376,7 @@ export default function AccountGate({ children }: { children: React.ReactNode })
           </button>
         </div>
       )}
+      {confirmarSalida && <CerrarSesion onCancelar={() => setConfirmarSalida(false)} onSalir={(c) => void salirDeVerdad(c)} />}
     </ContextoCuenta.Provider>
   );
 }

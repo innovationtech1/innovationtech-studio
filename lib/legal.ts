@@ -263,7 +263,7 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
         titulo: "7. Tus derechos",
         parrafos: [
           `Puedes pedirnos ver, corregir o borrar tus datos. El dueño del negocio puede desconectar la cuenta de Cloudflare en cualquier momento desde Mi cuenta. Escríbenos a ${CONTACTO_LEGAL}; te responderemos en un plazo razonable.`,
-          "Si al cerrar sesión usas un dispositivo compartido, Studio borra de ese navegador tus claves guardadas.",
+          "Al cerrar sesión puedes pedir que Studio borre de ese navegador tus claves guardadas, tu galería y «Mi marca». Hazlo si usas un dispositivo compartido.",
         ],
       },
       {
@@ -339,7 +339,7 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
         titulo: "7. Your rights",
         parrafos: [
           `You can ask us to access, correct or delete your data. The business owner can disconnect the Cloudflare account at any time from My account. Write to ${CONTACTO_LEGAL}; we will reply within a reasonable time.`,
-          "When you sign out on a shared device, Studio deletes your saved keys from that browser.",
+          "When you sign out you can ask Studio to delete your saved keys, your gallery and “My brand” from that browser. Do this if you use a shared device.",
         ],
       },
       {
