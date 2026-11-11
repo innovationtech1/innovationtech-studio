@@ -91,6 +91,15 @@ export async function borrarGaleriaYMarca() {
   await clearItems().catch(() => {});
 }
 
+// Al cerrar sesión: por defecto NO se borra nada (el dispositivo es de quien lo usa).
+// Solo si la persona marca que el dispositivo es compartido se borran sus claves propias,
+// la galería y «Mi marca» de ese navegador.
+export async function limpiarAlSalir(compartido: boolean) {
+  if (!compartido) return;
+  borrarClavesPropias();
+  await borrarGaleriaYMarca();
+}
+
 // Borra las claves y pregunta si también se borran la galería y «Mi marca».
 export async function limpiarDispositivo(pregunta: string) {
   borrarClavesPropias();

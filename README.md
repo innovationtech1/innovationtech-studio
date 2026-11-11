@@ -430,7 +430,7 @@ Notas:
 
 ### Limitaciones conocidas
 
-- La **galería** y **Mi marca** siguen guardándose en el dispositivo, no en la cuenta. Si varias personas usan el mismo aparato, verán lo mismo. Al **cerrar sesión** (o si entra otra persona) Studio borra del dispositivo las claves propias guardadas y pregunta si también quieres borrar la galería y «Mi marca». Cambiará con la Parte 2 (Memoria en la nube).
+- La **galería** y **Mi marca** siguen guardándose en el dispositivo, no en la cuenta. Si varias personas usan el mismo aparato, verán lo mismo. Al **cerrar sesión** no se borra nada, salvo que marques la casilla de «otras personas usan este dispositivo» (borra la galería, «Mi marca» y las claves propias de ese navegador). Si entra **otra cuenta** en el mismo dispositivo, Studio borra las claves propias que había y pregunta si también la galería y «Mi marca». Cambiará con la Parte 2 (Memoria en la nube).
 - Para cuidar las lecturas gratis de Firestore (compartidas con NOVA), la cuenta se vuelve a leer cada 5 minutos solo con la pestaña a la vista, al volver a ella y después de cada acción.
 - El inicio de sesión con Google por redirección, en la app instalada del iPhone, a veces vuelve sin sesión. En ese caso usa correo y contraseña.
 - El dictado con subtítulos (respaldo cuando el navegador no dicta) es solo del plan Pro.
