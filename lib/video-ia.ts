@@ -260,6 +260,8 @@ export async function despachar(deps: DepsVideo = {}): Promise<{ enviados: numbe
 }
 
 async function despacharCon(m: Mundo): Promise<{ enviados: number }> {
+  // Sin cuentas no hay tomas con IA: no se toca la base de datos (el respaldo corre cada 5 min)
+  if (!cuentasActivas()) return { enviados: 0 };
   if (!m.encendido || !m.r2) return { enviados: 0 };
   if (!(await m.videos.tomarCandado(CANDADO, MS_CANDADO, m.ahora))) return { enviados: 0 };
   let enviados = 0;

@@ -481,3 +481,12 @@ test("resumenVideo: solo administrador; da el gasto de hoy, el tope y los últim
     else process.env.STUDIO_ADMIN_EMAILS = antes;
   }
 });
+
+test("con las cuentas apagadas, despachar no hace nada (ni lee ni escribe en la base de datos)", async () => {
+  const m = mundo();
+  let tocado = 0;
+  const vigilado = new Proxy(m.videos, { get: (o, k) => (tocado++, Reflect.get(o, k)) });
+  process.env.STUDIO_CUENTAS = "off";
+  assert.deepEqual(await despachar({ ...m.deps, videos: vigilado }), { enviados: 0 });
+  assert.equal(tocado, 0);
+});

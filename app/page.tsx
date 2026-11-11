@@ -24,6 +24,8 @@ import ContentCalendar from "./content-calendar";
 import AssistantChat from "./assistant-chat";
 import { extract, phrases } from "@/lib/phrases";
 import { BotonCuenta, CUENTAS_ON, MejorarPro, ProTag, useCuenta } from "./account-context";
+import Camara from "./camara";
+import { dataUrlReducida } from "@/lib/resize";
 
 type Tab = "texto" | "imagen" | "editor" | "video" | "galeria" | "marca" | "config";
 
@@ -342,6 +344,7 @@ export default function Home() {
         <ImageStudio
           settings={settings}
           brand={brand}
+          gallery={gallery}
           prompt={imagePrompt}
           setPrompt={setImagePrompt}
           onDone={addToGallery}
@@ -620,6 +623,7 @@ function TextStudio({
 function ImageStudio({
   settings,
   brand,
+  gallery,
   prompt,
   setPrompt,
   onDone,
@@ -628,6 +632,7 @@ function ImageStudio({
 }: {
   settings: Settings;
   brand: Brand;
+  gallery: Item[];
   prompt: string;
   setPrompt: (p: string) => void;
   onDone: (items: Item[]) => void;
@@ -644,6 +649,8 @@ function ImageStudio({
   const [shapeSrc, setShapeSrc] = useState<string | null>(null);
   const [cutResults, setCutResults] = useState<string[]>([]);
   const [refs, setRefs] = useState<string[]>([]);
+  const [camara, setCamara] = useState(false);
+  const [eligiendo, setEligiendo] = useState(false);
   const [urls, setUrls] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -666,6 +673,25 @@ function ImageStudio({
       setError((e as Error).message);
     }
   }
+
+  // Agrega como referencia una imagen que ya está en el dispositivo (foto de la cámara o de la galería)
+  async function addRef(src: string) {
+    setError("");
+    try {
+      const url = await dataUrlReducida(await toDataUrl(src), cfProvider ? 500 : 1280);
+      setRefs((r) => (r.length >= maxRefs ? r : [...r, url]));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  // Foto tomada con la cámara: se guarda en la galería (para usarla después) y entra como referencia
+  async function fotoDeCamara(foto: string) {
+    onDone([{ kind: "imagen", url: foto, prompt: "Foto de la cámara", date: new Date().toISOString() }]);
+    await addRef(foto);
+  }
+
+  const fotosGaleria = gallery.filter((g) => g.kind === "imagen");
 
   async function generate(withoutRefs = false) {
     setLoading(true);
@@ -840,7 +866,26 @@ function ImageStudio({
             <span>＋ Subir foto</span>
           </label>
         )}
+        {refs.length < maxRefs && (
+          <button type="button" className="pick" onClick={() => setCamara(true)}>
+            <span>📷 Tomar foto</span>
+          </button>
+        )}
+        {refs.length < maxRefs && (
+          <button type="button" className="pick" onClick={() => setEligiendo((v) => !v)}>
+            <span>🖼 De mi galería</span>
+          </button>
+        )}
       </div>
+      {eligiendo && refs.length < maxRefs && (
+        <div className="picker" style={{ marginTop: 8 }}>
+          {fotosGaleria.length === 0 && <span className="muted">Tu galería está vacía.</span>}
+          {fotosGaleria.slice(0, 36).map((g, k) => (
+            <img key={g.url + k} src={g.url} alt={g.prompt} onClick={() => (void addRef(g.url), setEligiendo(false))} />
+          ))}
+        </div>
+      )}
+      {camara && <Camara onFoto={fotoDeCamara} onCerrar={() => setCamara(false)} lleno={refs.length >= maxRefs} />}
       <p className="hint" style={{ marginTop: 8 }}>
         {refs.length > 0
           ? "La IA usará tus fotos como base. Describe qué quieres: por ejemplo, «put this product on a wooden table with warm light» o «same person, now in a professional studio portrait»."
