@@ -4,6 +4,7 @@ import { jsonAcceso, requireAccess } from "@/lib/account";
 import { DEFAULT_VOICE, findVoice } from "@/lib/voices";
 
 export const maxDuration = 60;
+const TIEMPO_MAXIMO_MS = 25_000;
 
 // Voz en off gratis con Cloudflare Workers AI. Devuelve el audio MP3 como data URL.
 // Voces naturales: Deepgram Aura-2 (español e inglés). Voz básica: MeloTTS.
@@ -27,11 +28,21 @@ export async function POST(req: Request) {
     ? { text: text.slice(0, 1800), speaker: voice.speaker, encoding: "mp3" }
     : { prompt: text.slice(0, 1500), lang: voice.lang };
 
-  const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${voice.model}`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  // Netlify corta la función a los 30 s y entonces la voz descontada no se devolvería: se corta antes
+  // (25 s), se devuelve la voz y se responde con un mensaje claro.
+  let res: Response;
+  try {
+    res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${voice.model}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(TIEMPO_MAXIMO_MS),
+    });
+  } catch {
+    if (c.demo) refund(req, "voice");
+    await acceso.devolver();
+    return jsonError("La voz tardó demasiado en generarse y no se descontó. Intenta de nuevo; si se repite, usa un guion más corto.", 504);
+  }
 
   const type = res.headers.get("content-type") || "";
   if (res.ok && type.startsWith("audio/")) {

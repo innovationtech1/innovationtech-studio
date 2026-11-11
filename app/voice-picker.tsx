@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { Check, Loader2, Play, Square } from "lucide-react";
 import { getLang } from "@/lib/i18n";
 import { SAMPLE, Voice, VOICES } from "@/lib/voices";
+import { friendlyError } from "@/lib/errors";
 
 // Selector de voz: cada voz se puede escuchar antes de elegirla.
 // Las muestras se guardan en memoria para no gastar uso gratis al repetirlas.
@@ -50,7 +51,7 @@ export default function VoicePicker({
         src = data.audio as string;
         samples.set(v.id, src);
       } catch (e) {
-        setError((e as Error).message);
+        setError(friendlyError((e as Error).message));
         return;
       } finally {
         setLoading(null);
