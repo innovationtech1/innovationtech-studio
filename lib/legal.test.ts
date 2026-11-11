@@ -26,3 +26,12 @@ test("VERSION_LEGAL es una fecha AAAA-MM-DD y hay correo de contacto", () => {
   assert.match(VERSION_LEGAL, /^\d{4}-\d{2}-\d{2}$/);
   assert.match(CONTACTO_LEGAL, /^[^\s@]+@[^\s@]+\.[^\s@]+$/);
 });
+
+test("PRIVACIDAD menciona a fal.ai (video con IA) y el almacenamiento de fotos y clips, en es y en", () => {
+  for (const lang of ["es", "en"] as const) {
+    const texto = JSON.stringify(PRIVACIDAD[lang]);
+    assert.match(texto, /fal\.ai/, `${lang}: fal.ai`);
+    assert.match(texto, /Cloudflare R2/, `${lang}: R2`);
+    assert.match(texto, /30 (días|days)/, `${lang}: borrado de la prueba`);
+  }
+});

@@ -226,7 +226,7 @@ test("obtenerCuenta con prueba vencida: sin herramientas y límites en cero", as
   const r = await cuenta("u1", "d@x.com", true, { store, now: AHORA });
   assert.equal(r.efectivo?.estado, "sin_plan");
   assert.deepEqual(r.herramientas, []);
-  assert.deepEqual(r.limites, { textos: 0, imagenes: 0, voces: 0, subtitulos: 0 });
+  assert.deepEqual(r.limites, { textos: 0, imagenes: 0, voces: 0, subtitulos: 0, tomas_ia: 0 });
 });
 
 test("invitado sin correo confirmado: rechazado con VERIFICAR_CORREO y no se crea nada", async () => {
@@ -464,12 +464,12 @@ test("obtenerCuenta: límites del mes, reinicio, saldo y paquetes según el plan
   assert.equal(r.limites?.voces, 250);
   assert.equal(r.reinicio, Date.parse("2026-12-01T06:00:00Z"));
   assert.deepEqual(r.saldo, { voces: 7 });
-  assert.deepEqual(r.paquetes?.map((p) => p.id), ["creativo", "voz"]);
+  assert.deepEqual(r.paquetes?.map((p) => p.id), ["creativo", "voz", "video"]);
   assert.deepEqual(r.paquetes?.find((p) => p.id === "voz")?.contenido, { voces: 100, subtitulos: 100 });
 
   const basico = memoryStore({ usuarios: [dueno], negocios: [negocio({ plan: "basico" })] });
   const b = await cuenta("u1", "dueno@ejemplo.com", true, { store: basico, now: ocho });
-  assert.deepEqual(b.paquetes?.map((p) => p.id), ["creativo"]);
+  assert.deepEqual(b.paquetes?.map((p) => p.id), ["creativo", "video"]);
   assert.deepEqual(b.saldo, {});
 
   const sin = memoryStore({

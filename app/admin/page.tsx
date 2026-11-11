@@ -33,15 +33,16 @@ const origenTexto = (f: FilaNegocio) => (f.negocio.origen === "stripe" ? "Tarjet
 const venceTexto = (f: FilaNegocio) =>
   f.negocio.origen === "manual" && f.negocio.pagadoHasta !== undefined ? fechaCorta(f.negocio.pagadoHasta) : "—";
 const usoTexto = (u: FilaNegocio["usoMes"]) =>
-  `${u.textos} textos · ${u.imagenes} imágenes · ${u.voces} voces · ${u.subtitulos} subtítulos`;
+  `${u.textos} textos · ${u.imagenes} imágenes · ${u.voces} voces · ${u.subtitulos} subtítulos · ${u.tomas_ia ?? 0} tomas con IA`;
 
 const CONTADORES: [Contador, string][] = [
   ["textos", "textos"],
   ["imagenes", "imágenes"],
   ["voces", "voces"],
   ["subtitulos", "subtítulos"],
+  ["tomas_ia", "tomas con IA"],
 ];
-const PAQUETES: Record<PaqueteId, string> = { creativo: "Creativo", voz: "Voz" };
+const PAQUETES: Record<PaqueteId, string> = { creativo: "Creativo", voz: "Voz", video: "Video" };
 // «500 textos · 150 imágenes» (solo lo que tiene); con signo para el historial: «+500 textos, +150 imágenes»
 const saldoTexto = (s: Saldo, signo = "") => {
   const partes = CONTADORES.filter(([c]) => (s[c] ?? 0) > 0).map(([c, n]) => `${signo}${s[c]} ${n}`);
@@ -129,6 +130,7 @@ function Lista() {
         />
         <button className="btn small ghost" onClick={() => void cargar()}>Actualizar</button>
         <PrepararStripe />
+        <ResumenVideo />
       </div>
       {error && <p className="adm-error" role="alert">{error}</p>}
       {!filas && !error && <p>Cargando negocios…</p>}
@@ -149,6 +151,59 @@ function Lista() {
   );
 }
 
+// Video con IA: cuánto se ha gastado hoy en fal.ai, cómo va la fila y por qué fallaron las últimas tomas.
+function ResumenVideo() {
+  type Resumen = {
+    encendido: boolean;
+    gastoHoyCentavos: number;
+    topeCentavos: number;
+    enProceso: number;
+    enFila: number;
+    fallos: { fecha: number; negocio: string; motivo: string }[];
+  };
+  const [datos, setDatos] = useState<Resumen | null>(null);
+  const [error, setError] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+
+  async function ver() {
+    setOcupado(true);
+    setError("");
+    const r = await pedir("/api/admin/video");
+    setOcupado(false);
+    if (r.ok) setDatos(r.datos as unknown as Resumen);
+    else setError(String(r.datos.error ?? "No se pudo leer el resumen de video."));
+  }
+  const dolares = (c: number) => `$${(c / 100).toFixed(2)}`;
+
+  return (
+    <>
+      <button className="btn ghost small" disabled={ocupado} onClick={() => void ver()}>
+        {ocupado ? "Leyendo…" : "Video con IA: ver estado"}
+      </button>
+      {error && <p className="adm-error" role="status">{error}</p>}
+      {datos && (
+        <div className="adm-ok" role="status">
+          <p>
+            {datos.encendido ? "Encendido" : "En pausa (falta configuración o VIDEO_IA=off)"} · Gasto de hoy:{" "}
+            {dolares(datos.gastoHoyCentavos)} de {dolares(datos.topeCentavos)} · Generando: {datos.enProceso} · En fila: {datos.enFila}
+          </p>
+          {datos.fallos.length === 0 ? (
+            <p>Sin fallos en los últimos 7 días.</p>
+          ) : (
+            <ul>
+              {datos.fallos.map((f, i) => (
+                <li key={i} data-no-translate>
+                  {new Date(f.fecha).toLocaleString("es-MX", { timeZone: "America/Chicago", dateStyle: "short", timeStyle: "short" })} · {f.negocio} · {f.motivo}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 // Crea en Stripe los precios de Básico y Pro (si faltan) y guarda sus ids. Se puede pulsar varias veces.
 function PrepararStripe() {
   const [ocupado, setOcupado] = useState(false);
@@ -160,9 +215,9 @@ function PrepararStripe() {
     const r = await pedir("/api/admin/stripe", { method: "POST" });
     setOcupado(false);
     const precios = r.datos.precios as { basico?: string; pro?: string } | undefined;
-    const paquetes = r.datos.paquetes as { creativo?: string; voz?: string } | undefined;
+    const paquetes = r.datos.paquetes as { creativo?: string; voz?: string; video?: string } | undefined;
     if (r.ok && precios) {
-      setResultado({ ok: true, texto: `Stripe listo. Básico: ${precios.basico} · Pro: ${precios.pro}${paquetes ? ` · Creativo: ${paquetes.creativo} · Voz: ${paquetes.voz}` : ""}` });
+      setResultado({ ok: true, texto: `Stripe listo. Básico: ${precios.basico} · Pro: ${precios.pro}${paquetes ? ` · Creativo: ${paquetes.creativo} · Voz: ${paquetes.voz} · Video: ${paquetes.video}` : ""}` });
     } else {
       setResultado({ ok: false, texto: String(r.datos.error ?? "No se pudo preparar Stripe.") });
     }
@@ -395,7 +450,7 @@ function FormActivar({
 
 // Suma a mano un paquete pagado en efectivo, Zelle, Cash App u otro (queda en el Historial).
 // Solo se pueden elegir los paquetes del plan guardado del negocio (el servidor también lo revisa).
-const PAQUETE_TEXTO: Record<PaqueteId, string> = { creativo: "Creativo (textos e imágenes)", voz: "Voz (voces y subtítulos)" };
+const PAQUETE_TEXTO: Record<PaqueteId, string> = { creativo: "Creativo (textos e imágenes)", voz: "Voz (voces y subtítulos)", video: "Video (tomas con IA)" };
 const paquetesDelPlan = (plan: Negocio["plan"]) =>
   (Object.keys(PAQUETE_TEXTO) as PaqueteId[]).filter((p) => !!plan && DEFAULT_CONFIG.paquetes[p].planes.includes(plan));
 
@@ -465,7 +520,7 @@ function FormQuitar({
   onCancelar: () => void;
   onEnviar: (c: Record<string, unknown>) => Promise<void>;
 }) {
-  const [cantidades, setCantidades] = useState<Record<Contador, string>>({ textos: "", imagenes: "", voces: "", subtitulos: "" });
+  const [cantidades, setCantidades] = useState<Record<Contador, string>>({ textos: "", imagenes: "", voces: "", subtitulos: "", tomas_ia: "" });
   const [nota, setNota] = useState("");
   const [error, setError] = useState("");
 

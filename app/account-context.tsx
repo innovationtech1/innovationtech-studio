@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext } from "react";
+import { createContext, useContext, useSyncExternalStore } from "react";
 import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { UserRound } from "lucide-react";
@@ -66,15 +66,19 @@ export function refrescarCuenta(): Promise<void> {
 }
 
 // ¿Puede usar esta herramienta? Con las cuentas apagadas, siempre sí.
-export function usePuede(h: Herramienta): boolean {
+// soloPro: además pide el plan Pro (el video de Replicate: las tomas con IA sí son de todos los planes).
+export function usePuede(h: Herramienta, soloPro = false): boolean {
   const { activo, cuenta } = useCuenta();
   if (!activo || !cuenta || !cuenta.usuario) return true;
+  if (soloPro && cuenta.efectivo?.plan !== "pro") return false;
+  // Con saldo del paquete Video, el Creador de Reels es suyo aunque el plan sea Básico
+  if (h === "reels" && (cuenta.saldo.tomas_ia ?? 0) > 0) return true;
   return cuenta.herramientas.includes(h);
 }
 
 // Etiqueta «Pro» junto al nombre de una herramienta que el plan no incluye
-export function ProTag({ h }: { h: Herramienta }) {
-  const puede = usePuede(h);
+export function ProTag({ h, soloPro }: { h: Herramienta; soloPro?: boolean }) {
+  const puede = usePuede(h, soloPro);
   if (puede) return null;
   return (
     <>
@@ -85,8 +89,8 @@ export function ProTag({ h }: { h: Herramienta }) {
 }
 
 // Aviso con «Mejorar a Pro» encima de una herramienta que el plan no incluye
-export function MejorarPro({ h }: { h: Herramienta }) {
-  const puede = usePuede(h);
+export function MejorarPro({ h, soloPro }: { h: Herramienta; soloPro?: boolean }) {
+  const puede = usePuede(h, soloPro);
   const { abrirPlanes } = useCuenta();
   if (puede) return null;
   return (
@@ -110,5 +114,23 @@ export function BotonCuenta() {
       <UserRound size={16} aria-hidden />
       <span>Mi cuenta</span>
     </button>
+  );
+}
+
+// «Demo a la vista»: el Creador de Reels avisa que está generando o mostrando el video del demo gratis.
+// Mientras esté así, si la prueba vence no se tapa la pantalla con «Elige un plan»: el cliente ve su video.
+// (El servidor igual deja de aceptar pedidos nuevos cuando la prueba termina.)
+let demoALaVista = false;
+const oyentesDemo = new Set<() => void>();
+export function marcarDemoALaVista(v: boolean): void {
+  if (demoALaVista === v) return;
+  demoALaVista = v;
+  oyentesDemo.forEach((f) => f());
+}
+export function useDemoALaVista(): boolean {
+  return useSyncExternalStore(
+    (f) => (oyentesDemo.add(f), () => oyentesDemo.delete(f)),
+    () => demoALaVista,
+    () => false,
   );
 }

@@ -15,6 +15,10 @@ import {
   mezclarConfig,
   pasarATarjetaDisponible,
   puedeUsar,
+  costoTomaCentavos,
+  modeloDePlan,
+  normalizarMovimiento,
+  prioridadToma,
   type Negocio,
 } from "./plans";
 
@@ -104,7 +108,7 @@ test("puedeUsar: herramientas por plan", () => {
   assert.equal(puedeUsar(DEFAULT_CONFIG, "basico", "reels"), false);
   assert.equal(puedeUsar(DEFAULT_CONFIG, "pro", "reels"), true);
   assert.equal(puedeUsar(DEFAULT_CONFIG, "prueba", "voz"), true);
-  assert.equal(puedeUsar(DEFAULT_CONFIG, "prueba", "video_ia"), false);
+  assert.equal(puedeUsar(DEFAULT_CONFIG, "prueba", "video_ia"), true);
   assert.equal(puedeUsar(DEFAULT_CONFIG, "basico", "musica"), true);
 });
 
@@ -195,7 +199,7 @@ test("esPaquete", () => {
   assert.equal(esPaquete(undefined), false);
 });
 test("DEFAULT_CONFIG: topes mensuales y paquetes", () => {
-  assert.deepEqual(DEFAULT_CONFIG.limitesMes.pro, { textos: 3000, imagenes: 1000, voces: 250, subtitulos: 250 });
+  assert.deepEqual(DEFAULT_CONFIG.limitesMes.pro, { textos: 3000, imagenes: 1000, voces: 250, subtitulos: 250, tomas_ia: 20 });
   assert.deepEqual(DEFAULT_CONFIG.paquetes.creativo.contenido, { textos: 500, imagenes: 150 });
   assert.equal(DEFAULT_CONFIG.paquetes.creativo.monto, 5);
   assert.deepEqual(DEFAULT_CONFIG.paquetes.creativo.planes, ["basico", "pro"]);
@@ -272,4 +276,61 @@ test("pasarATarjetaDisponible: pausado → no", () => {
 
 test("pasarATarjetaDisponible: sin fecha de pago → no", () => {
   assert.equal(pasarATarjetaDisponible(aMano({ pagadoHasta: undefined }), AHORA), false);
+});
+
+// ── Video híbrido: tomas con IA ──────────────────────────────────────────────
+
+test("tomas con IA: valores por defecto del contador, el paquete y la herramienta", () => {
+  assert.equal(limiteMes(DEFAULT_CONFIG, "prueba", "tomas_ia"), 1);
+  assert.equal(limiteMes(DEFAULT_CONFIG, "basico", "tomas_ia"), 0);
+  assert.equal(limiteMes(DEFAULT_CONFIG, "pro", "tomas_ia"), 20);
+  assert.deepEqual(DEFAULT_CONFIG.paquetes.video, { monto: 15, contenido: { tomas_ia: 20 }, planes: ["basico", "pro"] });
+  for (const plan of ["prueba", "basico", "pro"] as const) assert.equal(puedeUsar(DEFAULT_CONFIG, plan, "video_ia"), true);
+  assert.equal(esPaquete("video"), true);
+});
+
+test("tomas con IA: configuración de video por defecto", () => {
+  assert.deepEqual(DEFAULT_CONFIG.videoIa, {
+    modelos: {
+      demo: { id: "minimax/h3-max-turbo/image-to-video", centavosPorSegundo: 2.5, resolucion: "480P" },
+      estandar: { id: "minimax/h3-max-turbo/image-to-video", centavosPorSegundo: 4, resolucion: "768P" },
+    },
+    segundosToma: 5,
+    topeDiarioCentavos: 500,
+    umbralDemo: 0.8,
+    simultaneos: 3,
+    minutosAtorado: 15,
+    maxIntentos: 2,
+  });
+});
+
+test("mezclarConfig mezcla videoIa sin perder los valores por defecto", () => {
+  const cfg = mezclarConfig({
+    videoIa: { topeDiarioCentavos: 800, modelos: { demo: { id: "fal-ai/otro" } } },
+  } as unknown as Parameters<typeof mezclarConfig>[0]);
+  assert.equal(cfg.videoIa.topeDiarioCentavos, 800);
+  assert.equal(cfg.videoIa.simultaneos, 3);
+  assert.deepEqual(cfg.videoIa.modelos.demo, { id: "fal-ai/otro", centavosPorSegundo: 2.5, resolucion: "480P" });
+  assert.deepEqual(cfg.videoIa.modelos.estandar, DEFAULT_CONFIG.videoIa.modelos.estandar);
+  assert.equal(DEFAULT_CONFIG.videoIa.topeDiarioCentavos, 500);
+  assert.equal(cfg.paquetes.video.monto, 15);
+  assert.equal(mezclarConfig({ limitesMes: { pro: { textos: 5 } } } as never).limitesMes.pro.tomas_ia, 20);
+});
+
+test("tomas con IA: costo, modelo y prioridad", () => {
+  assert.equal(costoTomaCentavos(DEFAULT_CONFIG, "estandar"), 20);
+  assert.equal(costoTomaCentavos(DEFAULT_CONFIG, "demo"), 13);
+  assert.equal(modeloDePlan("prueba"), "demo");
+  assert.equal(modeloDePlan("basico"), "estandar");
+  assert.equal(modeloDePlan("pro"), "estandar");
+  assert.equal(prioridadToma("pro", false), 1);
+  assert.equal(prioridadToma("pro", true), 2);
+  assert.equal(prioridadToma("basico", true), 2);
+  assert.equal(prioridadToma("prueba", false), 3);
+});
+
+test("normalizarMovimiento: minúsculas, espacios simples y máximo 300", () => {
+  assert.equal(normalizarMovimiento("  Zoom   Lento "), "zoom lento");
+  assert.equal(normalizarMovimiento("a\n\tB"), "a b");
+  assert.equal(normalizarMovimiento("x".repeat(400)).length, 300);
 });

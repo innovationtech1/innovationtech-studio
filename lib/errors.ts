@@ -3,6 +3,9 @@
 export function friendlyError(raw: string): string {
   const m = (raw || "").toLowerCase();
   if (m.startsWith("demo_limit:")) return raw.replace(/^DEMO_LIMIT:\s*/, "");
+  // El servidor cortó la respuesta (tardó demasiado) y llegó una página en vez de datos
+  if (/unexpected token|not valid json|json\.parse|did not match the expected pattern/.test(m))
+    return "El servidor tardó demasiado en responder. Intenta de nuevo; si es la voz, prueba con un guion más corto.";
   if (m.includes("credit balance is too low"))
     return "Tu cuenta de Anthropic no tiene crédito. Agrégalo en console.anthropic.com → Plans & Billing y vuelve a intentar.";
   if (m.includes("requires credit") || m.includes("insufficient credit"))

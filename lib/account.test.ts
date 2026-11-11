@@ -473,3 +473,33 @@ test("clave guardada no salta el plan: pausado y sin plan siguen bloqueados", as
   const c = await requireAccess(req(), { herramienta: "voz", contador: "voces", clavePropia: false, cloudflare: true }, { store: voz, verify, now: AHORA, llave: LLAVE });
   assert.ok(!c.ok && c.codigo === "PLAN");
 });
+
+// ── Tomas con IA (video híbrido) ─────────────────────────────────────────────
+const TOMA = { herramienta: "video_ia", contador: "tomas_ia", clavePropia: false } as const;
+
+test("tomas con IA en prueba: 1 incluida sin clave de Replicate; la segunda → 429", async () => {
+  const store = tienda({ estado: "prueba", plan: null, origen: null, pagadoHasta: undefined, pruebaHasta: AHORA + 5 * MIN });
+  const a = await requireAccess(req(), TOMA, { store, verify, now: AHORA });
+  assert.ok(a.ok && a.contado && a.plan === "prueba");
+  assert.deepEqual(a.ok && a.reserva, { delMes: 1, delSaldo: 0 });
+  assert.equal(a.ok && a.mes, MES);
+  const b = await requireAccess(req(), TOMA, { store, verify, now: AHORA });
+  assert.ok(!b.ok && b.status === 429 && b.codigo === "LIMITE");
+});
+
+test("tomas con IA en básico: sin saldo → 429 con «tomas con IA»; con saldo de paquete → ok", async () => {
+  const sin = await requireAccess(req(), TOMA, { store: tienda(), verify, now: AHORA });
+  assert.ok(!sin.ok && sin.status === 429);
+  assert.equal(!sin.ok ? sin.mensaje : "", "Tu plan no incluye tomas con IA. Compra el paquete Video en Mi cuenta para usarlas.");
+  const store = tienda({ paquetes: { tomas_ia: 3 } });
+  const con = await requireAccess(req(), { ...TOMA, unidades: 2 }, { store, verify, now: AHORA });
+  assert.ok(con.ok && con.contado);
+  assert.deepEqual(con.ok && con.reserva, { delMes: 0, delSaldo: 2 });
+  assert.deepEqual((await store.getNegocio("n1"))?.paquetes, { tomas_ia: 1 });
+});
+
+test("la ruta vieja de Replicate (video_ia sin contador de tomas) sigue siendo solo de Pro", async () => {
+  const prueba = tienda({ estado: "prueba", plan: null, origen: null, pagadoHasta: undefined, pruebaHasta: AHORA + 5 * MIN });
+  const a = await requireAccess(req(), { herramienta: "video_ia", clavePropia: true }, { store: prueba, verify, now: AHORA });
+  assert.ok(!a.ok && a.codigo === "PLAN");
+});

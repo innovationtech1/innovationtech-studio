@@ -29,7 +29,7 @@ export type MemoryStore = AccountStore & {
   eventoMarcado(id: string): boolean;
 };
 
-const vacio = (): Uso => ({ textos: 0, imagenes: 0, voces: 0, subtitulos: 0 });
+const vacio = (): Uso => ({ textos: 0, imagenes: 0, voces: 0, subtitulos: 0, tomas_ia: 0 });
 const copia = <T>(v: T): T => structuredClone(v);
 
 export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
@@ -177,6 +177,7 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
         paquetes: {
           creativo: { ...config.paquetes.creativo, ...p.paquetes?.creativo },
           voz: { ...config.paquetes.voz, ...p.paquetes?.voz },
+          video: { ...config.paquetes.video, ...p.paquetes?.video },
         },
       });
     },

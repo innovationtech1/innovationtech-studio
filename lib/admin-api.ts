@@ -233,7 +233,7 @@ export async function quitarManualPendiente(
   return { ok: true };
 }
 
-const CONTADORES: Contador[] = ["textos", "imagenes", "voces", "subtitulos"];
+const CONTADORES: Contador[] = ["textos", "imagenes", "voces", "subtitulos", "tomas_ia"];
 const notaLimpia = (n: unknown) => (typeof n === "string" ? n.trim().slice(0, 300) : "");
 
 // Suma a mano el contenido de un paquete al saldo. Solo paquetes del plan guardado del negocio

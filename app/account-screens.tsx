@@ -585,6 +585,38 @@ export function PagoPendiente({ onCerrar, mensaje = SIN_TARJETA }: { onCerrar: (
   );
 }
 
+/* ---------------- Cerrar sesión ---------------- */
+
+// Confirmación al cerrar sesión. Por defecto no se borra nada del dispositivo; la casilla es para
+// equipos compartidos (borra claves propias, galería y «Mi marca» de este navegador).
+export function CerrarSesion({ onCancelar, onSalir }: { onCancelar: () => void; onSalir: (compartido: boolean) => void }) {
+  const [compartido, setCompartido] = useState(false);
+  const [saliendo, setSaliendo] = useState(false);
+  return (
+    <div className="welcome-backdrop acct-capa" role="dialog" aria-modal="true" aria-label="Cerrar sesión">
+      <div className="acct-caja">
+        <button className="acct-cerrar" onClick={onCancelar} title="Cerrar" disabled={saliendo}>
+          <X size={20} aria-hidden />
+        </button>
+        <h2>¿Cerrar sesión?</h2>
+        <p className="muted">Tu galería, «Mi marca» y tus ajustes se quedan guardados en este dispositivo para la próxima vez que entres.</p>
+        <label className="check">
+          <input type="checkbox" checked={compartido} onChange={(e) => setCompartido(e.target.checked)} disabled={saliendo} />
+          Otras personas usan este dispositivo: borrar de aquí mi galería, «Mi marca» y mis claves propias
+        </label>
+        <div className="actions">
+          <button className="btn ghost" onClick={onCancelar} disabled={saliendo}>
+            Cancelar
+          </button>
+          <button className="btn" disabled={saliendo} onClick={() => (setSaliendo(true), onSalir(compartido))}>
+            {saliendo ? "Cerrando…" : "Cerrar sesión"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- Mi cuenta ---------------- */
 
 const NOMBRE_PLAN: Record<string, string> = { prueba: "Prueba Pro", basico: "Básico", pro: "Pro" };
@@ -601,6 +633,7 @@ const CONTADORES: [keyof CuentaConNegocio["uso"], string][] = [
   ["imagenes", "Imágenes"],
   ["voces", "Voces"],
   ["subtitulos", "Subtítulos"],
+  ["tomas_ia", "Tomas con IA"],
 ];
 
 export function MiCuenta({
