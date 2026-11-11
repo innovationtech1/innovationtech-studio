@@ -124,6 +124,11 @@ export default function ReelStudio({
   const [estadoIa, setEstadoIa] = useState("");
   const [invitarPlan, setInvitarPlan] = useState(false);
   const subidas = useRef(new Map<string, string>()); // sha256 → llave de la foto ya subida
+  // Voces ya generadas en esta sesión (voz + guion → audio): cambiar entre ellas es al instante y no gasta
+  const vocesHechas = useRef(new Map<string, string>());
+  // Los clips de IA del último video: para volver a grabarlo (otra voz, música o texto) sin pedirlos de nuevo
+  const ultimosClips = useRef<{ firma: string; clips: (string | null)[]; cuando: number } | null>(null);
+  const [vozCambio, setVozCambio] = useState(false);
   const { activo: cuentasOn, cuenta, abrirPlanes } = useCuenta();
   const conCuenta = cuentasOn && !!cuenta?.usuario;
   const esDemo = !!cuenta?.usuario && cuenta.efectivo.plan === "prueba";
@@ -303,18 +308,35 @@ export default function ReelStudio({
       if (failed) throw failed;
     });
 
-  const makeVoice = () =>
+  const makeVoice = (id: string = voiceId) =>
     run("Generando voz…", async () => {
       if (!script.trim()) throw new Error("Escribe el guion de la voz en off.");
-      const res = await fetch("/api/voice", {
-        method: "POST",
-        headers: { "content-type": "application/json", ...cfHeaders },
-        body: JSON.stringify({ text: script, lang: getLang(), voice: findVoice(voiceId)?.lang === getLang() ? voiceId : DEFAULT_VOICE[getLang()] }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      setVoice(data.audio);
+      const voz = findVoice(id)?.lang === getLang() ? id : DEFAULT_VOICE[getLang()];
+      const llave = `${voz}|${script}`;
+      let audio = vocesHechas.current.get(llave);
+      if (!audio) {
+        const res = await fetch("/api/voice", {
+          method: "POST",
+          headers: { "content-type": "application/json", ...cfHeaders },
+          body: JSON.stringify({ text: script, lang: getLang(), voice: voz }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        audio = data.audio as string;
+        vocesHechas.current.set(llave, audio);
+      }
+      setVoice(audio);
+      if (result) setVozCambio(true);
     });
+
+  // Elegir otra voz: si ya había una voz generada, la nueva se genera sola con el mismo guion
+  // (o se recupera al instante si ya se había generado antes).
+  function elegirVoz(id: string) {
+    setVoiceId(id);
+    if (!voice) return;
+    if (busy) return setVoice(""); // ocupado (grabando): se genera después con «Generar voz»
+    void makeVoice(id);
+  }
 
   // Marca o desmarca una foto «con IA» (máximo 4). Las tomas necesitan un video de duración fija.
   function marcarIa(i: number, on: boolean) {
@@ -358,6 +380,7 @@ export default function ReelStudio({
         previewCanvas: preview.current || undefined,
       });
       setResult({ url: r.url, ext: r.ext, seconds: r.seconds });
+      setVozCambio(false);
       onVideo(r.blob, `Reel: ${topic || brandName || "sin título"}`); // se guarda solo en la galería
     }
   }
@@ -378,6 +401,16 @@ export default function ReelStudio({
       setInvitarPlan(false);
       const fotos = await Promise.all(marcadas.map((m) => prepararFoto(m.s.image)));
       const firma = firmaTomas(marcadas.map((m, k) => ({ sha256: fotos[k].sha256, movimiento: m.s.movimiento ?? "" })));
+      // Mismas fotos y movimientos que el último video (por ejemplo, solo cambió la voz):
+      // se vuelve a grabar con los clips que ya se tienen, sin pedir nada ni gastar tomas.
+      const firmaVideo = `${firma}@${marcadas.map((m) => m.i).join(",")}/${ready.length}`;
+      const previos = ultimosClips.current;
+      if (previos && previos.firma === firmaVideo && Date.now() - previos.cuando < 50 * 60 * 1000) {
+        setBusy("Grabando tu reel…");
+        await grabar(previos.clips);
+        setEstadoIa(textoEstado({ tipo: "trabajos", trabajos: marcadas.map((_, k) => ({ id: String(k), estado: "listo", desdeCache: true })), topeHoy: false }));
+        return;
+      }
       let ids = pendientes && pendientes.firma === firma ? pendientes.ids : null;
       if (!ids) {
         const llaves: string[] = [];
@@ -419,6 +452,8 @@ export default function ReelStudio({
       const porId = new Map(vistos.map((t) => [t.id, t]));
       const clips: (string | null)[] = ready.map(() => null);
       marcadas.forEach((m, k) => (clips[m.i] = porId.get(ids![k])?.clipUrl ?? null));
+      // Solo se guardan si salieron todas: así un intento posterior vuelve a pedir la que falló
+      if (marcadas.every((m) => clips[m.i])) ultimosClips.current = { firma: firmaVideo, clips, cuando: Date.now() };
       setBusy("Grabando tu reel…");
       await grabar(clips);
       setEstadoIa(textoEstado({ tipo: "trabajos", trabajos: vistos, topeHoy: false }));
@@ -446,6 +481,8 @@ export default function ReelStudio({
             setResult(null);
             setError("");
             setEstadoIa("");
+            setVozCambio(false);
+            ultimosClips.current = null;
             setInvitarPlan(false);
             setPendientes(null);
           }}
@@ -663,18 +700,18 @@ export default function ReelStudio({
         style={{ minHeight: 70 }}
       />
       <label>Elige la voz (toca ▶ para escucharla)</label>
-      <VoicePicker value={voiceId} onChange={(id) => (setVoiceId(id), setVoice(""))} headers={cfHeaders} />
+      <VoicePicker value={voiceId} onChange={elegirVoz} headers={cfHeaders} />
       <p className="hint" style={{ marginTop: 6 }}>
         Para que suene más natural, escribe como hablas: usa comas para las pausas, puntos para respirar y signos de ¡exclamación! o ¿pregunta? para dar emoción.
       </p>
       <div className="actions" style={{ alignItems: "center" }}>
-        <button className="btn ghost small" disabled={!!busy || !script.trim()} onClick={makeVoice}>
+        <button className="btn ghost small" disabled={!!busy || !script.trim()} onClick={() => makeVoice()}>
           <Mic size={16} aria-hidden /> Generar voz
         </button>
         {voice && (
           <>
             <audio src={voice} controls style={{ height: 36, marginTop: 8 }} />
-            <button className="btn ghost small" onClick={() => setVoice("")}>
+            <button className="btn ghost small" onClick={() => (setVoice(""), result && setVozCambio(true))}>
               Sin voz
             </button>
           </>
@@ -773,6 +810,14 @@ export default function ReelStudio({
       </div>
       {duracion > 0 && voice && (
         <p className="hint" style={{ marginTop: 6 }}>Con duración fija, la voz se corta si dura más que el video.</p>
+      )}
+      {!busy && vozCambio && (
+        <div className="acct-upsell">
+          <span>Cambiaste la voz. Actualiza el video para escucharla: no gasta tomas con IA.</span>
+          <button className="btn small" disabled={!canRecord} onClick={conCuenta && tomasMarcadas > 0 ? generarConIa : buildReel}>
+            Actualizar video
+          </button>
+        </div>
       )}
       {!busy && estadoIa && tomasMarcadas > 0 && <div className="notice">{estadoIa}</div>}
       {!busy && invitarPlan && (
