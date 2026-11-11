@@ -7,7 +7,7 @@ export const maxDuration = 60;
 // El aviso de fal debe volver a esta misma versión del sitio.
 const base = (req: Request) => baseDePedido(req);
 
-// Crea las tomas con IA de un video (1 o 2 fotos). Responde con el id y estado de cada toma.
+// Crea las tomas con IA de un video (de 1 a 4 fotos). Responde con el id y estado de cada toma.
 export async function POST(req: Request) {
   const { tomas } = await cuerpoJson(req);
   const r = await crearVideo(req, { tomas }, { base: base(req) });

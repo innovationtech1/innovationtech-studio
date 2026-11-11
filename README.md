@@ -374,13 +374,13 @@ Copia el texto que aparece (termina en `=`) y pégalo como valor de la variable.
 
 ### Videos con IA (fal.ai + Cloudflare R2)
 
-En el **Creador de Reels**, el cliente puede marcar 1 o 2 fotos «Con IA»: cada una se convierte en una **toma de 5 segundos con movimiento real** generada en [fal.ai](https://fal.ai). El resto del video (10, 15, 20 o 30 s) sigue siendo la animación gratis del navegador. La **vista previa es gratis**; solo «Generar con IA» gasta tomas. Necesita las cuentas encendidas.
+En el **Creador de Reels**, el cliente puede marcar de 1 a 4 fotos «Con IA»: cada una se convierte en una **toma de 5 segundos con movimiento real** generada en [fal.ai](https://fal.ai). El resto del video (10, 15, 20 o 30 s) sigue siendo la animación gratis del navegador. La **vista previa es gratis**; solo «Generar con IA» gasta tomas. Necesita las cuentas encendidas.
 
 | | Prueba (demo) | Básico | Pro |
 | --- | --- | --- | --- |
 | Tomas incluidas | 1 | 0 (puede comprar el paquete Video) | 20 al mes |
-| Modelo | Wan 2.5 a 480p | Kling 2.5 Turbo Pro | Kling 2.5 Turbo Pro |
-| Costo para InnovationTECH por toma | ≈ $0.25 | ≈ $0.35 | ≈ $0.35 |
+| Modelo | MiniMax H3 Max Turbo a 480P | MiniMax H3 Max Turbo a 768P | MiniMax H3 Max Turbo a 768P |
+| Costo para InnovationTECH por toma | ≈ $0.13 | ≈ $0.20 | ≈ $0.20 |
 
 Protecciones que ya vienen puestas (se pueden cambiar en Firestore, documento `studio_config/planes`, campo `videoIa`):
 

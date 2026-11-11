@@ -24,7 +24,7 @@ export const EN_PAUSA = "Los videos con IA están en pausa por ahora. Puedes gen
 const SEGUNDOS_ENLACE = 3600;
 const MS_CANDADO = 30_000;
 const CANDADO = "despacho_video";
-const MAX_TOMAS = 2;
+const MAX_TOMAS = 4;
 const MAX_CONSULTA = 10;
 
 export type FalDeps = {
@@ -148,7 +148,7 @@ function tomasValidas(v: unknown): TomaPedida[] | null {
 
 export type TrabajoPublico = { id: string; estado: EstadoTrabajo; lugar?: number; clipUrl?: string; desdeCache?: boolean };
 
-// Crea las tomas con IA de un video (1 o 2). Las que ya están en caché se entregan listas sin descontar.
+// Crea las tomas con IA de un video (de 1 a 4). Las que ya están en caché se entregan listas sin descontar.
 export async function crearVideo(
   req: Request,
   datos: { tomas: unknown },
@@ -174,14 +174,16 @@ export async function crearVideo(
   if (!puedeUsar(cfg, plan, "video_ia")) return falla(403, "Tu plan no incluye videos con IA.", "PLAN");
 
   const tomas = tomasValidas(datos.tomas);
-  if (!tomas) return falla(400, "Elige 1 o 2 fotos para las tomas con IA.");
+  if (!tomas) return falla(400, "Elige de 1 a 4 fotos para las tomas con IA.");
   const nivel = modeloDePlan(plan);
   const modelo = cfg.videoIa.modelos[nivel].id;
+  // En el caché cuenta también la resolución: el clip de la prueba (480P) no sirve para un plan de pago
+  const modeloCache = `${modelo}@${cfg.videoIa.modelos[nivel].resolucion ?? ""}`;
   const preparadas: { toma: TomaPedida; cacheLlave: string; clipKey: string | null }[] = [];
   for (const toma of tomas) {
     const fotoSha = fotoDelNegocio(toma.imagenKey, negocio.id);
     if (!fotoSha) return falla(403, "Esa foto no es de tu cuenta. Súbela de nuevo.");
-    const cacheLlave = llaveCache(negocio.id, fotoSha, toma.movimiento, modelo);
+    const cacheLlave = llaveCache(negocio.id, fotoSha, toma.movimiento, modeloCache);
     preparadas.push({ toma, cacheLlave, clipKey: await m.videos.getCache(cacheLlave) });
   }
 
@@ -282,7 +284,8 @@ async function despacharCon(m: Mundo): Promise<{ enviados: number }> {
       try {
         const imagen = m.r2.firmar("GET", t.imagenKey, SEGUNDOS_ENLACE);
         const webhook = `${m.base}/api/video-ia/aviso?t=${encodeURIComponent(t.id)}&s=${t.secreto}`;
-        const e = await m.fal.enviar(t.modelo, entradaDeModelo(t.modelo, imagen, t.movimiento, v.segundosToma), webhook);
+        const mod = v.modelos[t.nivel];
+        const e = await m.fal.enviar(mod.id, entradaDeModelo(mod, imagen, t.movimiento, v.segundosToma), webhook);
         await m.videos.guardarEnvio(t.id, { falRequestId: e.requestId, statusUrl: e.statusUrl, responseUrl: e.responseUrl });
         enviados += 1;
       } catch (e) {

@@ -292,8 +292,8 @@ test("tomas con IA: valores por defecto del contador, el paquete y la herramient
 test("tomas con IA: configuración de video por defecto", () => {
   assert.deepEqual(DEFAULT_CONFIG.videoIa, {
     modelos: {
-      demo: { id: "fal-ai/wan-25-preview/image-to-video", centavosPorSegundo: 5 },
-      estandar: { id: "fal-ai/kling-video/v2.5-turbo/pro/image-to-video", centavosPorSegundo: 7 },
+      demo: { id: "minimax/h3-max-turbo/image-to-video", centavosPorSegundo: 2.5, resolucion: "480P" },
+      estandar: { id: "minimax/h3-max-turbo/image-to-video", centavosPorSegundo: 4, resolucion: "768P" },
     },
     segundosToma: 5,
     topeDiarioCentavos: 500,
@@ -310,7 +310,7 @@ test("mezclarConfig mezcla videoIa sin perder los valores por defecto", () => {
   } as unknown as Parameters<typeof mezclarConfig>[0]);
   assert.equal(cfg.videoIa.topeDiarioCentavos, 800);
   assert.equal(cfg.videoIa.simultaneos, 3);
-  assert.deepEqual(cfg.videoIa.modelos.demo, { id: "fal-ai/otro", centavosPorSegundo: 5 });
+  assert.deepEqual(cfg.videoIa.modelos.demo, { id: "fal-ai/otro", centavosPorSegundo: 2.5, resolucion: "480P" });
   assert.deepEqual(cfg.videoIa.modelos.estandar, DEFAULT_CONFIG.videoIa.modelos.estandar);
   assert.equal(DEFAULT_CONFIG.videoIa.topeDiarioCentavos, 500);
   assert.equal(cfg.paquetes.video.monto, 15);
@@ -318,8 +318,8 @@ test("mezclarConfig mezcla videoIa sin perder los valores por defecto", () => {
 });
 
 test("tomas con IA: costo, modelo y prioridad", () => {
-  assert.equal(costoTomaCentavos(DEFAULT_CONFIG, "estandar"), 35);
-  assert.equal(costoTomaCentavos(DEFAULT_CONFIG, "demo"), 25);
+  assert.equal(costoTomaCentavos(DEFAULT_CONFIG, "estandar"), 20);
+  assert.equal(costoTomaCentavos(DEFAULT_CONFIG, "demo"), 13);
   assert.equal(modeloDePlan("prueba"), "demo");
   assert.equal(modeloDePlan("basico"), "estandar");
   assert.equal(modeloDePlan("pro"), "estandar");

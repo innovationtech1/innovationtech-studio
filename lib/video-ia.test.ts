@@ -10,8 +10,9 @@ const AHORA = Date.parse("2026-11-10T18:00:00Z");
 const MES = "2026-11";
 const HOY = "2026-11-10";
 const MIN = 60 * 1000;
-const KLING = DEFAULT_CONFIG.videoIa.modelos.estandar.id;
-const WAN = DEFAULT_CONFIG.videoIa.modelos.demo.id;
+const MODELO = DEFAULT_CONFIG.videoIa.modelos.estandar.id;
+const COSTO = 20; // centavos por toma de pago (768P)
+const COSTO_DEMO = 13; // centavos por toma de la prueba (480P)
 const foto = (letra: string, negocioId = "n1", demo = false) => `${demo ? "demo/" : ""}negocios/${negocioId}/fotos/${letra.repeat(64)}.jpg`;
 
 function negocio(extra: Partial<Negocio> = {}): Negocio {
@@ -93,10 +94,12 @@ test("crear: 2 tomas en Pro se descuentan, se despachan al momento y suman al ga
   if (!r.ok) return;
   assert.deepEqual(r.trabajos.map((t) => t.estado), ["enviado", "enviado"]);
   assert.equal(m.store.uso("n1", MES).tomas_ia, 2);
-  assert.equal(await m.videos.getGasto(HOY), 70);
+  assert.equal(await m.videos.getGasto(HOY), 2 * COSTO);
   assert.equal(m.enviados.length, 2);
-  assert.equal(m.enviados[0].modelo, KLING);
-  assert.deepEqual(m.enviados[0].input, { image_url: `https://r2.example/${foto("a")}?m=GET&s=3600`, prompt: "zoom lento", duration: "5" });
+  assert.equal(m.enviados[0].modelo, MODELO);
+  assert.deepEqual(m.enviados[0].input, {
+    image_url: `https://r2.example/${foto("a")}?m=GET&s=3600`, prompt: "zoom lento", duration: 5, resolution: "768P", prompt_expansion_mode: "balanced",
+  });
   const t = (await m.videos.getTrabajo(r.trabajos[0].id))!;
   assert.equal(m.enviados[0].webhook, `https://studio.example/api/video-ia/aviso?t=${t.id}&s=${t.secreto}`);
   assert.equal(t.prioridad, 1);
@@ -110,11 +113,11 @@ test("crear en la prueba gratis: modelo del demo, prioridad 3 y foto bajo demo/"
   const m = mundo(PRUEBA);
   const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a", "n1", true), movimiento: "" }] }, m.deps);
   assert.ok(r.ok);
-  assert.equal(m.enviados[0].modelo, WAN);
-  assert.equal(m.enviados[0].input.resolution, "480p");
+  assert.equal(m.enviados[0].modelo, MODELO);
+  assert.equal(m.enviados[0].input.resolution, "480P");
   const t = m.videos.todos()[0];
   assert.equal(t.prioridad, 3);
-  assert.equal(t.costoCentavos, 25);
+  assert.equal(t.costoCentavos, COSTO_DEMO);
   // La prueba solo incluye 1 toma
   const otra = await crearVideo(req(), { tomas: [{ imagenKey: foto("b", "n1", true), movimiento: "" }] }, m.deps);
   assert.ok(!otra.ok && otra.status === 429);
@@ -146,7 +149,7 @@ test("crear rechaza: sin sesión 401, datos malos 400, foto de otro negocio 403,
   const m = mundo({ plan: "basico" });
   const sin = await crearVideo(new Request("https://studio.example/api/video-ia", { method: "POST" }), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
   assert.ok(!sin.ok && sin.status === 401);
-  for (const tomas of [[], [1], [{ imagenKey: foto("a") }], [{ imagenKey: "x", movimiento: "" }], Array(3).fill({ imagenKey: foto("a"), movimiento: "" }), "no"]) {
+  for (const tomas of [[], [1], [{ imagenKey: foto("a") }], [{ imagenKey: "x", movimiento: "" }], Array(5).fill({ imagenKey: foto("a"), movimiento: "" }), "no"]) {
     const r = await crearVideo(req(), { tomas } as never, m.deps);
     assert.ok(!r.ok && (r.status === 400 || r.status === 403), JSON.stringify(tomas));
   }
@@ -175,7 +178,7 @@ test("doble despacho: dos a la vez no envían el mismo trabajo ni pasan de 3 sim
   assert.equal(m.enviados.length, 3);
   assert.equal(new Set(m.enviados.map((e) => e.webhook)).size, 3);
   assert.equal(await m.videos.contarEnviados(), 3);
-  assert.equal(await m.videos.getGasto(HOY), 105);
+  assert.equal(await m.videos.getGasto(HOY), 3 * COSTO);
   // Sin candado (ya libre), otro despacho tampoco pasa de 3
   assert.deepEqual(await despachar(m.deps), { enviados: 0 });
 });
@@ -190,7 +193,7 @@ test("aviso OK: copia el clip a R2, queda listo, guarda caché y despacha el sig
   assert.equal(t.clipKey, `negocios/n1/clips/${id}.mp4`);
   assert.deepEqual(m.subidas, [{ origen: "https://v3.fal.media/clip.mp4", llave: `negocios/n1/clips/${id}.mp4`, tipo: "video/mp4" }]);
   assert.equal(await m.videos.getCache(t.cacheLlave), t.clipKey);
-  assert.equal(await m.videos.getGasto(HOY), 35);
+  assert.equal(await m.videos.getGasto(HOY), COSTO);
   // fal reenvía el mismo aviso
   assert.deepEqual(await m.aviso(0, m.OK), { status: 200 });
   assert.deepEqual(await m.aviso(0, m.ERROR), { status: 200 });
@@ -238,7 +241,7 @@ test("fallo después de cobrar: 1 reintento; al segundo fallo devuelve la toma a
   assert.equal(t.intentos, 1);
   assert.equal(t.falRequestId, "req-2");
   assert.equal(m.enviados.length, 2);
-  assert.equal(await m.videos.getGasto(HOY), 35);
+  assert.equal(await m.videos.getGasto(HOY), COSTO);
   assert.equal(m.store.uso("n1", MES).tomas_ia, 1);
   // Segundo fallo
   assert.deepEqual(await m.aviso(1, m.ERROR), { status: 200 });
@@ -286,7 +289,7 @@ test("fal no acepta el trabajo al despachar: reintenta una vez y luego falla dev
 });
 
 test("tope del día: el trabajo se queda en fila y sale al día siguiente", async () => {
-  const m = mundo({}, { gasto: { [HOY]: 480 } });
+  const m = mundo({}, { gasto: { [HOY]: 490 } });
   const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
   assert.ok(r.ok && r.trabajos[0].estado === "en_fila");
   assert.equal(m.enviados.length, 0);
@@ -295,15 +298,15 @@ test("tope del día: el trabajo se queda en fila y sale al día siguiente", asyn
   assert.deepEqual(c.ok && c.trabajos, [{ id: r.ok ? r.trabajos[0].id : "", estado: "en_fila", lugar: 1 }]);
   m.estado.now = AHORA + 24 * 60 * MIN;
   assert.deepEqual(await despachar(m.deps), { enviados: 1 });
-  assert.equal(await m.videos.getGasto("2026-11-11"), 35);
+  assert.equal(await m.videos.getGasto("2026-11-11"), COSTO);
 });
 
 test("tope del día: la prueba (demo) se detiene al 80% y los de pago siguen", async () => {
   const m = mundo(PRUEBA, { gasto: { [HOY]: 390 } });
   const demo = await crearVideo(req(), { tomas: [{ imagenKey: foto("a", "n1", true), movimiento: "" }] }, m.deps);
-  assert.ok(demo.ok && demo.trabajos[0].estado === "en_fila"); // 390 + 25 > 400
+  assert.ok(demo.ok && demo.trabajos[0].estado === "en_fila"); // 390 + 13 > 400
   const pro = await crearVideo(req("u2"), { tomas: [{ imagenKey: foto("b", "n2"), movimiento: "" }] }, m.deps);
-  assert.ok(pro.ok && pro.trabajos[0].estado === "enviado"); // 390 + 35 ≤ 500
+  assert.ok(pro.ok && pro.trabajos[0].estado === "enviado"); // 390 + 20 ≤ 500
   const c = await consultar("u1", [demo.ok ? demo.trabajos[0].id : ""], m.deps);
   assert.ok(c.ok && c.topeHoy === true);
 });
@@ -362,7 +365,7 @@ test("atorado más de 15 min: si fal ya terminó se procesa; si no, se reintenta
   assert.equal(t.estado, "enviado");
   assert.equal(t.intentos, 1);
   assert.equal(m2.enviados.length, 2);
-  assert.equal(await m2.videos.getGasto(HOY), 35);
+  assert.equal(await m2.videos.getGasto(HOY), COSTO);
 });
 
 test("consultar: solo trabajos del propio negocio, con lugar en la fila; despacha si hay lugar", async () => {
@@ -423,4 +426,14 @@ test("baseDePedido: el aviso de fal va a la misma versión del sitio que recibi�
   assert.equal(baseDePedido(pedido("pruebas--innovationtech-studio.netlify.app"), { ...env, STUDIO_URL: "https://studio.mx/" }), "https://studio.mx");
   // Sin datos de Netlify (computadora local): el origen del pedido
   assert.equal(baseDePedido(new Request("http://localhost:3000/api/video-ia"), {}), "http://localhost:3000");
+});
+
+test("hasta 4 tomas con IA por video; la prueba y los planes de pago no comparten caché (otra resolución)", async () => {
+  const m = mundo();
+  const r = await crearVideo(req(), { tomas: ["a", "b", "c", "d"].map((l) => ({ imagenKey: foto(l), movimiento: "" })) }, m.deps);
+  assert.ok(r.ok && r.trabajos.length === 4);
+  assert.equal(m.store.uso("n1", MES).tomas_ia, 4);
+  const demo = mundo(PRUEBA);
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a", "n1", true), movimiento: "" }] }, demo.deps);
+  assert.notEqual(demo.videos.todos()[0].cacheLlave, m.videos.todos()[0].cacheLlave);
 });
