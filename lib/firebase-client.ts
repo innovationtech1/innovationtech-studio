@@ -20,6 +20,7 @@ import {
   type User,
 } from "firebase/auth";
 import { getLang } from "./i18n";
+import { dominioDeAuth } from "./auth-dominio";
 
 export type { User };
 
@@ -32,7 +33,12 @@ export function auth(): Auth {
     getApps()[0] ??
     initializeApp({
       apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-      authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+      // En el sitio publicado, la propia dirección de Studio (ver lib/auth-dominio.ts)
+      authDomain: dominioDeAuth(
+        typeof window === "undefined" ? undefined : window.location.protocol,
+        typeof window === "undefined" ? undefined : window.location.host,
+        process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+      ),
       projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
     });
   // La sesión se guarda en el navegador: al recargar la página se sigue dentro
