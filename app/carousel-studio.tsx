@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Copy, Download, ImagePlus, Plus, Save, Share2, Sparkles, Trash2, Wand2, X } from "lucide-react";
 import { Brand, brandContext } from "@/lib/brand";
-import { buildSlideDoc, CAROUSEL_STYLES, CarouselFormat, CarouselStyle, Slide } from "@/lib/carousel";
+import { buildSlideDoc, CAROUSEL_FORMATS, CAROUSEL_STYLES, CarouselFormat, CarouselStyle, SIZES, Slide } from "@/lib/carousel";
 import type { Doc } from "@/lib/editor-model";
 import { friendlyError } from "@/lib/errors";
 import { usePersistentState } from "@/lib/persist";
@@ -320,7 +320,7 @@ export default function CarouselStudio({
     const el = stripRef.current?.children[i] as HTMLElement | undefined;
     el?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
   };
-  const ratio = format === "4:5" ? "4 / 5" : "1 / 1";
+  const ratio = `${SIZES[format][0]} / ${SIZES[format][1]}`;
 
   return (
     <section className="card carousel">
@@ -365,24 +365,23 @@ export default function CarouselStudio({
         </div>
         <div>
           <label>Formato</label>
-          <div className="seg">
-            <button className={format === "4:5" ? "active" : ""} onClick={() => setFormat("4:5")}>
-              Vertical 4:5
-            </button>
-            <button className={format === "1:1" ? "active" : ""} onClick={() => setFormat("1:1")}>
-              Cuadrado 1:1
-            </button>
-          </div>
+          <select value={format} onChange={(e) => setFormat(e.target.value as CarouselFormat)}>
+            {CAROUSEL_FORMATS.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.label}
+              </option>
+            ))}
+          </select>
         </div>
         <div>
           <label>Estilo</label>
-          <div className="seg">
+          <select value={style} onChange={(e) => setStyle(e.target.value as CarouselStyle)}>
             {CAROUSEL_STYLES.map((s) => (
-              <button key={s.id} className={style === s.id ? "active" : ""} onClick={() => setStyle(s.id)}>
+              <option key={s.id} value={s.id}>
                 {s.label}
-              </button>
+              </option>
             ))}
-          </div>
+          </select>
         </div>
       </div>
       <div className="actions">
