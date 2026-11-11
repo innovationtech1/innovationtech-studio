@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { baseDeEntorno, despachar } from "@/lib/video-ia";
+import { baseDePedido, despachar } from "@/lib/video-ia";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -13,6 +13,6 @@ export async function POST(req: Request) {
   if (!clave || recibido.length !== esperado.length || !timingSafeEqual(recibido, esperado)) {
     return new Response(null, { status: 404 });
   }
-  const r = await despachar({ base: baseDeEntorno() ?? new URL(req.url).origin });
+  const r = await despachar({ base: baseDePedido(req) });
   return Response.json(r, { headers: { "Cache-Control": "no-store" } });
 }

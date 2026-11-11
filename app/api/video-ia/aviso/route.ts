@@ -1,4 +1,4 @@
-import { baseDeEntorno, procesarAviso } from "@/lib/video-ia";
+import { baseDePedido, procesarAviso } from "@/lib/video-ia";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -7,6 +7,6 @@ export const maxDuration = 60;
 export async function POST(req: Request) {
   const cuerpo = await req.text();
   const url = new URL(req.url);
-  const r = await procesarAviso(url, req.headers, cuerpo, { base: baseDeEntorno() ?? url.origin });
+  const r = await procesarAviso(url, req.headers, cuerpo, { base: baseDePedido(req) });
   return new Response(null, { status: r.status, headers: { "Cache-Control": "no-store" } });
 }

@@ -59,11 +59,29 @@ export function videoIaEncendido(env: Record<string, string | undefined> = proce
   return (env.VIDEO_IA ?? "").trim().toLowerCase() !== "off" && !!(env.FAL_KEY ?? "").trim();
 }
 
-// Dirección pública de este Studio (a donde fal manda el aviso). En Netlify: URL es la de producción
-// y DEPLOY_PRIME_URL la de cada versión de prueba. STUDIO_URL manda si se define.
+const limpiaUrl = (v: string | undefined) => (v ?? "").trim().replace(/\/+$/, "") || undefined;
+
+// Dirección pública del sitio principal según Netlify (o STUDIO_URL si se define).
 export function baseDeEntorno(env: Record<string, string | undefined> = process.env): string | undefined {
-  const limpia = (v: string | undefined) => (v ?? "").trim().replace(/\/+$/, "") || undefined;
-  return limpia(env.STUDIO_URL) ?? (env.CONTEXT === "production" ? limpia(env.URL) : (limpia(env.DEPLOY_PRIME_URL) ?? limpia(env.URL)));
+  return limpiaUrl(env.STUDIO_URL) ?? limpiaUrl(env.URL);
+}
+
+// Dirección a la que fal debe mandar el aviso: la MISMA versión del sitio que recibió el pedido
+// (una versión de prueba tiene sus propios datos; si el aviso llegara al sitio principal se perdería).
+// Solo se acepta el host del pedido si es de este sitio de Netlify; si no, se usa el sitio principal.
+export function baseDePedido(req: Request, env: Record<string, string | undefined> = process.env): string {
+  const fija = limpiaUrl(env.STUDIO_URL);
+  if (fija) return fija;
+  const principal = limpiaUrl(env.URL);
+  if (!principal) return new URL(req.url).origin;
+  const hostPrincipal = new URL(principal).host;
+  const sitio = env.SITE_NAME ?? (/^([a-z0-9-]+)\.netlify\.app$/i.exec(hostPrincipal)?.[1] ?? "");
+  const deEsteSitio = (host: string) =>
+    host === hostPrincipal || (!!sitio && /^[a-z0-9-]+--[a-z0-9-]+\.netlify\.app$/.test(host) && host.endsWith(`--${sitio}.netlify.app`));
+  // El host público puede venir en cualquiera de estos tres lugares, según cómo Netlify pase el pedido
+  const candidatos = [req.headers.get("x-forwarded-host"), req.headers.get("host"), new URL(req.url).host];
+  const host = candidatos.map((h) => (h ?? "").trim().toLowerCase()).find(deEsteSitio);
+  return host ? `https://${host}` : principal;
 }
 
 type Mundo = {
