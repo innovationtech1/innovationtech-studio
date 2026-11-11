@@ -2,7 +2,7 @@
 // Permite instalar la app y que abra rápido; si no hay internet muestra una pantalla de aviso.
 // Nunca guarda en caché las llamadas a /api (claves y contenido generado).
 
-const VERSION = "its-v3";
+const VERSION = "its-v4";
 // Grabaciones de instrumentos y efectos: se guardan aparte y no se borran al actualizar la app
 // (cambia este nombre solo si cambian los archivos de /samples).
 const SAMPLES = "its-samples-v1";
@@ -41,6 +41,7 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // imágenes y videos de proveedores: directo
   if (url.pathname.startsWith("/api/")) return; // nunca en caché
+  if (url.pathname.startsWith("/__/")) return; // inicio de sesión de Firebase: directo, sin caché
 
   // Páginas: primero la red (siempre la versión más nueva); sin conexión, la copia o el aviso.
   if (req.mode === "navigate") {
