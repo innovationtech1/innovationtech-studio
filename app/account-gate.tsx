@@ -6,7 +6,7 @@ import { X } from "lucide-react";
 import { installAuthFetch } from "@/lib/auth-fetch";
 import { mensajeAuth } from "@/lib/auth-mensajes";
 import { guardarUltimoUid, leerUltimoUid, limpiarDispositivo } from "@/lib/limpiar-dispositivo";
-import { ContextoCuenta, registrarRefresco, type Cuenta, type ValorCuenta } from "./account-context";
+import { ContextoCuenta, registrarRefresco, type Cuenta, type ValorCuenta, marcarDemoALaVista, useDemoALaVista } from "./account-context";
 import {
   abrirPortal,
   Bienvenida,
@@ -283,6 +283,7 @@ export default function AccountGate({ children }: { children: React.ReactNode })
     }
   }
 
+  const demoVisible = useDemoALaVista();
   let contenido: React.ReactNode;
   const conNegocio = cuenta && cuenta.usuario ? cuenta : null;
   // En Básico también: si quedaron personas o invitaciones de cuando era Pro, el dueño las puede quitar
@@ -320,7 +321,17 @@ export default function AccountGate({ children }: { children: React.ReactNode })
         )}
         {children}
         {/* Sin plan: la app sigue abierta detrás (no se pierde lo que estaba haciendo), pero hay que elegir plan */}
-        {estado === "sin_plan" && <ElegirPlan precios={conNegocio.precios} onSalir={salir} />}
+        {estado === "sin_plan" &&
+          (demoVisible ? (
+            <div className="acct-upsell">
+              <span>Tu prueba gratis terminó. Descarga tu video y elige un plan para seguir creando.</span>
+              <button className="btn small" onClick={() => marcarDemoALaVista(false)}>
+                Ver planes
+              </button>
+            </div>
+          ) : (
+            <ElegirPlan precios={conNegocio.precios} onSalir={salir} />
+          ))}
         {estado !== "sin_plan" && modal === "planes" && (
           <ElegirPlan
             precios={conNegocio.precios}

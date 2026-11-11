@@ -23,8 +23,8 @@ import { loadSong } from "@/lib/library";
 import { DEFAULT_VOICE, findVoice } from "@/lib/voices";
 import { getLang } from "@/lib/i18n";
 import VoicePicker from "./voice-picker";
-import { ProTag, refrescarCuenta, useCuenta } from "./account-context";
-import { DURACIONES, MAX_TOMAS, duracionMinima } from "@/lib/reel-escenas";
+import { marcarDemoALaVista, ProTag, refrescarCuenta, useCuenta } from "./account-context";
+import { DURACIONES, MAX_TOMAS, duracionMinima, duracionPara } from "@/lib/reel-escenas";
 import { firmaTomas, terminado, textoEstado, type TrabajoVisto } from "@/lib/estados-video";
 import { consultarTomas, pedirTomas, prepararFoto, subirFoto } from "@/lib/video-ia-cliente";
 
@@ -197,6 +197,8 @@ export default function ReelStudio({
     });
   }, [handoff, setScenes]);
   useEffect(() => setBrandName((b) => b || brand.name), [brand.name]);
+  // Al salir del Creador de Reels ya no hay demo a la vista
+  useEffect(() => () => marcarDemoALaVista(false), []);
   // Tema enviado desde el calendario de contenido
   useEffect(() => {
     if (incomingTopic) setTopic(incomingTopic.text);
@@ -352,7 +354,7 @@ export default function ReelStudio({
   }
 
   // Graba el video. clips: el clip de IA de cada escena lista (null = animación normal).
-  async function grabar(clips?: (string | null)[]) {
+  async function grabar(clips?: (string | null)[], dur: number = duracion) {
     {
       const ready = scenes.filter((s) => s.image);
       if (ready.length === 0) throw new Error("Agrega al menos una imagen a las escenas.");
@@ -363,8 +365,8 @@ export default function ReelStudio({
         images: ready.map((s) => s.image),
         captions: ready.map((s) => s.caption),
         secondsPerSlide: seconds,
-        duracion: duracion || undefined,
-        tomas: duracion ? ready.flatMap((s, i) => (s.ia ? [i] : [])) : undefined,
+        duracion: dur || undefined,
+        tomas: dur ? ready.flatMap((s, i) => (s.ia ? [i] : [])) : undefined,
         clips,
         format,
         accent,
@@ -387,9 +389,19 @@ export default function ReelStudio({
 
   const buildReel = () =>
     run("Grabando tu reel…", async () => {
-      await grabar();
+      // Con fotos marcadas «con IA» la duración se acomoda sola para que quepan
+      await grabar(undefined, tomasMarcadas > 0 ? duracionAjustada() : duracion);
       if (tomasMarcadas > 0) setEstadoIa(textoEstado({ tipo: "previa" }));
     });
+
+  // La duración con la que se arma un video con tomas de IA: la elegida si caben las fotos; si no,
+  // la más corta donde caben. La deja puesta en el selector para que se vea.
+  function duracionAjustada(): number {
+    const fotos = scenes.filter((s) => s.image).length;
+    const d = duracionPara(duracion, fotos, tomasMarcadas, 3);
+    if (d !== duracion) setDuracion(d);
+    return d;
+  }
 
   // Genera las tomas con IA (sube las fotos marcadas, espera los clips) y graba el video final.
   const generarConIa = () =>
@@ -397,8 +409,9 @@ export default function ReelStudio({
       const ready = scenes.filter((s) => s.image);
       const marcadas = ready.flatMap((s, i) => (s.ia ? [{ i, s }] : []));
       if (marcadas.length === 0) throw new Error("Marca de 1 a 4 fotos «con IA».");
-      if (!duracion) throw new Error("Elige la duración del video (10, 15, 20 o 30 s).");
+      const dur = duracionAjustada();
       setInvitarPlan(false);
+      if (esDemo) marcarDemoALaVista(true); // si la prueba vence mientras tanto, no se tapa el video
       const fotos = await Promise.all(marcadas.map((m) => prepararFoto(m.s.image)));
       const firma = firmaTomas(marcadas.map((m, k) => ({ sha256: fotos[k].sha256, movimiento: m.s.movimiento ?? "" })));
       // Mismas fotos y movimientos que el último video (por ejemplo, solo cambió la voz):
@@ -407,7 +420,7 @@ export default function ReelStudio({
       const previos = ultimosClips.current;
       if (previos && previos.firma === firmaVideo && Date.now() - previos.cuando < 50 * 60 * 1000) {
         setBusy("Grabando tu reel…");
-        await grabar(previos.clips);
+        await grabar(previos.clips, dur);
         setEstadoIa(textoEstado({ tipo: "trabajos", trabajos: marcadas.map((_, k) => ({ id: String(k), estado: "listo", desdeCache: true })), topeHoy: false }));
         return;
       }
@@ -455,7 +468,7 @@ export default function ReelStudio({
       // Solo se guardan si salieron todas: así un intento posterior vuelve a pedir la que falló
       if (marcadas.every((m) => clips[m.i])) ultimosClips.current = { firma: firmaVideo, clips, cuando: Date.now() };
       setBusy("Grabando tu reel…");
-      await grabar(clips);
+      await grabar(clips, dur);
       setEstadoIa(textoEstado({ tipo: "trabajos", trabajos: vistos, topeHoy: false }));
       setInvitarPlan(esDemo);
     });

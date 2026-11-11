@@ -1001,6 +1001,7 @@ export const EN: Record<string, string> = {
   "Voces": "Voices",
   "Subtítulos": "Subtitles",
   "Tomas con IA": "AI shots",
+  "Tu prueba gratis terminó. Descarga tu video y elige un plan para seguir creando.": "Your free trial ended. Download your video and choose a plan to keep creating.",
   "Cambiaste la voz. Actualiza el video para escucharla: no gasta tomas con IA.": "You changed the voice. Update the video to hear it: it doesn't use AI shots.",
   "Actualizar video": "Update video",
   "Tu plan no incluye tomas con IA. Compra el paquete Video en Mi cuenta para usarlas.": "Your plan doesn't include AI shots. Buy the Video pack in My account to use them.",

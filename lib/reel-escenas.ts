@@ -58,3 +58,21 @@ export function duracionMinima(fotos: number, tomas: number, cierre: number): Du
   }
   return null;
 }
+
+// La duración con la que se arma el video: la elegida si caben las fotos; si no caben (o está en
+// automática, 0), la más corta donde sí caben. Lanza el error claro si no caben en ninguna.
+export function duracionPara(elegida: number, fotos: number, tomas: number, cierre: number): number {
+  const indices = Array.from({ length: tomas }, (_, i) => i);
+  if (elegida) {
+    try {
+      planDeEscenas(elegida, fotos, indices, cierre);
+      return elegida;
+    } catch {
+      // no caben en la elegida: se busca otra
+    }
+  }
+  const minima = duracionMinima(fotos, tomas, cierre);
+  if (minima) return minima;
+  planDeEscenas(DURACIONES[DURACIONES.length - 1], fotos, indices, cierre); // lanza el motivo
+  return DURACIONES[DURACIONES.length - 1];
+}

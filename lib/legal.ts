@@ -2,7 +2,7 @@
 // BORRADOR del 9 de noviembre de 2026: debe revisarlo un abogado o contador antes del lanzamiento.
 // Si cambia el contenido de fondo, sube VERSION_LEGAL: las cuentas nuevas guardan qué versión aceptaron.
 
-export const VERSION_LEGAL = "2026-11-09";
+export const VERSION_LEGAL = "2026-11-10";
 export const CONTACTO_LEGAL = "hectordehoyos053@gmail.com";
 
 export type Seccion = { titulo: string; parrafos: string[] };
@@ -212,7 +212,7 @@ export const TERMINOS: Record<"es" | "en", DocumentoLegal> = {
 export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
   es: {
     titulo: "Política de privacidad",
-    actualizado: "Última actualización: 9 de noviembre de 2026",
+    actualizado: "Última actualización: 10 de noviembre de 2026",
     secciones: [
       {
         titulo: "1. Quién es responsable",
@@ -236,6 +236,7 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
         parrafos: [
           "Tus textos, imágenes, videos, proyectos y ajustes se guardan en tu navegador (en tu dispositivo), no en nuestros servidores, salvo lo que se indica arriba.",
           "Para generar contenido, lo que escribes o subes (por ejemplo, una descripción, una foto de referencia o un audio para subtítulos) se envía al servicio de IA que corresponda: Cloudflare Workers AI, o Replicate o Anthropic si usas tus propias claves. Esos servicios lo procesan según sus propias políticas.",
+          "Si usas las tomas de video con IA, la foto que marcas y el movimiento que escribes se envían a fal.ai para generar el clip. Esa foto y el clip que resulta se guardan en nuestro almacenamiento privado (Cloudflare R2), ligados a tu negocio, para armar tu video y no cobrarte dos veces la misma toma. Los de la prueba gratis se borran a los 30 días; los demás se conservan hasta que nos pidas borrarlos.",
           "No subas datos personales sensibles de otras personas en tus pedidos a la IA.",
         ],
       },
@@ -249,7 +250,7 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
       {
         titulo: "5. Con quién los compartimos",
         parrafos: [
-          "Solo con los proveedores que hacen funcionar Studio: Google Firebase (cuentas y base de datos), Stripe (pagos), Cloudflare (IA), Netlify (hospedaje) y, si tú lo eliges, Replicate o Anthropic. Además, al abrir la app tu navegador descarga tipografías de Google Fonts y, si usas «quitar fondo», un modelo desde jsDelivr; esos servicios reciben datos técnicos como tu dirección IP. También compartimos datos si la ley nos lo exige.",
+          "Solo con los proveedores que hacen funcionar Studio: Google Firebase (cuentas y base de datos), Stripe (pagos), Cloudflare (IA y almacenamiento de fotos y clips de video), fal.ai (generación de video con IA), Netlify (hospedaje) y, si tú lo eliges, Replicate o Anthropic. Además, al abrir la app tu navegador descarga tipografías de Google Fonts y, si usas «quitar fondo», un modelo desde jsDelivr; esos servicios reciben datos técnicos como tu dirección IP. También compartimos datos si la ley nos lo exige.",
         ],
       },
       {
@@ -287,7 +288,7 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
   },
   en: {
     titulo: "Privacy Policy",
-    actualizado: "Last updated: November 9, 2026",
+    actualizado: "Last updated: November 10, 2026",
     secciones: [
       {
         titulo: "1. Who is responsible",
@@ -311,6 +312,7 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
         parrafos: [
           "Your copy, images, videos, projects and settings are stored in your browser (on your device), not on our servers, except as described above.",
           "To generate content, what you type or upload (for example, a description, a reference photo or an audio file for subtitles) is sent to the relevant AI service: Cloudflare Workers AI, or Replicate or Anthropic if you use your own keys. Those services process it under their own policies.",
+          "If you use AI video shots, the photo you mark and the motion you describe are sent to fal.ai to generate the clip. That photo and the resulting clip are stored in our private storage (Cloudflare R2), linked to your business, to build your video and avoid charging you twice for the same shot. Those from the free trial are deleted after 30 days; the rest are kept until you ask us to delete them.",
           "Do not include other people’s sensitive personal data in your AI requests.",
         ],
       },
@@ -324,7 +326,7 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
       {
         titulo: "5. Who we share it with",
         parrafos: [
-          "Only with the providers that run Studio: Google Firebase (accounts and database), Stripe (payments), Cloudflare (AI), Netlify (hosting) and, if you choose, Replicate or Anthropic. In addition, when you open the app your browser downloads fonts from Google Fonts and, if you use “remove background”, a model from jsDelivr; those services receive technical data such as your IP address. We also share data when required by law.",
+          "Only with the providers that run Studio: Google Firebase (accounts and database), Stripe (payments), Cloudflare (AI and storage of photos and video clips), fal.ai (AI video generation), Netlify (hosting) and, if you choose, Replicate or Anthropic. In addition, when you open the app your browser downloads fonts from Google Fonts and, if you use “remove background”, a model from jsDelivr; those services receive technical data such as your IP address. We also share data when required by law.",
         ],
       },
       {

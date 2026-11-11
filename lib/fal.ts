@@ -37,6 +37,28 @@ export function entradaDeModelo(
 // Solo ids con forma de modelo (letras, números, guiones, puntos y diagonales): nunca una URL armada por otro.
 const MODELO_VALIDO = /^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)+$/i;
 
+// Qué suele significar cada rechazo de fal, para que el administrador sepa qué arreglar.
+const PISTAS: Record<number, string> = {
+  401: "la clave FAL_KEY no es válida",
+  403: "falta saldo en fal.ai o la cuenta está bloqueada",
+  422: "fal.ai no aceptó la foto o los parámetros del modelo",
+  429: "demasiados pedidos a la vez en fal.ai",
+};
+
+// Mensaje del rechazo: código, pista y el detalle que da fal (corto; nunca trae nuestras claves).
+async function errorDeFal(res: Response): Promise<string> {
+  const cuerpo = (await res.json().catch(() => null)) as { detail?: unknown } | null;
+  const d = cuerpo && typeof cuerpo === "object" ? cuerpo.detail : undefined;
+  const detalle =
+    typeof d === "string"
+      ? d
+      : Array.isArray(d)
+        ? d.map((x) => (x && typeof x === "object" && typeof (x as { msg?: unknown }).msg === "string" ? (x as { msg: string }).msg : "")).filter(Boolean).join("; ")
+        : "";
+  const pista = PISTAS[res.status];
+  return `fal.ai no aceptó el trabajo (${res.status})${pista ? `: ${pista}` : ""}${detalle ? ` · ${detalle.slice(0, 140)}` : ""}`;
+}
+
 export async function enviarAFal(
   modelo: string,
   input: EntradaFal,
@@ -51,7 +73,7 @@ export async function enviarAFal(
     headers: { Authorization: `Key ${clave}`, "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (!res.ok) throw new Error(`fal.ai no aceptó el trabajo (${res.status})`);
+  if (!res.ok) throw new Error(await errorDeFal(res));
   const d = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (typeof d.request_id !== "string" || typeof d.status_url !== "string" || typeof d.response_url !== "string") {
     throw new Error("fal.ai respondió sin los datos del trabajo");

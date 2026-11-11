@@ -132,3 +132,10 @@ test("candado: exclusivo hasta soltarlo o hasta que vence", async () => {
   await s.soltarCandado("despacho");
   assert.equal(await s.tomarCandado("despacho", 10_000, T0 + 10_002), true);
 });
+
+test("trabajosDesde: los actualizados desde una fecha, del más nuevo al más viejo", async () => {
+  const s = memoryVideoStore();
+  await s.crearTrabajos([trabajo({ id: "viejo", actualizado: T0 - 1000 }), trabajo({ id: "a", actualizado: T0 + 5 }), trabajo({ id: "b", actualizado: T0 + 9 })]);
+  assert.deepEqual((await s.trabajosDesde(T0, 10)).map((t) => t.id), ["b", "a"]);
+  assert.deepEqual((await s.trabajosDesde(T0, 1)).map((t) => t.id), ["b"]);
+});
