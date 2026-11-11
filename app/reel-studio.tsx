@@ -23,12 +23,21 @@ import { loadSong } from "@/lib/library";
 import { DEFAULT_VOICE, findVoice } from "@/lib/voices";
 import { getLang } from "@/lib/i18n";
 import VoicePicker from "./voice-picker";
-import { ProTag } from "./account-context";
+import { ProTag, refrescarCuenta, useCuenta } from "./account-context";
+import { DURACIONES, MAX_TOMAS, maxFotos } from "@/lib/reel-escenas";
+import { firmaTomas, terminado, textoEstado, type TrabajoVisto } from "@/lib/estados-video";
+import { consultarTomas, pedirTomas, prepararFoto, subirFoto } from "@/lib/video-ia-cliente";
 
 import { Clapperboard, Dices, Download, Mic, Play, Sparkles } from "lucide-react";
 // imageId: la foto de la escena guardada en el dispositivo (IndexedDB), para que no se pierda
 // al cambiar de sección, editar, cerrar o recargar la app.
-type Scene = { image: string; caption: string; prompt: string; loading?: boolean; imageId?: string };
+// ia: la foto lleva una toma con IA (movimiento real, 5 s); movimiento: lo que se le pide a la IA.
+type Scene = { image: string; caption: string; prompt: string; loading?: boolean; imageId?: string; ia?: boolean; movimiento?: string };
+
+// Tomas con IA que siguen en proceso (se guardan para retomarlas sin pedirlas ni descontarlas otra vez)
+type TomasPendientes = { ids: string[]; firma: string } | null;
+const ESPERA_TOMAS = 5000; // cada cuánto se consulta
+const MAX_ESPERA = 20 * 60 * 1000;
 
 const emptyScene = (): Scene => ({ image: "", caption: "", prompt: "" });
 
@@ -109,6 +118,16 @@ export default function ReelStudio({
     });
   }, [scenes, setScenes]);
   const [seconds, setSeconds] = usePersistentState("reel:segundos", 3);
+  // 0 = automática (segundos por escena); 10, 15, 20 o 30 = video de duración fija
+  const [duracion, setDuracion] = usePersistentState<number>("reel:duracion", 0);
+  const [pendientes, setPendientes] = usePersistentState<TomasPendientes>("reel:tomas-pendientes", null);
+  const [estadoIa, setEstadoIa] = useState("");
+  const [invitarPlan, setInvitarPlan] = useState(false);
+  const subidas = useRef(new Map<string, string>()); // sha256 → llave de la foto ya subida
+  const { activo: cuentasOn, cuenta, abrirPlanes } = useCuenta();
+  const conCuenta = cuentasOn && !!cuenta?.usuario;
+  const esDemo = !!cuenta?.usuario && cuenta.efectivo.plan === "prueba";
+  const tomasMarcadas = scenes.filter((s) => s.image && s.ia).length;
   const [brandName, setBrandName] = usePersistentState("reel:negocio", brand.name);
   const [cta, setCta] = usePersistentState("reel:cta", "");
   // Color, logo y letra vienen de «Mi marca»; el color se puede cambiar solo para este reel.
@@ -297,8 +316,20 @@ export default function ReelStudio({
       setVoice(data.audio);
     });
 
-  const buildReel = () =>
-    run("Grabando tu reel…", async () => {
+  // Marca o desmarca una foto «con IA» (máximo 2). Las tomas necesitan un video de duración fija.
+  function marcarIa(i: number, on: boolean) {
+    if (on && tomasMarcadas >= MAX_TOMAS) return setError(`Puedes marcar máximo ${MAX_TOMAS} fotos con IA por video.`);
+    setError("");
+    setScene(i, { ia: on });
+    if (on && !duracion) {
+      const fotos = scenes.filter((s) => s.image).length;
+      setDuracion(DURACIONES.find((d) => maxFotos(d - 3, tomasMarcadas + 1) >= fotos) ?? 30);
+    }
+  }
+
+  // Graba el video. clips: el clip de IA de cada escena lista (null = animación normal).
+  async function grabar(clips?: (string | null)[]) {
+    {
       const ready = scenes.filter((s) => s.image);
       if (ready.length === 0) throw new Error("Agrega al menos una imagen a las escenas.");
       setResult(null);
@@ -308,6 +339,9 @@ export default function ReelStudio({
         images: ready.map((s) => s.image),
         captions: ready.map((s) => s.caption),
         secondsPerSlide: seconds,
+        duracion: duracion || undefined,
+        tomas: duracion ? ready.flatMap((s, i) => (s.ia ? [i] : [])) : undefined,
+        clips,
         format,
         accent,
         brandName,
@@ -323,6 +357,70 @@ export default function ReelStudio({
       });
       setResult({ url: r.url, ext: r.ext, seconds: r.seconds });
       onVideo(r.blob, `Reel: ${topic || brandName || "sin título"}`); // se guarda solo en la galería
+    }
+  }
+
+  const buildReel = () =>
+    run("Grabando tu reel…", async () => {
+      await grabar();
+      if (tomasMarcadas > 0) setEstadoIa(textoEstado({ tipo: "previa" }));
+    });
+
+  // Genera las tomas con IA (sube las fotos marcadas, espera los clips) y graba el video final.
+  const generarConIa = () =>
+    run("Preparando las tomas con IA…", async () => {
+      const ready = scenes.filter((s) => s.image);
+      const marcadas = ready.flatMap((s, i) => (s.ia ? [{ i, s }] : []));
+      if (marcadas.length === 0) throw new Error("Marca 1 o 2 fotos «con IA».");
+      if (!duracion) throw new Error("Elige la duración del video (10, 15, 20 o 30 s).");
+      setInvitarPlan(false);
+      const fotos = await Promise.all(marcadas.map((m) => prepararFoto(m.s.image)));
+      const firma = firmaTomas(marcadas.map((m, k) => ({ sha256: fotos[k].sha256, movimiento: m.s.movimiento ?? "" })));
+      let ids = pendientes && pendientes.firma === firma ? pendientes.ids : null;
+      if (!ids) {
+        const llaves: string[] = [];
+        for (const [k, f] of fotos.entries()) {
+          let llave = subidas.current.get(f.sha256);
+          if (!llave) {
+            llave = await subirFoto(f, (pct) => setBusy(textoEstado({ tipo: "subiendo", pct: (k * 100 + pct) / fotos.length })));
+            subidas.current.set(f.sha256, llave);
+          }
+          llaves.push(llave);
+        }
+        ids = await pedirTomas(marcadas.map((m, k) => ({ imagenKey: llaves[k], movimiento: m.s.movimiento ?? "" })));
+        setPendientes({ ids, firma });
+        void refrescarCuenta(); // actualiza «te quedan X tomas»
+      }
+      // Espera a que terminen (el servidor avisa el lugar en la fila y cuándo está cada toma)
+      const inicio = Date.now();
+      let vistos: TrabajoVisto[] = [];
+      for (;;) {
+        const r = await consultarTomas(ids);
+        vistos = r.trabajos;
+        if (vistos.length === 0) {
+          setPendientes(null);
+          throw new Error("No encontramos esas tomas. Vuelve a generarlas.");
+        }
+        const texto = textoEstado({ tipo: "trabajos", trabajos: vistos, topeHoy: r.topeHoy });
+        setBusy(texto);
+        if (terminado(vistos)) break;
+        const hayCupo = !(r.topeHoy && !vistos.some((t) => t.estado === "enviado"));
+        if (!hayCupo || Date.now() - inicio > MAX_ESPERA) {
+          // Se quedan guardadas: al volver y tocar «Generar con IA» se retoman sin costo
+          setEstadoIa(hayCupo ? "Tus tomas siguen en proceso. Vuelve en unos minutos y toca «Generar con IA» para terminar tu video." : texto);
+          return;
+        }
+        await new Promise((res) => setTimeout(res, ESPERA_TOMAS));
+      }
+      setPendientes(null);
+      void refrescarCuenta();
+      const porId = new Map(vistos.map((t) => [t.id, t]));
+      const clips: (string | null)[] = ready.map(() => null);
+      marcadas.forEach((m, k) => (clips[m.i] = porId.get(ids![k])?.clipUrl ?? null));
+      setBusy("Grabando tu reel…");
+      await grabar(clips);
+      setEstadoIa(textoEstado({ tipo: "trabajos", trabajos: vistos, topeHoy: false }));
+      setInvitarPlan(esDemo);
     });
 
   const ratioStyle = format === "9:16" ? "9 / 16" : format === "1:1" ? "1 / 1" : "16 / 9";
@@ -345,6 +443,9 @@ export default function ReelStudio({
             setVoice("");
             setResult(null);
             setError("");
+            setEstadoIa("");
+            setInvitarPlan(false);
+            setPendientes(null);
           }}
         >
           Empezar nuevo
@@ -386,15 +487,28 @@ export default function ReelStudio({
           </select>
         </div>
         <div>
-          <label>Segundos por escena</label>
-          <select value={seconds} onChange={(e) => setSeconds(Number(e.target.value))}>
-            {[2, 3, 4, 5, 6].map((n) => (
+          <label>Duración del video</label>
+          <select value={duracion} onChange={(e) => setDuracion(Number(e.target.value))}>
+            <option value={0}>Automática</option>
+            {DURACIONES.map((n) => (
               <option key={n} value={n}>
                 {n} s
               </option>
             ))}
           </select>
         </div>
+        {!duracion && (
+          <div>
+            <label>Segundos por escena</label>
+            <select value={seconds} onChange={(e) => setSeconds(Number(e.target.value))}>
+              {[2, 3, 4, 5, 6].map((n) => (
+                <option key={n} value={n}>
+                  {n} s
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
       <div className="actions">
         <button className="btn" disabled={!!busy || !topic.trim()} onClick={createAll}>
@@ -468,6 +582,20 @@ export default function ReelStudio({
                 </button>
               )}
             </div>
+            {conCuenta && sc.image && (
+              <label className="check scene-ia">
+                <input type="checkbox" checked={!!sc.ia} disabled={!!busy} onChange={(e) => marcarIa(i, e.target.checked)} />
+                Con IA (movimiento real, 5 s)
+              </label>
+            )}
+            {conCuenta && sc.image && sc.ia && (
+              <input
+                value={sc.movimiento ?? ""}
+                maxLength={300}
+                onChange={(e) => setScene(i, { movimiento: e.target.value })}
+                placeholder="Movimiento (opcional). Ej.: la cámara se acerca despacio"
+              />
+            )}
             {picking === i && (
               <div className="picker">
                 {galleryImages.length === 0 && <span className="muted">Tu galería está vacía.</span>}
@@ -625,9 +753,34 @@ export default function ReelStudio({
 
       {/* 6. Crear */}
       <h3 className="step">6. Crear el video</h3>
-      <button className="btn" disabled={!!busy || !canRecord || !scenes.some((s) => s.image)} onClick={buildReel}>
-        <Clapperboard size={16} aria-hidden /> Crear reel
-      </button>
+      {tomasMarcadas > 0 && (
+        <p className="hint">
+          La vista previa es gratis: las fotos con IA se ven con zoom hasta que las generes. Solo «Generar con IA» usa tus tomas con IA.
+        </p>
+      )}
+      <div className="actions">
+        <button className="btn" disabled={!!busy || !canRecord || !scenes.some((s) => s.image)} onClick={buildReel}>
+          <Clapperboard size={16} aria-hidden /> {tomasMarcadas > 0 ? "Vista previa gratis" : "Crear reel"}
+        </button>
+        {conCuenta && tomasMarcadas > 0 && (
+          <button className="btn" disabled={!!busy || !canRecord} onClick={generarConIa}>
+            <Sparkles size={16} aria-hidden /> Generar con IA
+            {esDemo && <span className="acct-pro">Demo gratis</span>}
+          </button>
+        )}
+      </div>
+      {duracion > 0 && voice && (
+        <p className="hint" style={{ marginTop: 6 }}>Con duración fija, la voz se corta si dura más que el video.</p>
+      )}
+      {!busy && estadoIa && tomasMarcadas > 0 && <div className="notice">{estadoIa}</div>}
+      {!busy && invitarPlan && (
+        <div className="acct-upsell">
+          <span>Elige un plan para seguir creando videos con IA</span>
+          <button className="btn small" onClick={abrirPlanes}>
+            Ver planes
+          </button>
+        </div>
+      )}
       {busy && (
         <div className="notice">
           {busy}

@@ -1,9 +1,9 @@
-import type { Contador, PaqueteId, Saldo } from "./plans";
+import { CONTADORES, type Contador, type PaqueteId, type Saldo } from "./plans";
 
 // Avisos del uso del mes y textos de los paquetes. Funciones puras: se usan en el navegador
 // (Mi cuenta y el aviso del 80%) y se prueban sin pantalla.
 
-const ORDEN: Contador[] = ["textos", "imagenes", "voces", "subtitulos"];
+const ORDEN: Contador[] = CONTADORES;
 
 // Contadores con tope (> 0) que ya llegaron al 80% de lo incluido en el mes.
 // Se compara con enteros (uso × 5 ≥ tope × 4) para no depender de decimales.
@@ -22,15 +22,17 @@ const NOMBRE_AVISO: Record<Contador, string> = {
   imagenes: "imágenes",
   voces: "voces",
   subtitulos: "subtítulos",
+  tomas_ia: "tomas con IA",
 };
 export const textoAviso80 = (c: Contador) => `Ya usaste el 80% de tus ${NOMBRE_AVISO[c]} de este mes.`;
 
-const NOMBRE_PAQUETE: Record<PaqueteId, string> = { creativo: "Creativo", voz: "Voz" };
+const NOMBRE_PAQUETE: Record<PaqueteId, string> = { creativo: "Creativo", voz: "Voz", video: "Video" };
 const NOMBRE_CORTO: Record<Contador, string> = {
   textos: "textos",
   imagenes: "imágenes",
   voces: "voces",
   subtitulos: "subtítulos",
+  tomas_ia: "tomas con IA",
 };
 
 // «Creativo · +500 textos y +150 imágenes · $5», armado con lo que hoy trae el paquete.

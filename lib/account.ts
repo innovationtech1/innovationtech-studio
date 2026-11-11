@@ -1,5 +1,5 @@
 import "server-only";
-import { firestoreStore, type AccountStore } from "./account-store";
+import { firestoreStore, type AccountStore, type Reserva } from "./account-store";
 import { stripeModoLive } from "./stripe-server";
 import { verifyIdToken } from "./verify-token";
 import { descifrarClave, llaveDeEntorno, type ClaveIA } from "./cifrado";
@@ -33,6 +33,9 @@ export type Acceso =
       plan: Plan | null;
       contado: boolean;
       devolver: () => Promise<void>;
+      // Lo reservado (mes y saldo) y su mes, cuando se contó: para devolverlo después por partes (tomas con IA).
+      reserva?: Reserva;
+      mes?: string;
       // La clave de Cloudflare guardada del negocio, ya descifrada (solo si la ruta usa Cloudflare
       // y el pedido no trae la del navegador). Pásala a getCreds. Nunca se devuelve al navegador.
       cfGuardada?: ClaveIA;
@@ -61,6 +64,7 @@ const NOMBRE_CONTADOR: Record<Contador, string> = {
   imagenes: "imágenes",
   voces: "voces",
   subtitulos: "subtítulos",
+  tomas_ia: "tomas con IA",
 };
 
 // «1 de diciembre»: día y mes en español, en la hora de Chicago
@@ -143,11 +147,14 @@ export async function requireAccess(
   }
 
   // 4) Herramienta
-  if (o.herramienta === "video_ia" && !o.clavePropia) {
+  // video_ia tiene dos caminos: las tomas con IA (contador tomas_ia, cuenta de InnovationTECH) y el
+  // flujo viejo de Replicate, que sigue siendo solo de Pro y con la clave propia del cliente.
+  const replicate = o.herramienta === "video_ia" && o.contador !== "tomas_ia";
+  if (replicate && !o.clavePropia) {
     return falla(403, "CLAVE_PROPIA", "El video con IA necesita tu propia clave de Replicate.");
   }
   const cfg = await store.getConfig();
-  if (!puedeUsar(cfg, plan, o.herramienta)) {
+  if (!puedeUsar(cfg, plan, o.herramienta) || (replicate && plan !== "pro")) {
     return falla(403, "PLAN", "Esta herramienta es del plan Pro. Mejora a Pro para usarla.");
   }
 
@@ -174,7 +181,12 @@ export async function requireAccess(
     const mensaje =
       plan === "prueba"
         ? "Llegaste al límite de la prueba. Elige un plan para seguir creando."
-        : negocio.duenoUid === uid
+        : contador === "tomas_ia" && tope === 0
+          ? // Básico no trae tomas al mes: «espera al día 1» no aplica
+            negocio.duenoUid === uid
+            ? "Tu plan no incluye tomas con IA. Compra el paquete Video en Mi cuenta para usarlas."
+            : "Tu plan no incluye tomas con IA. Pídele al dueño de la cuenta que compre el paquete Video."
+          : negocio.duenoUid === uid
           ? `Se acabó lo incluido este mes (${tope} ${NOMBRE_CONTADOR[contador]}). Compra un paquete o espera al ${fecha}.`
           : // Un miembro no puede comprar: solo el dueño paga
             `Se acabó lo incluido este mes (${tope} ${NOMBRE_CONTADOR[contador]}). Pídele al dueño de la cuenta que compre un paquete o espera al ${fecha}.`;
@@ -188,7 +200,7 @@ export async function requireAccess(
     devuelto = true;
     await store.devolverUso(negocio.id, mes, contador, reserva);
   };
-  return { ok: true, uid, negocio, plan, contado: true, devolver };
+  return { ok: true, uid, negocio, plan, contado: true, devolver, reserva, mes };
 }
 
 export function jsonAcceso(a: Extract<Acceso, { ok: false }>): Response {

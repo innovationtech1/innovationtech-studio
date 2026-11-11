@@ -2,6 +2,7 @@ import { cuesFromWords, drawCue, wordsFromScript } from "./captions";
 import { renderMusic, MusicStyleId } from "./music";
 import { loadSong } from "./library";
 import fixWebmDuration from "fix-webm-duration";
+import { planDeEscenas } from "./reel-escenas";
 // Motor de reels: arma un video animado dentro del navegador, gratis y sin límite.
 // Dibuja cada escena en un <canvas> (zoom/movimiento suave + transiciones + textos)
 // y lo graba con MediaRecorder, incluyendo la voz en off si existe.
@@ -12,6 +13,11 @@ export type ReelOptions = {
   images: string[]; // data URLs o URLs con CORS
   captions: string[]; // un texto por escena (puede ir vacío)
   secondsPerSlide: number;
+  // Video de duración fija (10, 15, 20 o 30 s): las fotos se reparten el tiempo (lib/reel-escenas.ts).
+  // Si no se pasa, cada foto dura secondsPerSlide como siempre.
+  duracion?: number;
+  tomas?: number[]; // índices de las fotos con IA: su escena dura 5 s (con o sin clip todavía)
+  clips?: (string | null)[]; // URL del clip de IA de cada foto (null = animación normal)
   format: ReelFormat;
   accent: string; // color de acento (hex)
   brandName: string;
@@ -71,6 +77,31 @@ async function loadImage(src: string): Promise<HTMLImageElement> {
     img.onerror = () => reject(new Error("Una de las imágenes no se pudo abrir."));
     img.src = url;
   });
+}
+
+// Carga un clip de IA como <video>. Se baja como archivo (igual que las imágenes) para poder grabarlo.
+async function loadClip(src: string): Promise<HTMLVideoElement> {
+  const res = await fetch(src).catch(() => null);
+  if (!res || !res.ok) throw new Error("No se pudo cargar una toma con IA (quizá el enlace ya caducó).");
+  const url = URL.createObjectURL(await res.blob());
+  return new Promise((resolve, reject) => {
+    const v = document.createElement("video");
+    v.muted = true;
+    v.playsInline = true;
+    v.preload = "auto";
+    v.onloadeddata = () => resolve(v);
+    v.onerror = () => reject(new Error("Una toma con IA no se pudo abrir."));
+    v.src = url;
+  });
+}
+
+// Dibuja el cuadro actual del clip cubriendo todo el lienzo.
+function drawClip(ctx: CanvasRenderingContext2D, v: HTMLVideoElement, W: number, H: number) {
+  if (!v.videoWidth || !v.videoHeight) return;
+  const k = Math.max(W / v.videoWidth, H / v.videoHeight);
+  const w = v.videoWidth * k;
+  const h = v.videoHeight * k;
+  ctx.drawImage(v, (W - w) / 2, (H - h) / 2, w, h);
 }
 
 function ease(t: number) {
@@ -241,11 +272,32 @@ export async function renderReel(o: ReelOptions): Promise<ReelResult> {
   }
   let per = Math.max(1.5, o.secondsPerSlide);
   if (voiceBuffer) per = Math.max(per, (voiceBuffer.duration + 0.5) / imgs.length);
-  const slidesTime = per * imgs.length;
+  // Cuánto dura cada escena y el cierre. Con duración fija manda el reparto; si no, todas duran `per`.
+  let durs = imgs.map(() => per);
+  let outro = OUTRO;
+  const clips: (HTMLVideoElement | null)[] = imgs.map(() => null);
+  if (o.duracion) {
+    const conClip = (o.clips ?? []).flatMap((c, i) => (c && i < imgs.length ? [i] : []));
+    const plan = planDeEscenas(o.duracion, imgs.length, o.tomas ?? conClip, OUTRO);
+    durs = plan.escenas.map((e) => e.segundos);
+    outro = plan.cierre;
+  }
+  if (o.clips?.some(Boolean)) {
+    o.onStatus?.("🎬 Cargando tomas con IA…");
+    await Promise.all(
+      o.clips.map(async (c, i) => {
+        // Si un clip no carga, esa escena se queda con la animación normal
+        if (c && i < imgs.length) clips[i] = await loadClip(c).catch(() => null);
+      }),
+    );
+  }
+  const starts: number[] = [];
+  durs.reduce((a, d, i) => ((starts[i] = a), a + d), 0);
+  const slidesTime = durs.reduce((a, d) => a + d, 0);
   // Subtítulos de la voz: cada palabra se reparte a lo largo del audio
   const subCues =
     voiceBuffer && o.subtitles?.script.trim() ? cuesFromWords(wordsFromScript(o.subtitles.script, voiceBuffer.duration, 0.05)) : [];
-  const total = slidesTime + OUTRO;
+  const total = slidesTime + outro;
 
   // Música de fondo (se compone a la medida exacta del reel)
   let musicBuffer: AudioBuffer | null = null;
@@ -273,15 +325,23 @@ export async function renderReel(o: ReelOptions): Promise<ReelResult> {
   const draw = (time: number) => {
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, W, H);
-    if (time < slidesTime) {
-      const i = Math.min(imgs.length - 1, Math.floor(time / per));
-      const local = time - i * per;
-      drawKenBurns(ctx, imgs[i], W, H, local / per, i);
+    // Una escena: su clip de IA si lo tiene; si no, la foto con zoom y paneo
+    const scene = (k: number, t: number) => {
+      const clip = clips[k];
+      if (clip) drawClip(ctx, clip, W, H);
+      else drawKenBurns(ctx, imgs[k], W, H, t, k);
+    };
+    if (time < slidesTime || outro === 0) {
+      let i = imgs.length - 1;
+      while (i > 0 && time < starts[i]) i--;
+      const per = durs[i];
+      const local = Math.min(per, time - starts[i]);
+      scene(i, local / per);
       // transición: la siguiente escena aparece encima
       if (local > per - FADE && i < imgs.length - 1) {
         ctx.save();
         ctx.globalAlpha = (local - (per - FADE)) / FADE;
-        drawKenBurns(ctx, imgs[i + 1], W, H, 0, i + 1);
+        scene(i + 1, 0);
         ctx.restore();
       }
       const fadeOut = local > per - FADE ? 1 - (local - (per - FADE)) / FADE : 1;
@@ -305,7 +365,7 @@ export async function renderReel(o: ReelOptions): Promise<ReelResult> {
     } else {
       const t = time - slidesTime;
       if (t < FADE) {
-        drawKenBurns(ctx, imgs[imgs.length - 1], W, H, 1, imgs.length - 1);
+        scene(imgs.length - 1, 1);
         ctx.save();
         ctx.globalAlpha = t / FADE;
         drawOutro(ctx, W, H, t, { brandName: o.brandName, cta: o.cta, accent: o.accent, logo });
@@ -371,9 +431,22 @@ export async function renderReel(o: ReelOptions): Promise<ReelResult> {
 
   // Usamos un temporizador (no requestAnimationFrame) para que siga grabando
   // aunque la ventana pierda el foco por un momento.
+  let sonando = -1; // escena cuyo clip se está reproduciendo
   await new Promise<void>((resolve) => {
     const tick = () => {
       const time = (performance.now() - start) / 1000;
+      // Al entrar a una escena con clip, el clip arranca desde el principio
+      let actual = imgs.length - 1;
+      while (actual > 0 && time < starts[actual]) actual--;
+      if (time < slidesTime && actual !== sonando) {
+        if (sonando >= 0) clips[sonando]?.pause();
+        sonando = actual;
+        const clip = clips[actual];
+        if (clip) {
+          clip.currentTime = 0;
+          clip.play().catch(() => {});
+        }
+      }
       if (time >= total) {
         draw(total - 0.001);
         resolve();
@@ -392,6 +465,11 @@ export async function renderReel(o: ReelOptions): Promise<ReelResult> {
   let blob = await done;
   // WebM grabado en el navegador no trae la duración: se la escribimos
   if (rec.ext === "webm") blob = await fixWebmDuration(blob, total * 1000, { logger: false }).catch(() => blob);
+  clips.forEach((c) => {
+    if (!c) return;
+    c.pause();
+    URL.revokeObjectURL(c.src);
+  });
   audioCtx?.close().catch(() => {});
   o.onProgress?.(1);
   return { url: URL.createObjectURL(blob), blob, ext: rec.ext, seconds: Math.round(total) };

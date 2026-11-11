@@ -41,6 +41,7 @@ export const LOOKUP_PLANES: Record<"basico" | "pro", string> = {
 export const LOOKUP_PAQUETES: Record<PaqueteId, string> = {
   creativo: "studio_paquete_creativo",
   voz: "studio_paquete_voz",
+  video: "studio_paquete_video",
 };
 
 // El plan que corresponde a un precio de Stripe (null si no es ninguno de los nuestros).

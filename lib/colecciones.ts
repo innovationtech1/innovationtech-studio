@@ -27,5 +27,9 @@ export function colecciones() {
     stripeEventos: `${p}stripe_eventos`,
     movimientosPaquetes: `${p}paquetes_movimientos`,
     clavesIa: `${p}claves_ia`,
+    trabajosVideo: `${p}trabajos_video`,
+    cacheVideo: `${p}cache_video`,
+    gastoVideo: `${p}gasto_video`,
+    candados: `${p}candados`,
   };
 }
