@@ -137,3 +137,10 @@ test("datos dañados: se empieza con «Mi video» sin romper nada", () => {
   assert.equal(r.proyectos.length, 1);
   assert.equal(a.getItem("its-draft:reel:tema"), '"promo martes"');
 });
+
+test("archivosDe: la voz guardada del proyecto también es suya", () => {
+  const datos = { "its-draft:reel:escenas-datos": clips({ imageId: "reel-f1" }), "its-draft:reel:voz-archivo": JSON.stringify({ id: "reelvoz-1" }) };
+  assert.deepEqual(archivosDe(datos), { fotos: ["reel-f1", "reelvoz-1"], videos: [] });
+  assert.deepEqual(archivosDe({ "its-draft:reel:voz-archivo": "null" }), { fotos: [], videos: [] });
+  assert.deepEqual(archivosDe({ "its-draft:reel:voz-archivo": "{roto" }), { fotos: [], videos: [] });
+});
