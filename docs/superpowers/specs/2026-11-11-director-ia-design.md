@@ -76,7 +76,7 @@ Al armar un video, cada foto dura **de 7 a 10 segundos** (8 por defecto). Así u
 - Número de clips = duración pedida ÷ 8, redondeado, entre 2 y 12. Sin duración pedida: 4 clips (unos 35 s con el cierre).
 - El guion de voz se escribe a la medida de esa duración (unas 2.3 palabras por segundo) para que la voz quepa sin alargar el video.
 - Las descripciones de imagen se piden detalladas (fotografía publicitaria, luz, encuadre, sin texto dentro) para que la imagen salga bien a la primera y no haya que repetirla.
-- Los clips que la persona agrega a mano siguen empezando en 3 s; esto aplica a lo que arma el Director.
+- Los clips que la persona agrega a mano también empiezan en 8 s (pedido de Hector, 2026-11-11). Los borradores de antes del editor conservan su duración.
 
 ## Costo
 

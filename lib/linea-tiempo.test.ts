@@ -20,11 +20,11 @@ import {
 const foto = (extra: Partial<Clip> = {}): Clip => nuevoClip({ image: "data:x", ...extra });
 const fotos = (n: number, segundos = 3) => Array.from({ length: n }, () => foto({ segundos }));
 
-test("nuevoClip: foto vacía de 3 s con id propio", () => {
+test("nuevoClip: foto vacía de 8 s con id propio", () => {
   const a = nuevoClip();
   const b = nuevoClip();
   assert.equal(a.tipo, "foto");
-  assert.equal(a.segundos, 3);
+  assert.equal(a.segundos, 8);
   assert.equal(a.image, "");
   assert.equal(a.caption, "");
   assert.equal(a.prompt, "");
@@ -57,7 +57,7 @@ test("normalizarClips: sin borrador válido deja 4 clips vacíos", () => {
   for (const malo of [null, "basura", [], undefined, 7]) {
     const r = normalizarClips(malo);
     assert.equal(r.length, 4);
-    assert.ok(r.every((c) => c.tipo === "foto" && !c.image && c.segundos === 3));
+    assert.ok(r.every((c) => c.tipo === "foto" && !c.image && c.segundos === 8));
   }
 });
 
@@ -170,7 +170,7 @@ test("aEscenas: omite los vacíos y pone los valores por defecto del texto", () 
   const r = aEscenas([a, nuevoClip(), b]);
   assert.deepEqual(r, [
     { imagen: "data:x", texto: "uno", textoPos: "abajo", textoTam: "normal", segundos: 4 },
-    { imagen: "data:x", texto: "dos", textoPos: "arriba", textoTam: "grande", segundos: 3 },
+    { imagen: "data:x", texto: "dos", textoPos: "arriba", textoTam: "grande", segundos: 8 },
   ]);
 });
 
@@ -194,7 +194,7 @@ test("ajustarAVoz: reparte las fotos para cubrir la voz", () => {
 test("ajustarAVoz: no toca las tomas ni los clips vacíos", () => {
   const toma = foto({ tipo: "toma" });
   const vacio = nuevoClip();
-  const r = ajustarAVoz([foto(), toma, vacio, foto()], 20);
+  const r = ajustarAVoz([foto({ segundos: 3 }), toma, vacio, foto({ segundos: 3 })], 20);
   assert.deepEqual(r.map((c) => c.segundos), [7.75, toma.segundos, vacio.segundos, 7.75]);
   assert.equal(r[1].tipo, "toma");
 });
@@ -213,4 +213,8 @@ test("formatoTiempo", () => {
   assert.equal(formatoTiempo(120), "2:00");
   assert.equal(formatoTiempo(11.6), "0:12");
   assert.equal(formatoTiempo(0), "0:00");
+});
+
+test("normalizarClips: un borrador de antes del editor sin duración guardada conserva sus 3 s", () => {
+  assert.equal(normalizarClips([{ image: "x", caption: "", prompt: "" }])[0].segundos, 3);
 });

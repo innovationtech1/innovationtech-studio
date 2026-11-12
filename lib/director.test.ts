@@ -215,7 +215,7 @@ test("aplicar: duración y estilo de texto para un clip o para todos", () => {
   let r = aplicar(estado([foto(), toma, foto()]), [{ tipo: "duracion", clip: "todos", segundos: 6 }]);
   assert.deepEqual(r.estado.clips.map((c) => c.segundos), [6, toma.segundos, 6]);
   r = aplicar(estado([foto(), foto()]), [{ tipo: "duracion", clip: 2, segundos: 9 }]);
-  assert.deepEqual(r.estado.clips.map((c) => c.segundos), [3, 9]);
+  assert.deepEqual(r.estado.clips.map((c) => c.segundos), [8, 9]);
   r = aplicar(estado([foto(), foto()]), [{ tipo: "estilo_texto", clip: "todos", posicion: "arriba", tamano: "grande" }]);
   assert.ok(r.estado.clips.every((c) => c.textoPos === "arriba" && c.textoTam === "grande"));
   r = aplicar(estado([foto(), foto()]), [{ tipo: "estilo_texto", clip: 2, tamano: "chico" }]);

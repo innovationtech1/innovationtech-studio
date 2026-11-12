@@ -5,7 +5,8 @@ export const MAX_VIDEO = 120; // segundos, contando el cierre
 export const CIERRE = 3; // segundos del cierre con la marca
 export const MIN_FOTO = 1.5;
 export const MAX_FOTO = 15;
-export const FOTO_DEFECTO = 3;
+export const FOTO_DEFECTO = 8; // un clip nuevo: pocas imágenes, bien aprovechadas (7 a 10 s cada una)
+const FOTO_ANTES = 3; // lo que duraba cada escena antes del editor (para borradores viejos)
 export const SEGUNDOS_TOMA = 5;
 export const MAX_TOMAS = 4;
 
@@ -56,7 +57,7 @@ export function nuevoClip(extra: Partial<Clip> = {}): Clip {
 const texto = (v: unknown) => (typeof v === "string" ? v : "");
 
 // Lee lo guardado en el dispositivo: clips nuevos o las escenas de antes (sin id ni duración, con `ia`).
-export function normalizarClips(guardado: unknown, segundosViejos: number = FOTO_DEFECTO): Clip[] {
+export function normalizarClips(guardado: unknown, segundosViejos: number = FOTO_ANTES): Clip[] {
   const lista = Array.isArray(guardado) ? guardado.filter((x) => x && typeof x === "object") : [];
   if (lista.length === 0) return Array.from({ length: 4 }, () => nuevoClip());
   return lista.map((x) => {
