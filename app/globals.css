@@ -219,6 +219,10 @@ h3.step { margin: 22px 0 6px; font-size: 16px; }
 .plegable[open] > summary::after { content: "▾"; }
 .plegable[open] > summary { border-bottom: 1px solid var(--navy-700); }
 .plegable > :not(summary) { margin-left: 14px; margin-right: 14px; }
+/* Los campos miden el 100 %: con el margen de la sección se salían por la derecha */
+.plegable > textarea, .plegable > input, .plegable > select { width: calc(100% - 28px); box-sizing: border-box; }
+.plegable > * { max-width: calc(100% - 28px); }
+.plegable > summary { max-width: none; }
 .plegable > :last-child { margin-bottom: 14px; }
 .plegable h4.sub { margin: 14px 14px 6px; font-size: 15px; }
 /* Barra de crear: fija abajo de la pantalla mientras se trabaja en el video */
