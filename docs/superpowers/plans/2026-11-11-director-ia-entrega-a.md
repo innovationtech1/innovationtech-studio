@@ -78,7 +78,7 @@ export function clipsPara(segundos?: number): number;       // duración pedida 
   - `clip: "todos"` solo vale en `duracion` y `estilo_texto`; en `borrar_clip` se descarta.
   - 25 acciones válidas → quedan 20 y `descartadas` 5.
   - `null`, `"hola"`, `{}`, `{acciones: "x"}` → `{acciones: [], descartadas: 0}`.
-  - `clipsPara(30)` → 4; `clipsPara(60)` → 8 (57 s de fotos ÷ 8, redondeado: se descuenta el cierre de 3 s); `clipsPara(200)` → 12; `clipsPara(5)` → 2; `clipsPara()` → 4.
+  - `clipsPara(30)` → 4 (30 ÷ 8 = 3.75, redondeado); `clipsPara(60)` → 8; `clipsPara(200)` → 12; `clipsPara(5)` → 2; `clipsPara()` → 4.
 - [ ] **Step 2:** Run: `node --conditions=react-server --import tsx --test lib/director.test.ts` → FAIL («Cannot find module './director'»).
 - [ ] **Step 3: Implementar** tipos, constantes, `validarAcciones` y `clipsPara`. Módulo puro.
 - [ ] **Step 4:** mismo comando → PASS.
