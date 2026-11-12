@@ -1336,6 +1336,14 @@ export const EN: Record<string, string> = {
   "Lenta": "Slow",
   "Aplicar a todos los clips": "Apply to all clips",
   "Repartí transiciones variadas por todo el video": "Spread varied transitions across the whole video",
+  "No se pudo guardar en tu dispositivo (puede que no tenga espacio). Puedes crear tu video ahora, pero si cierras la app eso no estará al volver. Para liberar espacio borra proyectos o videos de la Galería que ya no uses.": "Couldn't save to your device (it may be out of space). You can create your video now, but if you close the app this won't be here when you return. To free up space, delete projects or Gallery videos you no longer use.",
+  "Entendido": "Got it",
+  "Espera a que termine la toma que se está animando y vuelve a intentar.": "Wait for the take being animated to finish, then try again.",
+  "Ya estamos preparando tus tomas. Espera unos segundos y vuelve a intentar.": "We're already preparing your takes. Wait a few seconds and try again.",
+  "El sonido no pudo arrancar en este dispositivo. Toca «Crear reel» otra vez para grabarlo con sonido.": "Sound couldn't start on this device. Tap “Create reel” again to record it with sound.",
+  "Una toma anterior ya no está disponible: esa foto se ve con zoom. Tócala y elige «Animar» para generarla de nuevo.": "An earlier take is no longer available: that photo shows with zoom. Tap it and choose “Animate” to generate it again.",
+  "Este video tardó demasiado en abrir. Prueba con uno más corto o en formato MP4.": "This video took too long to open. Try a shorter one or an MP4 file.",
+  "No se pudo conectar con la IA de texto. Intenta de nuevo.": "Couldn't reach the text AI. Try again.",
 };
 
 // Textos con números u otras partes que cambian
@@ -1435,4 +1443,9 @@ export const EN_PATTERNS: [RegExp, string][] = [
   [/^Puse la transición «(.+)» después del clip (\d+)$/, "Set the “$1” transition after clip $2"],
   [/^Puse las transiciones (rápidas|lentas|de duración normal) en todos los clips$/, "Set all transitions: $1"],
   [/^Cambié la duración de la transición del clip (\d+)$/, "Changed the transition length of clip $1"],
+  [/^El video del clip ([\d, ]+) no está en este dispositivo\. Vuelve a subirlo o quita ese clip\.$/, "The video in clip $1 isn't on this device. Upload it again or remove that clip."],
+  [/^No se pudo traer la toma con IA del clip ([\d, ]+) \(revisa tu conexión\): ahí la foto se ve con zoom\. Vuelve a crear el video cuando tengas señal; no se cobra de nuevo\.$/, "Couldn't fetch the AI take for clip $1 (check your connection): the photo shows with zoom there. Create the video again when you have signal; you won't be charged again."],
+  [/^El video del clip (\d+) no se pudo abrir: en esa parte se ve su imagen fija\.$/, "The video in clip $1 couldn't be opened: its still image shows in that part."],
+  [/^El clip (\d+) ya se borró en esta misma orden$/, "Clip $1 was already deleted in this same order"],
+  [/^Un video admite hasta (\d+) clips$/, "A video can have up to $1 clips"],
 ];

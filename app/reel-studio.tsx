@@ -154,7 +154,14 @@ export default function ReelStudio({
       for (const id of faltan) {
         const blob = await abrirVideo(id);
         if (!vivo) return;
-        setUrlsVideo((u) => (id in u ? u : { ...u, [id]: blob ? URL.createObjectURL(blob) : null }));
+        if (id in urlsRef.current) continue;
+        // El enlace se crea una sola vez, fuera del cambio de estado (React puede repetir esa función)
+        const enlace = blob ? URL.createObjectURL(blob) : null;
+        setUrlsVideo((u) => {
+          if (!(id in u)) return { ...u, [id]: enlace };
+          if (enlace) URL.revokeObjectURL(enlace);
+          return u;
+        });
       }
     })();
     return () => {
@@ -706,8 +713,9 @@ export default function ReelStudio({
   async function verTomas(ids: string[]): Promise<{ vistos: TrabajoVisto[]; topeHoy: boolean }> {
     const vistos: TrabajoVisto[] = [];
     let topeHoy = false;
-    for (let k = 0; k < ids.length; k += 20) {
-      const r = await consultarTomas(ids.slice(k, k + 20));
+    // De 10 en 10: es lo que el servidor acepta por consulta
+    for (let k = 0; k < ids.length; k += 10) {
+      const r = await consultarTomas(ids.slice(k, k + 10));
       vistos.push(...r.trabajos);
       topeHoy = topeHoy || r.topeHoy;
     }
@@ -895,18 +903,25 @@ export default function ReelStudio({
       }
       // Las que fallaron (o que el servidor ya no reconoce) se quitan del clip: esa foto se verá con zoom
       const porId = new Map(r.vistos.map((t) => [t.id, t]));
-      let fallas = 0;
+      let fallas = 0; // se intentaron y fallaron: el servidor ya devolvió el crédito
+      let perdidas = 0; // el servidor ya no las tiene (muy viejas o de otra cuenta): no hay crédito que devolver
       for (const id of ids) {
         const t = porId.get(id);
-        if (!t || t.estado === "fallo") {
-          fallas++;
-          interno((l) => quitarToma(l, id));
-        }
+        if (t && t.estado !== "fallo") continue;
+        if (t) fallas++;
+        else perdidas++;
+        interno((l) => quitarToma(l, id));
       }
       void refrescarCuenta();
       setBusy("Grabando tu reel…");
       await grabar(clipsRef.current);
-      setEstadoIa(fallas ? "No se pudo generar la toma, te devolvimos tu crédito" : textoEstado({ tipo: "trabajos", trabajos: r.vistos, topeHoy: false }));
+      setEstadoIa(
+        fallas
+          ? "No se pudo generar la toma, te devolvimos tu crédito"
+          : perdidas
+            ? "Una toma anterior ya no está disponible: esa foto se ve con zoom. Tócala y elige «Animar» para generarla de nuevo."
+            : textoEstado({ tipo: "trabajos", trabajos: r.vistos, topeHoy: false }),
+      );
       setInvitarPlan(esDemo);
     });
 
@@ -958,7 +973,12 @@ export default function ReelStudio({
     }
   }
 
-  const enviarOrden = (orden: string) =>
+  const enviarOrden = async (orden: string): Promise<boolean> => {
+    let entendida = false;
+    await enviarLaOrden(orden, () => (entendida = true));
+    return entendida;
+  };
+  const enviarLaOrden = (orden: string, entendida: () => void) =>
     run("Pensando tu orden…", async () => {
       detenerPrevia();
       setResultadoDir(null);
@@ -991,10 +1011,12 @@ export default function ReelStudio({
       if (acciones.length === 0) {
         // La IA explicó por qué no puede: se muestra su mensaje y el video no cambia
         if (!mensaje) throw new Error("No entendí la orden. Dila de otra forma.");
+        entendida();
         setHayDeshacerOrden(false);
         setResultadoDir({ mensaje, hecho: [], avisos: [] });
         return;
       }
+      entendida();
       const r = aplicarAcciones(estado, acciones, catalogo, { voz: puedeVoz, ia: conCuenta });
       const gasto = costoDe(r.pendientes);
       let costo = textoCosto(gasto);
@@ -1313,6 +1335,11 @@ export default function ReelStudio({
             setCta("");
             setScript("");
             setVoice("");
+            // La canción propia también se quita del dispositivo (si no, se queda ocupando espacio)
+            if (cancionPropia?.id) deleteFile(cancionPropia.id).catch(() => {});
+            setCancionPropia(null);
+            setSinEspacio(false);
+            setAvisosVideo([]);
             setResult(null);
             setError("");
             setEstadoIa("");

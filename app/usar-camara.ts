@@ -41,7 +41,11 @@ export function usarCamara(o: { sonido: boolean; ancho?: number; alto?: number; 
           sinSonido = o.sonido && !i.audio;
           break;
         } catch (e) {
-          fallo = fallo || ((e as { name?: string }).name ?? "");
+          const nombre = (e as { name?: string }).name ?? "";
+          fallo = fallo || nombre;
+          // Permiso de cámara negado: no se insiste (cada intento volvería a molestar con el permiso).
+          // Si el intento pedía micrófono, sí se prueba sin sonido: puede que solo se negó el micrófono.
+          if ((nombre === "NotAllowedError" || nombre === "SecurityError") && !i.audio) break;
         }
       }
       const detectadas = camarasDe(await md.enumerateDevices().catch(() => []));

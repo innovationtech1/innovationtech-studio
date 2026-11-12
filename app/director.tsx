@@ -25,7 +25,7 @@ export default function Director({
   sugerida?: { text: string; n: number } | null; // un tema que llega de otra sección (calendario, asistente): queda escrito, listo para enviar
   ocupado: boolean;
   cfHeaders: Record<string, string>;
-  onEnviar: (orden: string) => void;
+  onEnviar: (orden: string) => Promise<boolean>; // true = la orden se entendió
   confirmar: { texto: string; onSi: () => void; onNo: () => void } | null; // antes de gastar imágenes o voz
   resultado: { mensaje: string; hecho: string[]; avisos: string[] } | null;
   onDeshacer: (() => void) | null; // null = no hay orden que deshacer
@@ -38,9 +38,9 @@ export default function Director({
   const lista = orden.trim();
   const enviar = () => {
     if (!lista || ocupado || confirmar) return;
-    onEnviar(lista);
-    setOrden("");
     setDictando("");
+    // La orden se queda escrita hasta que se entienda: si falla (sin señal, sin créditos) no hay que repetirla
+    void onEnviar(lista).then((ok) => ok && setOrden((o) => (o.trim() === lista ? "" : o)));
   };
 
   return (
