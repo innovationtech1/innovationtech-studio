@@ -1,6 +1,6 @@
 # Director con IA — órdenes escritas o por voz para crear y editar videos
 
-Fecha: 2026-11-11 · Estado: en revisión
+Fecha: 2026-11-11 · Estado: aprobada por Hector (con el ajuste de 7 a 10 s por imagen y gastar lo mínimo)
 
 ## Qué pidió Hector
 
@@ -42,7 +42,7 @@ Los clips se numeran desde 1, como en pantalla. `clip` acepta un número o `"tod
 
 | Acción | Campos | Qué hace |
 |---|---|---|
-| `armar` | `tema`, `clips` (2–12, por defecto 5), `textos[]`, `imagenes[]` (descripciones en inglés), `cta`, `guion`, `musica` (estilo) | Reemplaza los clips vacíos y agrega los que falten; pone textos, cierre, guion y música. Pide crear una imagen por clip sin foto y generar la voz. |
+| `armar` | `tema`, `clips` (2–12, por defecto 4), `segundos_por_foto` (7–10, por defecto 8), `textos[]`, `imagenes[]` (descripciones en inglés), `cta`, `guion`, `musica` (estilo) | Reemplaza los clips vacíos y agrega los que falten; pone textos, cierre, guion y música. Pide crear una imagen por clip sin foto y generar la voz. |
 | `agregar_clip` | `cantidad` (1–10) | Agrega clips al final |
 | `borrar_clip` | `clip` | Borra ese clip |
 | `mover_clip` | `clip`, `a` | Lo cambia de lugar |
@@ -68,6 +68,15 @@ Reglas:
 - **Voz:** si el plan no incluye voz, la acción se omite y se avisa («Tu plan no incluye voz»); el resto de la orden sí se hace. Tras generar la voz en un `armar`, las fotos se reparten para cubrirla (`ajustarAVoz`).
 - **Tope de 2 minutos:** si tras aplicar la orden el video pasa de 2:00, se aplica y se muestra el aviso de siempre.
 - `armar` sobre un video que ya tiene fotos **no las borra**: conserva los clips con foto y completa el resto. Para empezar de cero, la persona usa «Empezar nuevo».
+
+## Pocas imágenes, bien aprovechadas (pedido de Hector)
+
+Al armar un video, cada foto dura **de 7 a 10 segundos** (8 por defecto). Así un video de 30 s usa 4 imágenes y no 10: se gasta menos y cada imagen se luce con su zoom lento. Reglas para `armar`:
+
+- Número de clips = duración pedida ÷ 8, redondeado, entre 2 y 12. Sin duración pedida: 4 clips (unos 35 s con el cierre).
+- El guion de voz se escribe a la medida de esa duración (unas 2.3 palabras por segundo) para que la voz quepa sin alargar el video.
+- Las descripciones de imagen se piden detalladas (fotografía publicitaria, luz, encuadre, sin texto dentro) para que la imagen salga bien a la primera y no haya que repetirla.
+- Los clips que la persona agrega a mano siguen empezando en 3 s; esto aplica a lo que arma el Director.
 
 ## Costo
 
