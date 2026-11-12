@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Camera, Check, SwitchCamera, X } from "lucide-react";
 import { mensajeCamara, tamanoCaptura } from "@/lib/camara";
+import { usarCamara } from "./usar-camara";
+import { CamaraNoAbre, SelectorCamara } from "./camara-ayuda";
 
 const LADO_MAXIMO = 1600;
 
@@ -17,43 +19,11 @@ export default function Camara({
   onCerrar: () => void;
   lleno?: boolean;
 }) {
-  const video = useRef<HTMLVideoElement>(null);
-  const flujo = useRef<MediaStream | null>(null);
-  const [frente, setFrente] = useState(false);
-  const [lista, setLista] = useState(false);
-  const [error, setError] = useState("");
+  const cam = usarCamara({ sonido: false });
+  const { video, listo: lista, error, setError } = cam;
+  const frente = cam.espejo;
   const [ultima, setUltima] = useState("");
   const [tomadas, setTomadas] = useState(0);
-
-  // Abre la cámara (trasera por defecto) y la cierra al salir o al cambiar de cámara
-  useEffect(() => {
-    let vivo = true;
-    setLista(false);
-    setError("");
-    (async () => {
-      if (!navigator.mediaDevices?.getUserMedia) return setError(mensajeCamara("SinSoporte"));
-      try {
-        const s = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: frente ? "user" : { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-          audio: false,
-        });
-        if (!vivo) return s.getTracks().forEach((t) => t.stop());
-        flujo.current = s;
-        if (video.current) {
-          video.current.srcObject = s;
-          await video.current.play().catch(() => {});
-        }
-        setLista(true);
-      } catch (e) {
-        if (vivo) setError(mensajeCamara((e as { name?: string }).name ?? ""));
-      }
-    })();
-    return () => {
-      vivo = false;
-      flujo.current?.getTracks().forEach((t) => t.stop());
-      flujo.current = null;
-    };
-  }, [frente]);
 
   async function tomar() {
     const v = video.current;
@@ -86,7 +56,7 @@ export default function Camara({
         </button>
         <h2>Tomar foto</h2>
         {error ? (
-          <div className="error">{error}</div>
+          <CamaraNoAbre error={error} detectadas={cam.lista.length} onReintentar={cam.reintentar} />
         ) : (
           <div className="camara-vista">
             <video ref={video} playsInline muted style={{ transform: frente ? "scaleX(-1)" : undefined }} />
@@ -100,8 +70,9 @@ export default function Camara({
             {!puedeMas && " Ya llegaste al máximo de fotos de referencia."}
           </p>
         )}
+        {!error && <SelectorCamara lista={cam.lista} activa={cam.activa} onElegir={cam.elegir} />}
         <div className="actions camara-botones">
-          <button className="btn ghost" disabled={!!error} onClick={() => setFrente((f) => !f)} title="Cambiar de cámara">
+          <button className="btn ghost" disabled={!!error} onClick={cam.cambiar} title="Cambiar de cámara">
             <SwitchCamera size={18} aria-hidden /> Cambiar
           </button>
           <button className="btn" disabled={!lista || !!error || !puedeMas} onClick={() => void tomar()}>

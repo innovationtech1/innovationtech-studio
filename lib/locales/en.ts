@@ -1292,6 +1292,11 @@ export const EN: Record<string, string> = {
   "Primero ponle una foto a este clip.": "First add a photo to this clip.",
   "Anima las fotos marcadas que faltan (usa tus tomas) y graba el video": "Animates the marked photos that are missing (uses your takes) and records the video",
   "Borrar este video": "Delete this video",
+  "Cámara": "Camera",
+  "Buscar la cámara otra vez": "Look for the camera again",
+  "Cámaras detectadas: ninguna.": "Cameras detected: none.",
+  "Cámaras detectadas: 1.": "Cameras detected: 1.",
+  "No detectamos ninguna cámara en este equipo. Conecta una (o revisa que no esté apagada o tapada) y toca «Buscar la cámara otra vez». También puedes subir el archivo desde tu dispositivo.": "We didn't detect any camera on this device. Connect one (or check it isn't off or covered) and tap “Look for the camera again”. You can also upload the file from your device.",
 };
 
 // Textos con números u otras partes que cambian
@@ -1386,4 +1391,5 @@ export const EN_PATTERNS: [RegExp, string][] = [
   [/^¿Borrar «(.*)»\? Se borran sus fotos y videos de este dispositivo\. Los videos ya creados siguen en tu galería\.$/, "Delete “$1”? Its photos and videos are deleted from this device. Videos already created stay in your gallery."],
   [/^Máximo (\d+) videos guardados$/, "Maximum $1 saved videos"],
   [/^Video (\d+)$/, "Video $1"],
+  [/^Cámaras detectadas: (\d+)\.$/, "Cameras detected: $1."],
 ];
