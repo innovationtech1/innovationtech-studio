@@ -628,7 +628,7 @@ export default function ReelStudio({
   const [hayDeshacerOrden, setHayDeshacerOrden] = useState(false);
   // Lo que la orden dejó por hacer (imágenes, voz) y cómo termina (vista previa o crear el video)
   const [cola, setCola] = useState<Pendiente[] | null>(null);
-  const [alFinal, setAlFinal] = useState<"vista_previa" | "crear_video" | null>(null);
+  const [alFinal, setAlFinal] = useState<"vista_previa" | "crear_video" | "generar_ia" | null>(null);
   const ajustarTrasVoz = useRef(false);
 
   const ajustesActuales = (): Ajustes => ({
@@ -700,7 +700,11 @@ export default function ReelStudio({
         return;
       }
       const r = aplicarAcciones(estado, acciones, catalogo, { voz: puedeVoz, ia: conCuenta });
-      const costo = textoCosto(costoDe(r.pendientes));
+      const gasto = costoDe(r.pendientes);
+      let costo = textoCosto(gasto);
+      // Con tomas de IA se dice cuántas quedan en el saldo, para decidir con el dato a la vista
+      const saldoTomas = cuenta?.usuario ? cuenta.saldo?.tomas_ia : undefined;
+      if (costo && gasto.tomas > 0 && typeof saldoTomas === "number") costo += saldoTomas === 1 ? " Te queda 1 toma." : ` Te quedan ${saldoTomas} tomas.`;
       if (costo) setPropuesta({ r, mensaje, costo, sobre });
       else confirmarOrden({ r, mensaje, sobre });
     });
@@ -764,8 +768,8 @@ export default function ReelStudio({
         }
       }
       if (fallas.length) setResultadoDir((r) => (r ? { ...r, avisos: [...r.avisos, ...fallas] } : r));
-      const fin = pendientes.find((p) => p.tipo === "vista_previa" || p.tipo === "crear_video");
-      if (fin) setAlFinal(fin.tipo as "vista_previa" | "crear_video");
+      const fin = pendientes.find((p) => p.tipo === "vista_previa" || p.tipo === "crear_video" || p.tipo === "generar_ia");
+      if (fin) setAlFinal(fin.tipo as "vista_previa" | "crear_video" | "generar_ia");
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cola, busy, viendo]);
@@ -778,13 +782,14 @@ export default function ReelStudio({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vozSegundos]);
 
-  // «Muéstrame la vista previa» o «crea el video»: al final, con todo ya en su lugar
+  // «Muéstrame la vista previa», «crea el video» o «genéralo con IA»: al final, con todo ya en su lugar
   useEffect(() => {
     if (!alFinal || busy || viendo || cola) return;
     if (voice && vozSegundos === 0) return; // falta medir la voz recién generada
     const que = alFinal;
     setAlFinal(null);
     if (que === "vista_previa") void verPrevia();
+    else if (que === "generar_ia") void generarConIa(); // sube las fotos marcadas, espera las tomas y graba el video
     else void buildReel();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alFinal, busy, viendo, cola, voice, vozSegundos]);
