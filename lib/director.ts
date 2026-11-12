@@ -1,0 +1,613 @@
+// Director con IA: la persona escribe o dicta una orden y la IA la traduce a acciones de un catálogo fijo.
+// Aquí vive el catálogo, la validación de lo que devuelve la IA y cómo se aplica al video.
+// Módulo puro (sin React ni DOM). Ninguna función modifica lo que recibe.
+
+import {
+  CIERRE,
+  MAX_FOTO,
+  MAX_TOMAS,
+  MAX_VIDEO,
+  MIN_FOTO,
+  SEGUNDOS_TOMA,
+  borrar,
+  cambiar,
+  duplicar,
+  mover,
+  nuevoClip,
+  type Clip,
+  type TextoPos,
+  type TextoTam,
+} from "./linea-tiempo";
+
+export const MAX_ACCIONES = 20;
+export const MAX_ORDEN = 500; // caracteres de la orden
+// Al armar un video cada foto dura de 7 a 10 s: pocas imágenes, bien aprovechadas (se gasta menos)
+export const FOTO_DIRECTOR = 8;
+export const MIN_FOTO_DIRECTOR = 7;
+export const MAX_FOTO_DIRECTOR = 10;
+export const CLIPS_DEFECTO = 4;
+const MIN_CLIPS = 2;
+const MAX_CLIPS = 12;
+const MAX_TEXTO = 120;
+const MAX_GUION = 1500;
+
+export type Formato = "9:16" | "1:1" | "16:9";
+export type RefClip = number | "todos"; // número desde 1, como en pantalla
+
+export type Accion =
+  | { tipo: "armar"; tema: string; clips: number; segundosPorFoto: number; textos: string[]; imagenes: string[]; cta: string; guion: string; musica?: string }
+  | { tipo: "agregar_clip"; cantidad: number }
+  | { tipo: "borrar_clip"; clip: number }
+  | { tipo: "mover_clip"; clip: number; a: number }
+  | { tipo: "duplicar_clip"; clip: number }
+  | { tipo: "duracion"; clip: RefClip; segundos: number }
+  | { tipo: "duracion_total"; segundos: number }
+  | { tipo: "texto"; clip: number; texto: string }
+  | { tipo: "estilo_texto"; clip: RefClip; posicion?: TextoPos; tamano?: TextoTam }
+  | { tipo: "imagen"; clip: number; descripcion: string }
+  | { tipo: "animar"; clip: number; activar: boolean; movimiento?: string }
+  | { tipo: "formato"; valor: Formato }
+  | { tipo: "cierre"; negocio?: string; cta?: string }
+  | { tipo: "guion"; texto: string }
+  | { tipo: "voz"; genero?: "mujer" | "hombre"; voz?: string; generar?: boolean; quitar?: boolean }
+  | { tipo: "subtitulos"; activar: boolean }
+  | { tipo: "musica"; activar?: boolean; estilo?: string; volumen?: number | "subir" | "bajar" }
+  | { tipo: "vista_previa" }
+  | { tipo: "crear_video" };
+
+export const TIPOS_DE_ACCION: Accion["tipo"][] = [
+  "armar",
+  "agregar_clip",
+  "borrar_clip",
+  "mover_clip",
+  "duplicar_clip",
+  "duracion",
+  "duracion_total",
+  "texto",
+  "estilo_texto",
+  "imagen",
+  "animar",
+  "formato",
+  "cierre",
+  "guion",
+  "voz",
+  "subtitulos",
+  "musica",
+  "vista_previa",
+  "crear_video",
+];
+
+// Lo que la app tiene para elegir: estilos de música y voces
+export type Catalogo = { estilos: string[]; voces: { id: string; genero: "mujer" | "hombre" }[] };
+
+// ---------- Validación de lo que devuelve la IA ----------
+
+type Cruda = Record<string, unknown>;
+const POSICIONES: TextoPos[] = ["arriba", "centro", "abajo"];
+const TAMANOS: TextoTam[] = ["chico", "normal", "grande"];
+const FORMATOS: Formato[] = ["9:16", "1:1", "16:9"];
+
+const num = (v: unknown): number | null => {
+  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
+  return Number.isFinite(n) ? n : null;
+};
+const entre = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
+const txt = (v: unknown, max: number): string => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "");
+const bool = (v: unknown): boolean | null => (typeof v === "boolean" ? v : v === "true" || v === "si" || v === "sí" ? true : v === "false" || v === "no" ? false : null);
+// Número de clip: entero desde 1
+const nClip = (v: unknown): number | null => {
+  const n = num(v);
+  return n !== null && Number.isInteger(n) && n >= 1 ? n : null;
+};
+const refClip = (v: unknown): RefClip | null => (typeof v === "string" && v.trim().toLowerCase() === "todos" ? "todos" : nClip(v));
+
+export function clipsPara(segundos?: number): number {
+  if (!segundos || !Number.isFinite(segundos)) return CLIPS_DEFECTO;
+  return entre(Math.round(segundos / FOTO_DIRECTOR), MIN_CLIPS, MAX_CLIPS);
+}
+
+function validarUna(a: Cruda, cat: Catalogo): Accion | null {
+  switch (a.tipo) {
+    case "armar": {
+      const tema = txt(a.tema, 300);
+      if (!tema) return null;
+      const clips = entre(Math.round(num(a.clips) ?? CLIPS_DEFECTO), MIN_CLIPS, MAX_CLIPS);
+      const lista = (v: unknown, max: number, relleno: string) => {
+        const l = (Array.isArray(v) ? v : []).slice(0, clips).map((x) => txt(x, max));
+        while (l.length < clips) l.push(relleno);
+        return l.map((x) => x || relleno);
+      };
+      const r: Accion = {
+        tipo: "armar",
+        tema,
+        clips,
+        segundosPorFoto: entre(num(a.segundos_por_foto ?? a.segundosPorFoto) ?? FOTO_DIRECTOR, MIN_FOTO_DIRECTOR, MAX_FOTO_DIRECTOR),
+        textos: lista(a.textos, MAX_TEXTO, ""),
+        imagenes: lista(a.imagenes, 400, `${tema}, advertising photography, high quality`),
+        cta: txt(a.cta, MAX_TEXTO),
+        guion: txt(a.guion, MAX_GUION),
+      };
+      if (typeof a.musica === "string" && cat.estilos.includes(a.musica)) r.musica = a.musica;
+      return r;
+    }
+    case "agregar_clip":
+      return { tipo: "agregar_clip", cantidad: entre(Math.round(num(a.cantidad) ?? 1), 1, 10) };
+    case "borrar_clip":
+    case "duplicar_clip": {
+      const clip = nClip(a.clip);
+      return clip === null ? null : { tipo: a.tipo, clip };
+    }
+    case "mover_clip": {
+      const clip = nClip(a.clip);
+      const destino = nClip(a.a);
+      return clip === null || destino === null ? null : { tipo: "mover_clip", clip, a: destino };
+    }
+    case "duracion": {
+      const clip = refClip(a.clip);
+      const s = num(a.segundos);
+      return clip === null || s === null ? null : { tipo: "duracion", clip, segundos: entre(s, MIN_FOTO, MAX_FOTO) };
+    }
+    case "duracion_total": {
+      const s = num(a.segundos);
+      return s === null ? null : { tipo: "duracion_total", segundos: entre(s, 5, MAX_VIDEO) };
+    }
+    case "texto": {
+      const clip = nClip(a.clip);
+      // Un texto vacío vale (quita el texto), pero tiene que venir
+      return clip === null || typeof a.texto !== "string" ? null : { tipo: "texto", clip, texto: txt(a.texto, MAX_TEXTO) };
+    }
+    case "estilo_texto": {
+      const clip = refClip(a.clip);
+      const posicion = POSICIONES.includes(a.posicion as TextoPos) ? (a.posicion as TextoPos) : undefined;
+      const tamano = TAMANOS.includes(a.tamano as TextoTam) ? (a.tamano as TextoTam) : undefined;
+      if (clip === null || (!posicion && !tamano)) return null;
+      return { tipo: "estilo_texto", clip, ...(posicion ? { posicion } : {}), ...(tamano ? { tamano } : {}) };
+    }
+    case "imagen": {
+      const clip = nClip(a.clip);
+      const descripcion = txt(a.descripcion, 400);
+      return clip === null || !descripcion ? null : { tipo: "imagen", clip, descripcion };
+    }
+    case "animar": {
+      const clip = nClip(a.clip);
+      if (clip === null) return null;
+      const movimiento = txt(a.movimiento, 300);
+      return { tipo: "animar", clip, activar: bool(a.activar) ?? true, ...(movimiento ? { movimiento } : {}) };
+    }
+    case "formato":
+      return FORMATOS.includes(a.valor as Formato) ? { tipo: "formato", valor: a.valor as Formato } : null;
+    case "cierre": {
+      const negocio = txt(a.negocio, MAX_TEXTO);
+      const cta = txt(a.cta, MAX_TEXTO);
+      if (!negocio && !cta) return null;
+      return { tipo: "cierre", ...(negocio ? { negocio } : {}), ...(cta ? { cta } : {}) };
+    }
+    case "guion": {
+      const texto = txt(a.texto, MAX_GUION);
+      return texto ? { tipo: "guion", texto } : null;
+    }
+    case "voz": {
+      const r: Extract<Accion, { tipo: "voz" }> = { tipo: "voz" };
+      if (a.genero === "mujer" || a.genero === "hombre") r.genero = a.genero;
+      if (typeof a.voz === "string") {
+        if (!cat.voces.some((v) => v.id === a.voz)) return null;
+        r.voz = a.voz;
+      }
+      if (bool(a.generar)) r.generar = true;
+      if (bool(a.quitar)) r.quitar = true;
+      return Object.keys(r).length > 1 ? r : null;
+    }
+    case "subtitulos": {
+      const activar = bool(a.activar);
+      return activar === null ? null : { tipo: "subtitulos", activar };
+    }
+    case "musica": {
+      const r: Extract<Accion, { tipo: "musica" }> = { tipo: "musica" };
+      const activar = bool(a.activar);
+      if (activar !== null) r.activar = activar;
+      if (typeof a.estilo === "string") {
+        if (!cat.estilos.includes(a.estilo)) return null;
+        r.estilo = a.estilo;
+      }
+      if (a.volumen === "subir" || a.volumen === "bajar") r.volumen = a.volumen;
+      else if (num(a.volumen) !== null) r.volumen = entre(num(a.volumen)!, 0, 100);
+      return Object.keys(r).length > 1 ? r : null;
+    }
+    case "vista_previa":
+      return { tipo: "vista_previa" };
+    case "crear_video":
+      return { tipo: "crear_video" };
+    default:
+      return null;
+  }
+}
+
+// Recibe lo que devolvió la IA ({acciones: [...]} o la lista) y deja solo acciones del catálogo, bien formadas.
+export function validarAcciones(json: unknown, cat: Catalogo): { acciones: Accion[]; descartadas: number } {
+  const lista: unknown[] | null = Array.isArray(json)
+    ? json
+    : json && typeof json === "object" && Array.isArray((json as Cruda).acciones)
+      ? ((json as Cruda).acciones as unknown[])
+      : null;
+  if (!lista) return { acciones: [], descartadas: 0 };
+  const acciones: Accion[] = [];
+  let descartadas = 0;
+  for (const x of lista) {
+    const a = x && typeof x === "object" ? validarUna(x as Cruda, cat) : null;
+    if (a && acciones.length < MAX_ACCIONES) acciones.push(a);
+    else descartadas++;
+  }
+  return { acciones, descartadas };
+}
+
+// ---------- Aplicar las acciones al video ----------
+
+// Los ajustes del reel que una orden puede cambiar (lo demás del Creador de Reels no se toca)
+export type Ajustes = {
+  formato: Formato;
+  negocio: string;
+  cta: string;
+  guion: string;
+  vozId: string;
+  hayVoz: boolean; // ya hay una voz generada
+  subtitulos: boolean;
+  musica: boolean;
+  estilo: string;
+  volumen: number; // 0 a 1
+};
+export type Estado = { clips: Clip[]; ajustes: Ajustes };
+
+// Lo que la orden deja por hacer después de aplicarse: lo que gasta (imágenes, voz) y lo que se ve al final.
+export type Pendiente =
+  | { tipo: "imagen"; clipId: string; descripcion: string }
+  | { tipo: "voz"; ajustarFotos: boolean } // ajustarFotos: al generarla, repartir las fotos para cubrirla (al armar)
+  | { tipo: "quitar_voz" }
+  | { tipo: "vista_previa" }
+  | { tipo: "crear_video" };
+
+export type Permisos = { voz: boolean; ia: boolean }; // el plan incluye voz / hay sesión para animar con IA
+export type Resultado = { estado: Estado; pendientes: Pendiente[]; hecho: string[]; avisos: string[] };
+
+const mmss = (s: number) => `${Math.floor(Math.round(s) / 60)}:${String(Math.round(s) % 60).padStart(2, "0")}`;
+
+export function aplicarAcciones(estado: Estado, acciones: Accion[], cat: Catalogo, permisos: Permisos): Resultado {
+  let clips = estado.clips;
+  const aj: Ajustes = { ...estado.ajustes };
+  const hecho: string[] = [];
+  const avisos: string[] = [];
+  const imagenes = new Map<string, string>(); // clip → descripción de la imagen por crear
+  let voz: { ajustarFotos: boolean } | null = null;
+  let quitarVoz = false;
+  let final: "vista_previa" | "crear_video" | null = null;
+
+  const aviso = (t: string) => void (avisos.includes(t) || avisos.push(t));
+  // Devuelve el índice del clip número n, o avisa que no existe
+  const lugar = (n: number): number => {
+    if (n >= 1 && n <= clips.length) return n - 1;
+    aviso(`No existe el clip ${n}`);
+    return -1;
+  };
+  // Un clip «tendrá foto» si ya la tiene o si esta misma orden la va a crear
+  const tendraFoto = (c: Clip) => !!c.image || imagenes.has(c.id);
+  const pedirVoz = (ajustarFotos: boolean) => {
+    if (!aj.guion.trim()) return aviso("Escribe primero el guion");
+    if (!permisos.voz) return aviso("Tu plan no incluye voz");
+    voz = { ajustarFotos: ajustarFotos || !!voz?.ajustarFotos };
+    quitarVoz = false;
+    aj.hayVoz = false;
+    return true;
+  };
+
+  for (const a of acciones) {
+    switch (a.tipo) {
+      case "agregar_clip":
+        clips = [...clips, ...Array.from({ length: a.cantidad }, () => nuevoClip())];
+        hecho.push(a.cantidad === 1 ? "Agregué 1 clip" : `Agregué ${a.cantidad} clips`);
+        break;
+      case "borrar_clip": {
+        const i = lugar(a.clip);
+        if (i < 0) break;
+        imagenes.delete(clips[i].id);
+        clips = borrar(clips, i);
+        hecho.push(`Borré el clip ${a.clip}`);
+        break;
+      }
+      case "mover_clip": {
+        const i = lugar(a.clip);
+        if (i < 0) break;
+        const destino = Math.min(clips.length, a.a) - 1;
+        clips = mover(clips, i, destino);
+        hecho.push(`Moví el clip ${a.clip} al lugar ${destino + 1}`);
+        break;
+      }
+      case "duplicar_clip": {
+        const i = lugar(a.clip);
+        if (i < 0) break;
+        clips = duplicar(clips, i);
+        hecho.push(`Dupliqué el clip ${a.clip}`);
+        break;
+      }
+      case "duracion": {
+        if (a.clip === "todos") {
+          clips = clips.map((c) => (c.tipo === "foto" ? { ...c, segundos: a.segundos } : c));
+          hecho.push(`Puse todas las fotos en ${a.segundos} s`);
+          break;
+        }
+        const i = lugar(a.clip);
+        if (i < 0) break;
+        if (clips[i].tipo === "toma") {
+          aviso(`El clip ${a.clip} está animado con IA y siempre dura ${SEGUNDOS_TOMA} s`);
+          break;
+        }
+        clips = cambiar(clips, i, { segundos: a.segundos });
+        hecho.push(`Puse el clip ${a.clip} en ${a.segundos} s`);
+        break;
+      }
+      case "duracion_total": {
+        const cuentan = clips.filter(tendraFoto);
+        const fotos = cuentan.filter((c) => c.tipo === "foto");
+        if (fotos.length === 0) {
+          aviso("Agrega fotos antes de fijar la duración del video");
+          break;
+        }
+        const fijo = cuentan.filter((c) => c.tipo === "toma").length * SEGUNDOS_TOMA + CIERRE;
+        const cada = entre(Math.round(((a.segundos - fijo) / fotos.length) * 10) / 10, MIN_FOTO, MAX_FOTO);
+        const ids = new Set(fotos.map((c) => c.id));
+        clips = clips.map((c) => (ids.has(c.id) ? { ...c, segundos: cada } : c));
+        hecho.push(`Ajusté el video a ${mmss(fotos.length * cada + fijo)}`);
+        break;
+      }
+      case "texto": {
+        const i = lugar(a.clip);
+        if (i < 0) break;
+        clips = cambiar(clips, i, { caption: a.texto });
+        hecho.push(`Cambié el texto del clip ${a.clip}`);
+        break;
+      }
+      case "estilo_texto": {
+        const cambios: Partial<Clip> = { ...(a.posicion ? { textoPos: a.posicion } : {}), ...(a.tamano ? { textoTam: a.tamano } : {}) };
+        if (a.clip === "todos") {
+          clips = clips.map((c) => ({ ...c, ...cambios }));
+          hecho.push("Cambié el estilo de todos los textos");
+          break;
+        }
+        const i = lugar(a.clip);
+        if (i < 0) break;
+        clips = cambiar(clips, i, cambios);
+        hecho.push(`Cambié el estilo del texto del clip ${a.clip}`);
+        break;
+      }
+      case "imagen": {
+        const i = lugar(a.clip);
+        if (i < 0) break;
+        clips = cambiar(clips, i, { prompt: a.descripcion });
+        imagenes.set(clips[i].id, a.descripcion);
+        hecho.push(`Crearé la imagen del clip ${a.clip}`);
+        break;
+      }
+      case "animar": {
+        const i = lugar(a.clip);
+        if (i < 0) break;
+        if (!a.activar) {
+          clips = cambiar(clips, i, { tipo: "foto" });
+          hecho.push(`Quité la IA del clip ${a.clip}`);
+          break;
+        }
+        if (!permisos.ia) {
+          aviso("Inicia sesión para animar fotos con IA");
+          break;
+        }
+        if (!tendraFoto(clips[i])) {
+          aviso(`El clip ${a.clip} no tiene foto todavía`);
+          break;
+        }
+        const yaEs = clips[i].tipo === "toma";
+        if (!yaEs && clips.filter((c) => c.tipo === "toma" && tendraFoto(c)).length >= MAX_TOMAS) {
+          aviso(`Máximo ${MAX_TOMAS} fotos con IA por video`);
+          break;
+        }
+        clips = cambiar(clips, i, { tipo: "toma", ...(a.movimiento ? { movimiento: a.movimiento } : {}) });
+        hecho.push(`Marqué el clip ${a.clip} para animar con IA (toca «Generar con IA» cuando quieras)`);
+        break;
+      }
+      case "formato":
+        aj.formato = a.valor;
+        hecho.push(`Cambié el formato a ${a.valor}`);
+        break;
+      case "cierre":
+        if (a.negocio) aj.negocio = a.negocio;
+        if (a.cta) aj.cta = a.cta;
+        hecho.push("Cambié el cierre");
+        break;
+      case "guion":
+        aj.guion = a.texto;
+        hecho.push("Cambié el guion de la voz");
+        if (aj.hayVoz) {
+          aj.hayVoz = false;
+          quitarVoz = true;
+          aviso("Cambió el guion: genera la voz de nuevo");
+        }
+        break;
+      case "voz": {
+        if (a.quitar) {
+          aj.hayVoz = false;
+          voz = null;
+          quitarVoz = true;
+          hecho.push("Quité la voz");
+          break;
+        }
+        const antes = aj.vozId;
+        const elegida = a.voz ?? (a.genero ? cat.voces.find((v) => v.genero === a.genero)?.id : undefined);
+        // Si ya suena una voz de ese género, no se cambia
+        const yaEsDeEseGenero = !a.voz && !!a.genero && cat.voces.find((v) => v.id === antes)?.genero === a.genero;
+        if (elegida && !yaEsDeEseGenero) aj.vozId = elegida;
+        const cambio = aj.vozId !== antes;
+        if (cambio) hecho.push("Elegí otra voz");
+        // Con una voz ya generada, cambiarla la vuelve a generar (igual que el selector de voces)
+        if (a.generar || (cambio && aj.hayVoz)) {
+          if (pedirVoz(false)) hecho.push("Generaré la voz");
+        }
+        break;
+      }
+      case "subtitulos":
+        aj.subtitulos = a.activar;
+        hecho.push(a.activar ? "Activé los subtítulos" : "Quité los subtítulos");
+        break;
+      case "musica": {
+        if (a.estilo) {
+          aj.estilo = a.estilo;
+          aj.musica = true;
+        }
+        if (a.activar !== undefined) aj.musica = a.activar;
+        if (a.volumen !== undefined) {
+          const v = a.volumen === "subir" ? aj.volumen + 0.15 : a.volumen === "bajar" ? aj.volumen - 0.15 : a.volumen / 100;
+          aj.volumen = Math.round(entre(v, 0, 1) * 100) / 100;
+        }
+        hecho.push(a.activar === false ? "Quité la música" : "Cambié la música");
+        break;
+      }
+      case "armar": {
+        // Nunca se borra una foto: se conservan los clips con foto y, de los vacíos, solo los necesarios
+        let lista = clips.slice();
+        for (let i = lista.length - 1; i >= 0 && lista.length > a.clips; i--) {
+          if (!tendraFoto(lista[i])) lista.splice(i, 1);
+        }
+        while (lista.length < a.clips) lista.push(nuevoClip());
+        lista = lista.map((c, i) => {
+          if (i >= a.clips) return c;
+          const n: Clip = { ...c, prompt: a.imagenes[i] || c.prompt };
+          if (a.textos[i]) n.caption = a.textos[i];
+          if (n.tipo === "foto") n.segundos = a.segundosPorFoto;
+          if (!c.image) imagenes.set(c.id, a.imagenes[i]);
+          return n;
+        });
+        clips = lista;
+        if (a.cta) aj.cta = a.cta;
+        if (a.musica) {
+          aj.estilo = a.musica;
+          aj.musica = true;
+        }
+        hecho.push(`Armé ${a.clips} clips con sus textos`);
+        if (a.guion) {
+          aj.guion = a.guion;
+          if (pedirVoz(true)) hecho.push("Escribí el guion y generaré la voz");
+          else hecho.push("Escribí el guion");
+        }
+        break;
+      }
+      case "vista_previa":
+        if (final !== "crear_video") final = "vista_previa";
+        break;
+      case "crear_video":
+        final = "crear_video";
+        break;
+    }
+  }
+
+  const pendientes: Pendiente[] = [];
+  // Solo las imágenes de clips que siguen en la lista
+  for (const c of clips) if (imagenes.has(c.id)) pendientes.push({ tipo: "imagen", clipId: c.id, descripcion: imagenes.get(c.id)! });
+  if (voz) pendientes.push({ tipo: "voz", ajustarFotos: (voz as { ajustarFotos: boolean }).ajustarFotos });
+  else if (quitarVoz) pendientes.push({ tipo: "quitar_voz" });
+  if (final) pendientes.push({ tipo: final });
+  return { estado: { clips, ajustes: aj }, pendientes, hecho, avisos };
+}
+
+export function costoDe(pendientes: Pendiente[]): { imagenes: number; voces: number } {
+  return {
+    imagenes: pendientes.filter((p) => p.tipo === "imagen").length,
+    voces: pendientes.filter((p) => p.tipo === "voz").length,
+  };
+}
+
+// El texto de la confirmación antes de gastar. null = la orden no gasta nada.
+export function textoCosto(c: { imagenes: number; voces: number }): string | null {
+  const partes: string[] = [];
+  if (c.imagenes > 0) partes.push(c.imagenes === 1 ? "1 imagen" : `${c.imagenes} imágenes`);
+  if (c.voces > 0) partes.push(c.voces === 1 ? "1 voz" : `${c.voces} voces`);
+  return partes.length ? `Esta orden usa ${partes.join(" y ")}.` : null;
+}
+
+// Lo que se le cuenta a la IA del video: textos y números. Nunca las fotos.
+export function resumenProyecto(estado: Estado): Record<string, unknown> {
+  const a = estado.ajustes;
+  return {
+    formato: a.formato,
+    clips: estado.clips.map((c, i) => ({
+      n: i + 1,
+      tipo: c.tipo === "toma" ? "con_ia" : "foto",
+      segundos: c.tipo === "toma" ? SEGUNDOS_TOMA : c.segundos,
+      foto: !!c.image,
+      texto: c.caption,
+    })),
+    negocio: a.negocio,
+    cta: a.cta,
+    guion: a.guion,
+    voz: a.vozId,
+    voz_generada: a.hayVoz,
+    subtitulos: a.subtitulos,
+    musica: { activa: a.musica, estilo: a.estilo, volumen: Math.round(a.volumen * 100) },
+  };
+}
+
+// ---------- Instrucciones para la IA ----------
+
+// Lo que se le dice a la IA: quién es, el catálogo de acciones, las reglas de costo y calidad, y ejemplos.
+export function instruccionesDirector(o: {
+  resumen: Record<string, unknown>;
+  estilos: { id: string; nombre: string }[];
+  voces: { id: string; nombre: string; genero: string }[];
+  marca?: string;
+  ingles?: boolean;
+}): { system: string; user: (orden: string) => string } {
+  const system = [
+    "Eres el director de video de InnovationTECH Studio. La persona te da una orden (escrita o dictada) sobre su reel publicitario y tú la conviertes en acciones.",
+    'Responde SOLO con un objeto JSON válido, sin texto adicional ni explicaciones, con esta forma exacta: {"acciones": [ ... ], "mensaje": "una frase corta para la persona"}',
+    "",
+    "ACCIONES PERMITIDAS (usa solo estas; nunca inventes acciones ni campos). Los clips se numeran desde 1:",
+    '- {"tipo": "armar", "tema": "...", "clips": N, "segundos_por_foto": S, "textos": [N frases], "imagenes": [N descripciones], "cta": "...", "guion": "...", "musica": "estilo"}: arma el video completo. Úsala cuando pidan crear, hacer o armar un video.',
+    '- {"tipo": "agregar_clip", "cantidad": N}: agrega clips vacíos al final.',
+    '- {"tipo": "borrar_clip", "clip": N}',
+    '- {"tipo": "mover_clip", "clip": N, "a": N}: mueve el clip al lugar "a".',
+    '- {"tipo": "duplicar_clip", "clip": N}',
+    '- {"tipo": "duracion", "clip": N o "todos", "segundos": S}: cuánto dura esa foto (1.5 a 15).',
+    '- {"tipo": "duracion_total", "segundos": S}: cuánto dura el video completo (hasta 120).',
+    '- {"tipo": "texto", "clip": N, "texto": "..."}: el texto en pantalla de ese clip (máximo 8 palabras).',
+    '- {"tipo": "estilo_texto", "clip": N o "todos", "posicion": "arriba" | "centro" | "abajo", "tamano": "chico" | "normal" | "grande"}',
+    '- {"tipo": "imagen", "clip": N, "descripcion": "..."}: crea con IA la imagen de ese clip. Úsala solo si la piden.',
+    '- {"tipo": "animar", "clip": N, "activar": true | false, "movimiento": "..."}: marca la foto para animarla con IA. Úsala solo si la piden.',
+    '- {"tipo": "formato", "valor": "9:16" | "1:1" | "16:9"}: vertical, cuadrado u horizontal.',
+    '- {"tipo": "cierre", "negocio": "...", "cta": "..."}: nombre del negocio y llamada a la acción del final.',
+    '- {"tipo": "guion", "texto": "..."}: lo que dice la voz en off.',
+    '- {"tipo": "voz", "genero": "mujer" | "hombre", "voz": "id", "generar": true, "quitar": true}: elige la voz, la genera o la quita (pon solo los campos que hagan falta).',
+    '- {"tipo": "subtitulos", "activar": true | false}',
+    '- {"tipo": "musica", "activar": true | false, "estilo": "id", "volumen": 0 a 100 | "subir" | "bajar"}',
+    '- {"tipo": "vista_previa"}: muestra el video sin grabarlo.',
+    '- {"tipo": "crear_video"}: graba el video final. Úsala solo si piden crearlo, grabarlo o exportarlo ya.',
+    "",
+    `ESTILOS DE MÚSICA (usa el id): ${o.estilos.map((e) => `${e.id} (${e.nombre})`).join(", ")}.`,
+    `VOCES (usa el id): ${o.voces.map((v) => `${v.id} (${v.nombre}, ${v.genero})`).join(", ")}.`,
+    "",
+    "REGLAS PARA GASTAR POCO Y QUE QUEDE BIEN:",
+    "- Pocas imágenes, bien aprovechadas: al armar, cada foto dura entre 7 y 10 segundos (8 si no dicen otra cosa).",
+    '- El número de clips de "armar" es la duración pedida dividida entre 8 (30 s → 4 clips, 60 s → 8 clips), entre 2 y 12. Si no dicen duración, usa 4 clips.',
+    '- "textos": una frase corta por clip (máximo 8 palabras) que cuente una historia: gancho, beneficios y oferta. Sin hashtags ni emojis.',
+    '- "imagenes": una descripción EN INGLÉS por clip, detallada: sujeto, lugar, luz, encuadre, estilo de fotografía publicitaria profesional, sin texto dentro de la imagen. Que la imagen salga bien a la primera.',
+    '- "guion": natural y entusiasta, a unas 2.3 palabras por segundo de video, para que la voz quepa sin alargarlo.',
+    "- No crees imágenes, voz ni animaciones con IA que no te hayan pedido. No cambies lo que no te pidan.",
+    "- Si la orden no se puede hacer con estas acciones, o no se entiende, responde con la lista vacía y explica en el mensaje qué sí puedes hacer.",
+    '- "mensaje": una sola frase amable, en el idioma de la orden.',
+    "",
+    "EJEMPLOS:",
+    'Orden: "hazme un video de 30 segundos de la promo 2x1 en tortas los martes, con música alegre"',
+    '{"acciones": [{"tipo": "armar", "tema": "promo 2x1 en tortas los martes", "clips": 4, "segundos_por_foto": 7, "textos": ["¿Antojo de torta?", "Martes de 2x1", "Recién hechas, bien servidas", "Solo este martes"], "imagenes": ["close-up of a Mexican torta ahogada on a rustic wooden table, warm natural light, shallow depth of field, professional food advertising photography", "two fresh Mexican tortas side by side on a colorful plate, bright daylight, top-down view, professional food advertising photography", "cook hands assembling a torta in a busy taqueria kitchen, steam rising, warm light, professional advertising photography", "happy friends sharing tortas at a street food stand at dusk, string lights, candid, professional advertising photography"], "cta": "Te esperamos este martes", "guion": "¿Se te antoja una torta? Este martes llévate dos al precio de una. Recién hechas, bien servidas y con todo el sabor de casa. No te lo pierdas, te esperamos este martes.", "musica": "pop"}], "mensaje": "Listo, armé tu video de la promo de los martes."}',
+    'Orden: "quita el clip 2, pon todos los textos arriba y grandes y baja la música"',
+    '{"acciones": [{"tipo": "borrar_clip", "clip": 2}, {"tipo": "estilo_texto", "clip": "todos", "posicion": "arriba", "tamano": "grande"}, {"tipo": "musica", "volumen": "bajar"}], "mensaje": "Hecho: quité el clip 2, subí los textos y bajé la música."}',
+    'Orden: "publícalo en Instagram"',
+    '{"acciones": [], "mensaje": "Todavía no puedo publicar por ti; puedo crear el video para que lo descargues."}',
+    o.marca ? `\nContexto de la marca:\n${o.marca}` : "",
+    o.ingles ? "\nIMPORTANT: Write the on-screen texts, the script, the call to action and the message in English (keep the JSON keys and action names exactly as specified)." : "",
+  ].join("\n");
+  const user = (orden: string) => `ESTADO ACTUAL DEL VIDEO:\n${JSON.stringify(o.resumen)}\n\nORDEN: ${orden}`;
+  return { system, user };
+}
