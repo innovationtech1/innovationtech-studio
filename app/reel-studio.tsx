@@ -16,14 +16,14 @@ const blobToDataUrl = (b: Blob) =>
     r.onerror = () => rej(r.error);
     r.readAsDataURL(b);
   });
-import { describeVersion, MusicStyleId, renderMusic } from "@/lib/music";
+import { describeVersion, MUSIC_STYLES, MusicStyleId, renderMusic } from "@/lib/music";
 import MusicPicker from "./music-picker";
 import LibraryPicker from "./library-picker";
 import { loadSong } from "@/lib/library";
-import { DEFAULT_VOICE, findVoice } from "@/lib/voices";
+import { DEFAULT_VOICE, VOICES, findVoice } from "@/lib/voices";
 import { getLang } from "@/lib/i18n";
 import VoicePicker from "./voice-picker";
-import { marcarDemoALaVista, ProTag, refrescarCuenta, useCuenta } from "./account-context";
+import { marcarDemoALaVista, ProTag, refrescarCuenta, useCuenta, usePuede } from "./account-context";
 import {
   MAX_VIDEO,
   aEscenas,
@@ -42,6 +42,19 @@ import {
 } from "@/lib/linea-tiempo";
 import { anotar, deshacer, rehacer } from "@/lib/historial";
 import LineaTiempo from "./linea-tiempo";
+import Director from "./director";
+import {
+  aplicarAcciones,
+  costoDe,
+  resumenProyecto,
+  textoCosto,
+  validarAcciones,
+  type Ajustes,
+  type Catalogo,
+  type Estado,
+  type Pendiente,
+  type Resultado,
+} from "@/lib/director";
 import { firmaTomas, terminado, textoEstado, type TrabajoVisto } from "@/lib/estados-video";
 import { consultarTomas, pedirTomas, prepararFoto, subirFoto } from "@/lib/video-ia-cliente";
 
@@ -394,26 +407,27 @@ export default function ReelStudio({
       if (failed) throw failed;
     });
 
-  const makeVoice = (id: string = voiceId) =>
-    run("Generando voz…", async () => {
-      if (!script.trim()) throw new Error("Escribe el guion de la voz en off.");
-      const voz = findVoice(id)?.lang === getLang() ? id : DEFAULT_VOICE[getLang()];
-      const llave = `${voz}|${script}`;
-      let audio = vocesHechas.current.get(llave);
-      if (!audio) {
-        const res = await fetch("/api/voice", {
-          method: "POST",
-          headers: { "content-type": "application/json", ...cfHeaders },
-          body: JSON.stringify({ text: script, lang: getLang(), voice: voz }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
-        audio = data.audio as string;
-        vocesHechas.current.set(llave, audio);
-      }
-      setVoice(audio);
-      if (result) setVozCambio(true);
-    });
+  // Genera la voz (o la recupera al instante si esa voz ya se generó con ese mismo guion)
+  async function generarVoz(id: string, texto: string) {
+    if (!texto.trim()) throw new Error("Escribe el guion de la voz en off.");
+    const voz = findVoice(id)?.lang === getLang() ? id : DEFAULT_VOICE[getLang()];
+    const llave = `${voz}|${texto}`;
+    let audio = vocesHechas.current.get(llave);
+    if (!audio) {
+      const res = await fetch("/api/voice", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...cfHeaders },
+        body: JSON.stringify({ text: texto, lang: getLang(), voice: voz }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      audio = data.audio as string;
+      vocesHechas.current.set(llave, audio);
+    }
+    setVoice(audio);
+    if (result) setVozCambio(true);
+  }
+  const makeVoice = (id: string = voiceId) => run("Generando voz…", () => generarVoz(id, script));
 
   // Elegir otra voz: si ya había una voz generada, la nueva se genera sola con el mismo guion
   // (o se recupera al instante si ya se había generado antes).
@@ -487,7 +501,7 @@ export default function ReelStudio({
         const buf = await new OfflineAudioContext(1, 1, 44100).decodeAudioData(bytes);
         if (vivo) setVozSegundos(buf.duration);
       } catch {
-        /* sin duración no hay aviso */
+        if (vivo) setVozSegundos(-1); // no se pudo medir: no hay aviso
       }
     })();
     return () => {
@@ -599,6 +613,179 @@ export default function ReelStudio({
       setEstadoIa(textoEstado({ tipo: "trabajos", trabajos: vistos, topeHoy: false }));
       setInvitarPlan(esDemo);
     });
+
+  // ---------- Director con IA: órdenes escritas o dictadas ----------
+  const puedeVoz = usePuede("voz");
+  const catalogo = useMemo<Catalogo>(
+    () => ({ estilos: MUSIC_STYLES.map((e) => e.id), voces: VOICES.filter((v) => v.lang === getLang()).map((v) => ({ id: v.id, genero: v.gender })) }),
+    []
+  );
+  // Orden ya entendida que espera el «Hacerlo» porque gasta imágenes o voz
+  const [propuesta, setPropuesta] = useState<{ r: Resultado; mensaje: string; costo: string; sobre: Clip[] } | null>(null);
+  const [resultadoDir, setResultadoDir] = useState<{ mensaje: string; hecho: string[]; avisos: string[] } | null>(null);
+  // Cómo estaba el video antes de la última orden, para «Deshacer orden»
+  const antesDeOrden = useRef<{ clips: Clip[]; ajustes: Ajustes; voice: string } | null>(null);
+  const [hayDeshacerOrden, setHayDeshacerOrden] = useState(false);
+  // Lo que la orden dejó por hacer (imágenes, voz) y cómo termina (vista previa o crear el video)
+  const [cola, setCola] = useState<Pendiente[] | null>(null);
+  const [alFinal, setAlFinal] = useState<"vista_previa" | "crear_video" | null>(null);
+  const ajustarTrasVoz = useRef(false);
+
+  const ajustesActuales = (): Ajustes => ({
+    formato: format,
+    negocio: brandName,
+    cta,
+    guion: script,
+    vozId: voiceId,
+    hayVoz: !!voice,
+    subtitulos: subtitlesOn,
+    musica: musicOn,
+    estilo: musicStyle,
+    volumen: musicVolume,
+  });
+  function ponerAjustes(a: Ajustes) {
+    setFormat(a.formato);
+    setBrandName(a.negocio);
+    setCta(a.cta);
+    setScript(a.guion);
+    setVoiceId(a.vozId);
+    setSubtitlesOn(a.subtitulos);
+    setMusicOn(a.musica);
+    setMusicVolume(a.volumen);
+    if (a.estilo !== musicStyle) {
+      // Un estilo pedido por orden es música compuesta por la app
+      setMusicStyle(a.estilo as MusicStyleId);
+      setMusicSeed(1);
+      setMusicSource("generated");
+    }
+  }
+
+  const enviarOrden = (orden: string) =>
+    run("Pensando tu orden…", async () => {
+      detenerPrevia();
+      setResultadoDir(null);
+      setPropuesta(null);
+      const sobre = clipsRef.current;
+      const estado: Estado = { clips: sobre, ajustes: ajustesActuales() };
+      const res = await fetch("/api/text", {
+        method: "POST",
+        headers:
+          settings.textProvider === "cloudflare"
+            ? { "content-type": "application/json", ...cfHeaders }
+            : { "content-type": "application/json", "x-anthropic-key": settings.anthropicKey },
+        body: JSON.stringify({
+          mode: "director",
+          prompt: orden,
+          estado: resumenProyecto(estado),
+          catalogo: {
+            estilos: MUSIC_STYLES.map((e) => ({ id: e.id, nombre: e.label })),
+            voces: VOICES.filter((v) => v.lang === getLang()).map((v) => ({ id: v.id, nombre: v.name, genero: v.gender })),
+          },
+          brand: brandContext(brand),
+          provider: settings.textProvider,
+          model: settings.textProvider === "cloudflare" ? settings.cfTextModel : settings.textModel,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      const mensaje = typeof data.mensaje === "string" ? data.mensaje : "";
+      const { acciones } = validarAcciones(data, catalogo);
+      if (acciones.length === 0) {
+        // La IA explicó por qué no puede: se muestra su mensaje y el video no cambia
+        if (!mensaje) throw new Error("No entendí la orden. Dila de otra forma.");
+        setHayDeshacerOrden(false);
+        setResultadoDir({ mensaje, hecho: [], avisos: [] });
+        return;
+      }
+      const r = aplicarAcciones(estado, acciones, catalogo, { voz: puedeVoz, ia: conCuenta });
+      const costo = textoCosto(costoDe(r.pendientes));
+      if (costo) setPropuesta({ r, mensaje, costo, sobre });
+      else confirmarOrden({ r, mensaje, sobre });
+    });
+
+  function confirmarOrden(p: { r: Resultado; mensaje: string; sobre: Clip[] }) {
+    setPropuesta(null);
+    if (clipsRef.current !== p.sobre) return setError("Tu video cambió mientras esperaba tu respuesta. Envía la orden otra vez.");
+    antesDeOrden.current = { clips: p.sobre, ajustes: ajustesActuales(), voice };
+    setHayDeshacerOrden(true);
+    editar(() => p.r.estado.clips);
+    ponerAjustes(p.r.estado.ajustes);
+    setElegido(-1);
+    setResultadoDir({ mensaje: p.mensaje, hecho: p.r.hecho, avisos: p.r.avisos });
+    if (p.r.pendientes.length) setCola(p.r.pendientes);
+  }
+
+  function deshacerOrden() {
+    const a = antesDeOrden.current;
+    if (!a) return;
+    antesDeOrden.current = null;
+    setHayDeshacerOrden(false);
+    setCola(null);
+    setAlFinal(null);
+    ajustarTrasVoz.current = false;
+    editar(() => reconciliar(a.clips));
+    ponerAjustes(a.ajustes);
+    setVoice(a.voice);
+    setElegido(-1);
+    setResultadoDir(null);
+  }
+
+  // Lo pendiente de la orden se hace cuando la app queda libre, ya con los ajustes nuevos puestos
+  useEffect(() => {
+    if (!cola || busy || viendo) return;
+    const pendientes = cola;
+    setCola(null);
+    void run("Haciendo lo que pediste…", async () => {
+      const fallas: string[] = [];
+      const falla = (e: unknown) => {
+        const m = friendlyError((e as Error).message);
+        if (!fallas.includes(m)) fallas.push(m);
+      };
+      // Imágenes de 3 en 3 para no saturar el límite gratuito de Cloudflare
+      const imagenes = pendientes.flatMap((p) => (p.tipo === "imagen" ? [p] : []));
+      for (let k = 0; k < imagenes.length; k += 3) {
+        const lote = imagenes.slice(k, k + 3);
+        setBusy(`Creando imágenes ${k + 1}–${k + lote.length} de ${imagenes.length}…`);
+        const rs = await Promise.allSettled(lote.map((p) => makeImage(p.clipId, p.descripcion)));
+        rs.forEach((x) => x.status === "rejected" && falla(x.reason));
+      }
+      for (const p of pendientes) {
+        if (p.tipo === "quitar_voz") setVoice("");
+        if (p.tipo === "voz") {
+          setBusy("Generando voz…");
+          try {
+            await generarVoz(voiceId, script);
+            ajustarTrasVoz.current = p.ajustarFotos;
+          } catch (e) {
+            falla(e);
+          }
+        }
+      }
+      if (fallas.length) setResultadoDir((r) => (r ? { ...r, avisos: [...r.avisos, ...fallas] } : r));
+      const fin = pendientes.find((p) => p.tipo === "vista_previa" || p.tipo === "crear_video");
+      if (fin) setAlFinal(fin.tipo as "vista_previa" | "crear_video");
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cola, busy, viendo]);
+
+  // Al armar un video, cuando se conoce cuánto dura la voz, las fotos se reparten para cubrirla
+  useEffect(() => {
+    if (!ajustarTrasVoz.current || vozSegundos <= 0) return;
+    ajustarTrasVoz.current = false;
+    editar((c) => ajustarAVoz(c, vozSegundos));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vozSegundos]);
+
+  // «Muéstrame la vista previa» o «crea el video»: al final, con todo ya en su lugar
+  useEffect(() => {
+    if (!alFinal || busy || viendo || cola) return;
+    if (voice && vozSegundos === 0) return; // falta medir la voz recién generada
+    const que = alFinal;
+    setAlFinal(null);
+    if (que === "vista_previa") void verPrevia();
+    else void buildReel();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alFinal, busy, viendo, cola, voice, vozSegundos]);
 
   // Lo que se hace con los clips desde la línea de tiempo
   const alMover = (de: number, a: number) => {
@@ -727,6 +914,12 @@ export default function ReelStudio({
             ultimosClips.current = null;
             setInvitarPlan(false);
             setPendientes(null);
+            setPropuesta(null);
+            setResultadoDir(null);
+            setCola(null);
+            setAlFinal(null);
+            antesDeOrden.current = null;
+            setHayDeshacerOrden(false);
           }}
         >
           Empezar nuevo
@@ -739,6 +932,15 @@ export default function ReelStudio({
       {!canRecord && (
         <div className="error">Este navegador no puede grabar video. Usa Chrome, Edge o Safari actualizados.</div>
       )}
+
+      <Director
+        ocupado={!!busy}
+        cfHeaders={cfHeaders}
+        onEnviar={enviarOrden}
+        confirmar={propuesta ? { texto: propuesta.costo, onSi: () => confirmarOrden(propuesta), onNo: () => setPropuesta(null) } : null}
+        resultado={resultadoDir}
+        onDeshacer={hayDeshacerOrden ? deshacerOrden : null}
+      />
 
       {/* 1. Tema */}
       <h3 className="step">1. ¿De qué trata el reel?</h3>
