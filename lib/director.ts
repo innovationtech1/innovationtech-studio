@@ -239,3 +239,313 @@ export function validarAcciones(json: unknown, cat: Catalogo): { acciones: Accio
   }
   return { acciones, descartadas };
 }
+
+// ---------- Aplicar las acciones al video ----------
+
+// Los ajustes del reel que una orden puede cambiar (lo demás del Creador de Reels no se toca)
+export type Ajustes = {
+  formato: Formato;
+  negocio: string;
+  cta: string;
+  guion: string;
+  vozId: string;
+  hayVoz: boolean; // ya hay una voz generada
+  subtitulos: boolean;
+  musica: boolean;
+  estilo: string;
+  volumen: number; // 0 a 1
+};
+export type Estado = { clips: Clip[]; ajustes: Ajustes };
+
+// Lo que la orden deja por hacer después de aplicarse: lo que gasta (imágenes, voz) y lo que se ve al final.
+export type Pendiente =
+  | { tipo: "imagen"; clipId: string; descripcion: string }
+  | { tipo: "voz"; ajustarFotos: boolean } // ajustarFotos: al generarla, repartir las fotos para cubrirla (al armar)
+  | { tipo: "quitar_voz" }
+  | { tipo: "vista_previa" }
+  | { tipo: "crear_video" };
+
+export type Permisos = { voz: boolean; ia: boolean }; // el plan incluye voz / hay sesión para animar con IA
+export type Resultado = { estado: Estado; pendientes: Pendiente[]; hecho: string[]; avisos: string[] };
+
+const mmss = (s: number) => `${Math.floor(Math.round(s) / 60)}:${String(Math.round(s) % 60).padStart(2, "0")}`;
+
+export function aplicarAcciones(estado: Estado, acciones: Accion[], cat: Catalogo, permisos: Permisos): Resultado {
+  let clips = estado.clips;
+  const aj: Ajustes = { ...estado.ajustes };
+  const hecho: string[] = [];
+  const avisos: string[] = [];
+  const imagenes = new Map<string, string>(); // clip → descripción de la imagen por crear
+  let voz: { ajustarFotos: boolean } | null = null;
+  let quitarVoz = false;
+  let final: "vista_previa" | "crear_video" | null = null;
+
+  const aviso = (t: string) => void (avisos.includes(t) || avisos.push(t));
+  // Devuelve el índice del clip número n, o avisa que no existe
+  const lugar = (n: number): number => {
+    if (n >= 1 && n <= clips.length) return n - 1;
+    aviso(`No existe el clip ${n}`);
+    return -1;
+  };
+  // Un clip «tendrá foto» si ya la tiene o si esta misma orden la va a crear
+  const tendraFoto = (c: Clip) => !!c.image || imagenes.has(c.id);
+  const pedirVoz = (ajustarFotos: boolean) => {
+    if (!aj.guion.trim()) return aviso("Escribe primero el guion");
+    if (!permisos.voz) return aviso("Tu plan no incluye voz");
+    voz = { ajustarFotos: ajustarFotos || !!voz?.ajustarFotos };
+    quitarVoz = false;
+    aj.hayVoz = false;
+    return true;
+  };
+
+  for (const a of acciones) {
+    switch (a.tipo) {
+      case "agregar_clip":
+        clips = [...clips, ...Array.from({ length: a.cantidad }, () => nuevoClip())];
+        hecho.push(a.cantidad === 1 ? "Agregué 1 clip" : `Agregué ${a.cantidad} clips`);
+        break;
+      case "borrar_clip": {
+        const i = lugar(a.clip);
+        if (i < 0) break;
+        imagenes.delete(clips[i].id);
+        clips = borrar(clips, i);
+        hecho.push(`Borré el clip ${a.clip}`);
+        break;
+      }
+      case "mover_clip": {
+        const i = lugar(a.clip);
+        if (i < 0) break;
+        const destino = Math.min(clips.length, a.a) - 1;
+        clips = mover(clips, i, destino);
+        hecho.push(`Moví el clip ${a.clip} al lugar ${destino + 1}`);
+        break;
+      }
+      case "duplicar_clip": {
+        const i = lugar(a.clip);
+        if (i < 0) break;
+        clips = duplicar(clips, i);
+        hecho.push(`Dupliqué el clip ${a.clip}`);
+        break;
+      }
+      case "duracion": {
+        if (a.clip === "todos") {
+          clips = clips.map((c) => (c.tipo === "foto" ? { ...c, segundos: a.segundos } : c));
+          hecho.push(`Puse todas las fotos en ${a.segundos} s`);
+          break;
+        }
+        const i = lugar(a.clip);
+        if (i < 0) break;
+        if (clips[i].tipo === "toma") {
+          aviso(`El clip ${a.clip} está animado con IA y siempre dura ${SEGUNDOS_TOMA} s`);
+          break;
+        }
+        clips = cambiar(clips, i, { segundos: a.segundos });
+        hecho.push(`Puse el clip ${a.clip} en ${a.segundos} s`);
+        break;
+      }
+      case "duracion_total": {
+        const cuentan = clips.filter(tendraFoto);
+        const fotos = cuentan.filter((c) => c.tipo === "foto");
+        if (fotos.length === 0) {
+          aviso("Agrega fotos antes de fijar la duración del video");
+          break;
+        }
+        const fijo = cuentan.filter((c) => c.tipo === "toma").length * SEGUNDOS_TOMA + CIERRE;
+        const cada = entre(Math.round(((a.segundos - fijo) / fotos.length) * 10) / 10, MIN_FOTO, MAX_FOTO);
+        const ids = new Set(fotos.map((c) => c.id));
+        clips = clips.map((c) => (ids.has(c.id) ? { ...c, segundos: cada } : c));
+        hecho.push(`Ajusté el video a ${mmss(fotos.length * cada + fijo)}`);
+        break;
+      }
+      case "texto": {
+        const i = lugar(a.clip);
+        if (i < 0) break;
+        clips = cambiar(clips, i, { caption: a.texto });
+        hecho.push(`Cambié el texto del clip ${a.clip}`);
+        break;
+      }
+      case "estilo_texto": {
+        const cambios: Partial<Clip> = { ...(a.posicion ? { textoPos: a.posicion } : {}), ...(a.tamano ? { textoTam: a.tamano } : {}) };
+        if (a.clip === "todos") {
+          clips = clips.map((c) => ({ ...c, ...cambios }));
+          hecho.push("Cambié el estilo de todos los textos");
+          break;
+        }
+        const i = lugar(a.clip);
+        if (i < 0) break;
+        clips = cambiar(clips, i, cambios);
+        hecho.push(`Cambié el estilo del texto del clip ${a.clip}`);
+        break;
+      }
+      case "imagen": {
+        const i = lugar(a.clip);
+        if (i < 0) break;
+        clips = cambiar(clips, i, { prompt: a.descripcion });
+        imagenes.set(clips[i].id, a.descripcion);
+        hecho.push(`Crearé la imagen del clip ${a.clip}`);
+        break;
+      }
+      case "animar": {
+        const i = lugar(a.clip);
+        if (i < 0) break;
+        if (!a.activar) {
+          clips = cambiar(clips, i, { tipo: "foto" });
+          hecho.push(`Quité la IA del clip ${a.clip}`);
+          break;
+        }
+        if (!permisos.ia) {
+          aviso("Inicia sesión para animar fotos con IA");
+          break;
+        }
+        if (!tendraFoto(clips[i])) {
+          aviso(`El clip ${a.clip} no tiene foto todavía`);
+          break;
+        }
+        const yaEs = clips[i].tipo === "toma";
+        if (!yaEs && clips.filter((c) => c.tipo === "toma" && tendraFoto(c)).length >= MAX_TOMAS) {
+          aviso(`Máximo ${MAX_TOMAS} fotos con IA por video`);
+          break;
+        }
+        clips = cambiar(clips, i, { tipo: "toma", ...(a.movimiento ? { movimiento: a.movimiento } : {}) });
+        hecho.push(`Marqué el clip ${a.clip} para animar con IA (toca «Generar con IA» cuando quieras)`);
+        break;
+      }
+      case "formato":
+        aj.formato = a.valor;
+        hecho.push(`Cambié el formato a ${a.valor}`);
+        break;
+      case "cierre":
+        if (a.negocio) aj.negocio = a.negocio;
+        if (a.cta) aj.cta = a.cta;
+        hecho.push("Cambié el cierre");
+        break;
+      case "guion":
+        aj.guion = a.texto;
+        hecho.push("Cambié el guion de la voz");
+        if (aj.hayVoz) {
+          aj.hayVoz = false;
+          quitarVoz = true;
+          aviso("Cambió el guion: genera la voz de nuevo");
+        }
+        break;
+      case "voz": {
+        if (a.quitar) {
+          aj.hayVoz = false;
+          voz = null;
+          quitarVoz = true;
+          hecho.push("Quité la voz");
+          break;
+        }
+        const antes = aj.vozId;
+        const elegida = a.voz ?? (a.genero ? cat.voces.find((v) => v.genero === a.genero)?.id : undefined);
+        // Si ya suena una voz de ese género, no se cambia
+        const yaEsDeEseGenero = !a.voz && !!a.genero && cat.voces.find((v) => v.id === antes)?.genero === a.genero;
+        if (elegida && !yaEsDeEseGenero) aj.vozId = elegida;
+        const cambio = aj.vozId !== antes;
+        if (cambio) hecho.push("Elegí otra voz");
+        // Con una voz ya generada, cambiarla la vuelve a generar (igual que el selector de voces)
+        if (a.generar || (cambio && aj.hayVoz)) {
+          if (pedirVoz(false)) hecho.push("Generaré la voz");
+        }
+        break;
+      }
+      case "subtitulos":
+        aj.subtitulos = a.activar;
+        hecho.push(a.activar ? "Activé los subtítulos" : "Quité los subtítulos");
+        break;
+      case "musica": {
+        if (a.estilo) {
+          aj.estilo = a.estilo;
+          aj.musica = true;
+        }
+        if (a.activar !== undefined) aj.musica = a.activar;
+        if (a.volumen !== undefined) {
+          const v = a.volumen === "subir" ? aj.volumen + 0.15 : a.volumen === "bajar" ? aj.volumen - 0.15 : a.volumen / 100;
+          aj.volumen = Math.round(entre(v, 0, 1) * 100) / 100;
+        }
+        hecho.push(a.activar === false ? "Quité la música" : "Cambié la música");
+        break;
+      }
+      case "armar": {
+        // Nunca se borra una foto: se conservan los clips con foto y, de los vacíos, solo los necesarios
+        let lista = clips.slice();
+        for (let i = lista.length - 1; i >= 0 && lista.length > a.clips; i--) {
+          if (!tendraFoto(lista[i])) lista.splice(i, 1);
+        }
+        while (lista.length < a.clips) lista.push(nuevoClip());
+        lista = lista.map((c, i) => {
+          if (i >= a.clips) return c;
+          const n: Clip = { ...c, prompt: a.imagenes[i] || c.prompt };
+          if (a.textos[i]) n.caption = a.textos[i];
+          if (n.tipo === "foto") n.segundos = a.segundosPorFoto;
+          if (!c.image) imagenes.set(c.id, a.imagenes[i]);
+          return n;
+        });
+        clips = lista;
+        if (a.cta) aj.cta = a.cta;
+        if (a.musica) {
+          aj.estilo = a.musica;
+          aj.musica = true;
+        }
+        hecho.push(`Armé ${a.clips} clips con sus textos`);
+        if (a.guion) {
+          aj.guion = a.guion;
+          if (pedirVoz(true)) hecho.push("Escribí el guion y generaré la voz");
+          else hecho.push("Escribí el guion");
+        }
+        break;
+      }
+      case "vista_previa":
+        if (final !== "crear_video") final = "vista_previa";
+        break;
+      case "crear_video":
+        final = "crear_video";
+        break;
+    }
+  }
+
+  const pendientes: Pendiente[] = [];
+  // Solo las imágenes de clips que siguen en la lista
+  for (const c of clips) if (imagenes.has(c.id)) pendientes.push({ tipo: "imagen", clipId: c.id, descripcion: imagenes.get(c.id)! });
+  if (voz) pendientes.push({ tipo: "voz", ajustarFotos: (voz as { ajustarFotos: boolean }).ajustarFotos });
+  else if (quitarVoz) pendientes.push({ tipo: "quitar_voz" });
+  if (final) pendientes.push({ tipo: final });
+  return { estado: { clips, ajustes: aj }, pendientes, hecho, avisos };
+}
+
+export function costoDe(pendientes: Pendiente[]): { imagenes: number; voces: number } {
+  return {
+    imagenes: pendientes.filter((p) => p.tipo === "imagen").length,
+    voces: pendientes.filter((p) => p.tipo === "voz").length,
+  };
+}
+
+// El texto de la confirmación antes de gastar. null = la orden no gasta nada.
+export function textoCosto(c: { imagenes: number; voces: number }): string | null {
+  const partes: string[] = [];
+  if (c.imagenes > 0) partes.push(c.imagenes === 1 ? "1 imagen" : `${c.imagenes} imágenes`);
+  if (c.voces > 0) partes.push(c.voces === 1 ? "1 voz" : `${c.voces} voces`);
+  return partes.length ? `Esta orden usa ${partes.join(" y ")}.` : null;
+}
+
+// Lo que se le cuenta a la IA del video: textos y números. Nunca las fotos.
+export function resumenProyecto(estado: Estado): Record<string, unknown> {
+  const a = estado.ajustes;
+  return {
+    formato: a.formato,
+    clips: estado.clips.map((c, i) => ({
+      n: i + 1,
+      tipo: c.tipo === "toma" ? "con_ia" : "foto",
+      segundos: c.tipo === "toma" ? SEGUNDOS_TOMA : c.segundos,
+      foto: !!c.image,
+      texto: c.caption,
+    })),
+    negocio: a.negocio,
+    cta: a.cta,
+    guion: a.guion,
+    voz: a.vozId,
+    voz_generada: a.hayVoz,
+    subtitulos: a.subtitulos,
+    musica: { activa: a.musica, estilo: a.estilo, volumen: Math.round(a.volumen * 100) },
+  };
+}

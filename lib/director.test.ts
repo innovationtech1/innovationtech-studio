@@ -1,6 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clipsPara, validarAcciones, type Accion, type Catalogo } from "./director";
+import {
+  aplicarAcciones,
+  clipsPara,
+  costoDe,
+  resumenProyecto,
+  textoCosto,
+  validarAcciones,
+  type Accion,
+  type Ajustes,
+  type Catalogo,
+  type Estado,
+} from "./director";
+import { nuevoClip, type Clip } from "./linea-tiempo";
 
 const cat: Catalogo = {
   estilos: ["pop", "lofi", "cumbia"],
@@ -139,4 +151,262 @@ test("clipsPara: duración pedida entre 8, de 2 a 12", () => {
   assert.equal(clipsPara(200), 12);
   assert.equal(clipsPara(5), 2);
   assert.equal(clipsPara(), 4);
+});
+
+// ---------- Aplicar acciones ----------
+
+const ajustes = (extra: Partial<Ajustes> = {}): Ajustes => ({
+  formato: "9:16",
+  negocio: "Tortas Tortuga",
+  cta: "",
+  guion: "",
+  vozId: "es-selena",
+  hayVoz: false,
+  subtitulos: true,
+  musica: true,
+  estilo: "pop",
+  volumen: 0.6,
+  ...extra,
+});
+const foto = (extra: Partial<Clip> = {}): Clip => nuevoClip({ image: "data:x", ...extra });
+const estado = (clips: Clip[], extra: Partial<Ajustes> = {}): Estado => ({ clips, ajustes: ajustes(extra) });
+const todo = { voz: true, ia: true };
+const aplicar = (e: Estado, acciones: Accion[], permisos = todo) => aplicarAcciones(e, acciones, cat, permisos);
+
+test("aplicar: borrar, mover, duplicar y agregar, con una línea por acción", () => {
+  const [a, b, c] = [foto(), foto(), foto()];
+  const e = estado([a, b, c]);
+  let r = aplicar(e, [{ tipo: "borrar_clip", clip: 2 }]);
+  assert.deepEqual(r.estado.clips.map((x) => x.id), [a.id, c.id]);
+  assert.deepEqual(r.hecho, ["Borré el clip 2"]);
+  r = aplicar(e, [{ tipo: "mover_clip", clip: 1, a: 3 }]);
+  assert.deepEqual(r.estado.clips.map((x) => x.id), [b.id, c.id, a.id]);
+  assert.deepEqual(r.hecho, ["Moví el clip 1 al lugar 3"]);
+  r = aplicar(e, [{ tipo: "duplicar_clip", clip: 1 }]);
+  assert.equal(r.estado.clips.length, 4);
+  assert.deepEqual(r.hecho, ["Dupliqué el clip 1"]);
+  r = aplicar(e, [{ tipo: "agregar_clip", cantidad: 2 }]);
+  assert.equal(r.estado.clips.length, 5);
+  assert.deepEqual(r.hecho, ["Agregué 2 clips"]);
+  assert.deepEqual(e.clips.map((x) => x.id), [a.id, b.id, c.id]); // no modifica lo que recibe
+});
+
+test("aplicar: un clip que no existe se avisa y no cambia nada", () => {
+  const e = estado([foto(), foto(), foto(), foto()]);
+  const r = aplicar(e, [{ tipo: "texto", clip: 9, texto: "Hola" }]);
+  assert.deepEqual(r.avisos, ["No existe el clip 9"]);
+  assert.deepEqual(r.hecho, []);
+  assert.deepEqual(r.estado.clips, e.clips);
+});
+
+test("aplicar: las acciones van en orden (agregar y luego usar el clip nuevo)", () => {
+  const r = aplicar(estado([foto(), foto(), foto(), foto()]), [
+    { tipo: "agregar_clip", cantidad: 2 },
+    { tipo: "texto", clip: 6, texto: "Hola" },
+  ]);
+  assert.equal(r.estado.clips[5].caption, "Hola");
+  assert.deepEqual(r.avisos, []);
+});
+
+test("aplicar: duración y estilo de texto para un clip o para todos", () => {
+  const toma = foto({ tipo: "toma" });
+  let r = aplicar(estado([foto(), toma, foto()]), [{ tipo: "duracion", clip: "todos", segundos: 6 }]);
+  assert.deepEqual(r.estado.clips.map((c) => c.segundos), [6, toma.segundos, 6]);
+  r = aplicar(estado([foto(), foto()]), [{ tipo: "duracion", clip: 2, segundos: 9 }]);
+  assert.deepEqual(r.estado.clips.map((c) => c.segundos), [3, 9]);
+  r = aplicar(estado([foto(), foto()]), [{ tipo: "estilo_texto", clip: "todos", posicion: "arriba", tamano: "grande" }]);
+  assert.ok(r.estado.clips.every((c) => c.textoPos === "arriba" && c.textoTam === "grande"));
+  r = aplicar(estado([foto(), foto()]), [{ tipo: "estilo_texto", clip: 2, tamano: "chico" }]);
+  assert.deepEqual(r.estado.clips.map((c) => c.textoTam), [undefined, "chico"]);
+});
+
+test("aplicar: duracion_total reparte las fotos y no toca las tomas", () => {
+  let r = aplicar(estado([foto(), foto(), foto()]), [{ tipo: "duracion_total", segundos: 30 }]);
+  assert.deepEqual(r.estado.clips.map((c) => c.segundos), [9, 9, 9]);
+  const toma = foto({ tipo: "toma" });
+  r = aplicar(estado([foto(), toma, foto()]), [{ tipo: "duracion_total", segundos: 30 }]);
+  assert.deepEqual(r.estado.clips.map((c) => c.segundos), [11, toma.segundos, 11]);
+  r = aplicar(estado([foto()]), [{ tipo: "duracion_total", segundos: 120 }]);
+  assert.equal(r.estado.clips[0].segundos, 15);
+  r = aplicar(estado([nuevoClip()]), [{ tipo: "duracion_total", segundos: 30 }]);
+  assert.equal(r.avisos.length, 1);
+});
+
+test("aplicar: imagen deja el pedido pendiente y no toca la foto", () => {
+  const a = foto();
+  const r = aplicar(estado([a]), [{ tipo: "imagen", clip: 1, descripcion: "a torta" }]);
+  assert.equal(r.estado.clips[0].image, "data:x");
+  assert.equal(r.estado.clips[0].prompt, "a torta");
+  assert.deepEqual(r.pendientes, [{ tipo: "imagen", clipId: a.id, descripcion: "a torta" }]);
+});
+
+test("aplicar: animar marca la foto, con sus límites", () => {
+  let r = aplicar(estado([foto()]), [{ tipo: "animar", clip: 1, activar: true, movimiento: "zoom" }]);
+  assert.equal(r.estado.clips[0].tipo, "toma");
+  assert.equal(r.estado.clips[0].movimiento, "zoom");
+  assert.deepEqual(r.pendientes, []); // nunca lanza la toma
+  r = aplicar(estado([foto({ tipo: "toma" })]), [{ tipo: "animar", clip: 1, activar: false }]);
+  assert.equal(r.estado.clips[0].tipo, "foto");
+  r = aplicar(estado([foto()]), [{ tipo: "animar", clip: 1, activar: true }], { voz: true, ia: false });
+  assert.equal(r.estado.clips[0].tipo, "foto");
+  assert.deepEqual(r.avisos, ["Inicia sesión para animar fotos con IA"]);
+  r = aplicar(estado([nuevoClip()]), [{ tipo: "animar", clip: 1, activar: true }]);
+  assert.equal(r.estado.clips[0].tipo, "foto");
+  assert.equal(r.avisos.length, 1);
+  const cuatro = Array.from({ length: 4 }, () => foto({ tipo: "toma" }));
+  r = aplicar(estado([...cuatro, foto()]), [{ tipo: "animar", clip: 5, activar: true }]);
+  assert.equal(r.estado.clips[4].tipo, "foto");
+  assert.deepEqual(r.avisos, ["Máximo 4 fotos con IA por video"]);
+});
+
+test("aplicar: formato, cierre, subtítulos y música cambian los ajustes", () => {
+  const r = aplicar(estado([foto()]), [
+    { tipo: "formato", valor: "1:1" },
+    { tipo: "cierre", cta: "Te esperamos" },
+    { tipo: "subtitulos", activar: false },
+    { tipo: "musica", estilo: "lofi", volumen: 40 },
+  ]);
+  assert.equal(r.estado.ajustes.formato, "1:1");
+  assert.equal(r.estado.ajustes.cta, "Te esperamos");
+  assert.equal(r.estado.ajustes.negocio, "Tortas Tortuga");
+  assert.equal(r.estado.ajustes.subtitulos, false);
+  assert.equal(r.estado.ajustes.estilo, "lofi");
+  assert.equal(r.estado.ajustes.volumen, 0.4);
+  assert.equal(r.estado.ajustes.musica, true);
+});
+
+test("aplicar: subir y bajar la música, y apagarla", () => {
+  let r = aplicar(estado([foto()], { volumen: 0.6 }), [{ tipo: "musica", volumen: "subir" }]);
+  assert.equal(r.estado.ajustes.volumen, 0.75);
+  r = aplicar(estado([foto()], { volumen: 0.1 }), [{ tipo: "musica", volumen: "bajar" }]);
+  assert.equal(r.estado.ajustes.volumen, 0);
+  r = aplicar(estado([foto()], { volumen: 0.95 }), [{ tipo: "musica", volumen: "subir" }]);
+  assert.equal(r.estado.ajustes.volumen, 1);
+  r = aplicar(estado([foto()]), [{ tipo: "musica", activar: false }]);
+  assert.equal(r.estado.ajustes.musica, false);
+  r = aplicar(estado([foto()], { musica: false }), [{ tipo: "musica", estilo: "cumbia" }]);
+  assert.equal(r.estado.ajustes.musica, true); // elegir un estilo la enciende
+});
+
+test("aplicar: cambiar el guion con voz ya generada pide generarla de nuevo", () => {
+  const r = aplicar(estado([foto()], { guion: "viejo", hayVoz: true }), [{ tipo: "guion", texto: "nuevo" }]);
+  assert.equal(r.estado.ajustes.guion, "nuevo");
+  assert.equal(r.estado.ajustes.hayVoz, false);
+  assert.deepEqual(r.avisos, ["Cambió el guion: genera la voz de nuevo"]);
+  assert.deepEqual(r.pendientes, [{ tipo: "quitar_voz" }]);
+});
+
+test("aplicar: voz por género, generar y quitar", () => {
+  let r = aplicar(estado([foto()], { guion: "hola" }), [{ tipo: "voz", genero: "hombre", generar: true }]);
+  assert.equal(r.estado.ajustes.vozId, "es-javier");
+  assert.deepEqual(r.pendientes, [{ tipo: "voz", ajustarFotos: false }]);
+  r = aplicar(estado([foto()]), [{ tipo: "voz", generar: true }]);
+  assert.deepEqual(r.avisos, ["Escribe primero el guion"]);
+  assert.deepEqual(r.pendientes, []);
+  r = aplicar(estado([foto()], { guion: "hola" }), [{ tipo: "voz", generar: true }], { voz: false, ia: true });
+  assert.deepEqual(r.avisos, ["Tu plan no incluye voz"]);
+  assert.deepEqual(r.pendientes, []);
+  r = aplicar(estado([foto()], { guion: "hola", hayVoz: true }), [{ tipo: "voz", quitar: true }]);
+  assert.deepEqual(r.pendientes, [{ tipo: "quitar_voz" }]);
+  assert.equal(r.estado.ajustes.hayVoz, false);
+  // Con voz ya generada, elegir otra voz la vuelve a generar (como el selector de voces)
+  r = aplicar(estado([foto()], { guion: "hola", hayVoz: true }), [{ tipo: "voz", voz: "es-javier" }]);
+  assert.deepEqual(r.pendientes, [{ tipo: "voz", ajustarFotos: false }]);
+  // Sin voz generada, solo queda elegida
+  r = aplicar(estado([foto()], { guion: "hola" }), [{ tipo: "voz", voz: "es-javier" }]);
+  assert.deepEqual(r.pendientes, []);
+});
+
+const armar = (extra: Partial<Extract<Accion, { tipo: "armar" }>> = {}): Accion => ({
+  tipo: "armar",
+  tema: "promo",
+  clips: 4,
+  segundosPorFoto: 8,
+  textos: ["t1", "t2", "t3", "t4"],
+  imagenes: ["i1", "i2", "i3", "i4"],
+  cta: "Ven hoy",
+  guion: "El guion",
+  musica: "cumbia",
+  ...extra,
+});
+
+test("armar: sobre clips vacíos pone textos, duración, cierre, guion y música, y deja imágenes y voz pendientes", () => {
+  const vacios = [nuevoClip(), nuevoClip(), nuevoClip(), nuevoClip()];
+  const r = aplicar(estado(vacios), [armar()]);
+  assert.deepEqual(r.estado.clips.map((c) => [c.caption, c.prompt, c.segundos]), [
+    ["t1", "i1", 8],
+    ["t2", "i2", 8],
+    ["t3", "i3", 8],
+    ["t4", "i4", 8],
+  ]);
+  assert.equal(r.estado.ajustes.cta, "Ven hoy");
+  assert.equal(r.estado.ajustes.guion, "El guion");
+  assert.equal(r.estado.ajustes.estilo, "cumbia");
+  assert.deepEqual(
+    r.pendientes,
+    [...r.estado.clips.map((c, i) => ({ tipo: "imagen", clipId: c.id, descripcion: `i${i + 1}` })), { tipo: "voz", ajustarFotos: true }],
+  );
+  assert.deepEqual(costoDe(r.pendientes), { imagenes: 4, voces: 1 });
+});
+
+test("armar: conserva la foto que ya había y quita los clips vacíos que sobran", () => {
+  const a = foto({ caption: "viejo" });
+  const r = aplicar(estado([a, nuevoClip(), nuevoClip(), nuevoClip(), nuevoClip()]), [armar({ clips: 3, textos: ["t1", "t2", "t3"], imagenes: ["i1", "i2", "i3"] })]);
+  assert.equal(r.estado.clips.length, 3);
+  assert.equal(r.estado.clips[0].id, a.id);
+  assert.equal(r.estado.clips[0].image, "data:x");
+  assert.equal(r.estado.clips[0].caption, "t1");
+  assert.equal(costoDe(r.pendientes).imagenes, 2);
+});
+
+test("armar: nunca borra un clip con foto aunque pida menos clips", () => {
+  const tres = [foto({ caption: "a" }), foto({ caption: "b" }), foto({ caption: "c" })];
+  const r = aplicar(estado(tres), [armar({ clips: 2, textos: ["t1", "t2"], imagenes: ["i1", "i2"] })]);
+  assert.deepEqual(r.estado.clips.map((c) => c.caption), ["t1", "t2", "c"]);
+  assert.ok(r.estado.clips.every((c) => c.image === "data:x"));
+  assert.equal(costoDe(r.pendientes).imagenes, 0);
+});
+
+test("armar: agrega los clips que falten", () => {
+  const r = aplicar(estado([nuevoClip()]), [armar()]);
+  assert.equal(r.estado.clips.length, 4);
+});
+
+test("armar: sin voz en el plan se arma todo lo demás y se avisa", () => {
+  const r = aplicar(estado([nuevoClip()]), [armar()], { voz: false, ia: true });
+  assert.equal(costoDe(r.pendientes).voces, 0);
+  assert.deepEqual(r.avisos, ["Tu plan no incluye voz"]);
+  assert.equal(r.estado.ajustes.guion, "El guion");
+});
+
+test("armar y luego duracion_total: cuenta las fotos que están por crearse", () => {
+  const r = aplicar(estado([nuevoClip()]), [armar(), { tipo: "duracion_total", segundos: 43 }]);
+  assert.deepEqual(r.estado.clips.map((c) => c.segundos), [10, 10, 10, 10]);
+  assert.deepEqual(r.avisos, []);
+});
+
+test("vista previa y crear video quedan para el final; si vienen los dos, solo crear", () => {
+  let r = aplicar(estado([foto()]), [{ tipo: "vista_previa" }]);
+  assert.deepEqual(r.pendientes, [{ tipo: "vista_previa" }]);
+  r = aplicar(estado([foto()]), [{ tipo: "vista_previa" }, { tipo: "crear_video" }, { tipo: "imagen", clip: 1, descripcion: "x" }]);
+  assert.deepEqual(r.pendientes.map((p) => p.tipo), ["imagen", "crear_video"]);
+});
+
+test("costo: texto de la confirmación", () => {
+  assert.equal(textoCosto({ imagenes: 4, voces: 1 }), "Esta orden usa 4 imágenes y 1 voz.");
+  assert.equal(textoCosto({ imagenes: 1, voces: 0 }), "Esta orden usa 1 imagen.");
+  assert.equal(textoCosto({ imagenes: 0, voces: 1 }), "Esta orden usa 1 voz.");
+  assert.equal(textoCosto({ imagenes: 0, voces: 0 }), null);
+});
+
+test("resumenProyecto: textos y números, nunca las fotos", () => {
+  const r = resumenProyecto(estado([foto({ caption: "Hola", imageId: "reel-1", segundos: 4 }), nuevoClip({ tipo: "toma" })], { guion: "g", cta: "c" }));
+  const json = JSON.stringify(r);
+  assert.ok(!json.includes("data:x") && !json.includes("reel-1"));
+  assert.deepEqual(r.clips, [
+    { n: 1, tipo: "foto", segundos: 4, foto: true, texto: "Hola" },
+    { n: 2, tipo: "con_ia", segundos: 5, foto: false, texto: "" },
+  ]);
+  assert.equal(r.guion, "g");
+  assert.equal(r.formato, "9:16");
 });
