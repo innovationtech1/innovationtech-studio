@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Brand, brandAccent, brandContext, brandVisual } from "@/lib/brand";
 import { friendlyError } from "@/lib/errors";
 import { fileToResizedDataUrl } from "@/lib/resize";
-import { ReelFormat, renderReel, supportedRecording } from "@/lib/reel";
+import { ReelFormat, ReelOptions, renderReel, supportedRecording, vistaPrevia } from "@/lib/reel";
 import type { Item, Settings } from "@/lib/types";
 import { clearDrafts, usePersistentState } from "@/lib/persist";
 import { deleteFile, getFile, putFile, toBlob, toDataUrl } from "@/lib/media-store";
@@ -24,22 +24,41 @@ import { DEFAULT_VOICE, findVoice } from "@/lib/voices";
 import { getLang } from "@/lib/i18n";
 import VoicePicker from "./voice-picker";
 import { marcarDemoALaVista, ProTag, refrescarCuenta, useCuenta } from "./account-context";
-import { DURACIONES, MAX_TOMAS, duracionMinima, duracionPara } from "@/lib/reel-escenas";
+import {
+  MAX_VIDEO,
+  aEscenas,
+  ajustarAVoz,
+  borrar,
+  cambiar,
+  cierreDe,
+  duplicar,
+  duracionTotal,
+  formatoTiempo,
+  mover,
+  normalizarClips,
+  nuevoClip,
+  validar,
+  type Clip,
+} from "@/lib/linea-tiempo";
+import { anotar, deshacer, rehacer } from "@/lib/historial";
+import LineaTiempo from "./linea-tiempo";
 import { firmaTomas, terminado, textoEstado, type TrabajoVisto } from "@/lib/estados-video";
 import { consultarTomas, pedirTomas, prepararFoto, subirFoto } from "@/lib/video-ia-cliente";
 
-import { Clapperboard, Dices, Download, Mic, Play, Sparkles } from "lucide-react";
-// imageId: la foto de la escena guardada en el dispositivo (IndexedDB), para que no se pierda
-// al cambiar de sección, editar, cerrar o recargar la app.
-// ia: la foto lleva una toma con IA (movimiento real, 5 s); movimiento: lo que se le pide a la IA.
-type Scene = { image: string; caption: string; prompt: string; loading?: boolean; imageId?: string; ia?: boolean; movimiento?: string };
+import { Clapperboard, Dices, Download, Eye, Mic, Play, Redo2, Sparkles, Square, Undo2 } from "lucide-react";
+// Cada clip guarda su foto en el dispositivo (IndexedDB) con imageId, para que no se pierda
+// al cambiar de sección, editar, cerrar o recargar la app. El modelo está en lib/linea-tiempo.ts.
 
 // Tomas con IA que siguen en proceso (se guardan para retomarlas sin pedirlas ni descontarlas otra vez)
 type TomasPendientes = { ids: string[]; firma: string } | null;
 const ESPERA_TOMAS = 5000; // cada cuánto se consulta
 const MAX_ESPERA = 20 * 60 * 1000;
 
-const emptyScene = (): Scene => ({ image: "", caption: "", prompt: "" });
+// Los 4 clips vacíos con los que se empieza (ids fijos: igual en el servidor y en el navegador)
+const clipsIniciales = (): Clip[] => Array.from({ length: 4 }, (_, i) => nuevoClip({ id: `inicial-${i}` }));
+// ¿Lo guardado ya tiene la forma nueva? (las escenas de antes no traían id, tipo ni duración)
+const esClip = (c: unknown): c is Clip =>
+  !!c && typeof c === "object" && typeof (c as Clip).id === "string" && !!(c as Clip).tipo && typeof (c as Clip).segundos === "number";
 
 export default function ReelStudio({
   settings,
@@ -66,23 +85,97 @@ export default function ReelStudio({
 }) {
   // Todo lo que escribes se guarda: no se pierde al cambiar de pestaña ni al cerrar la app.
   const [topic, setTopic] = usePersistentState("reel:tema", "");
-  const [count, setCount] = usePersistentState("reel:escenas", 4);
   const [format, setFormat] = usePersistentState<ReelFormat>("reel:formato", "9:16");
-  const [scenes, setScenes] = usePersistentState<Scene[]>(
+  const [guardados, setClips] = usePersistentState<Clip[]>(
     "reel:escenas-datos",
-    Array.from({ length: 4 }, emptyScene),
+    clipsIniciales(),
     undefined,
     // Las fotos van al almacenamiento del dispositivo (IndexedDB); aquí solo se guarda su id y los textos.
     (s) => s.map((sc) => ({ ...sc, image: sc.imageId || !sc.image.startsWith("data:") ? (sc.imageId ? "" : sc.image) : "", loading: false }))
   );
+  // Segundos por escena de antes del editor: solo sirve para dar duración a un borrador viejo
+  const [segundosViejos] = usePersistentState("reel:segundos", 3);
+  // Un borrador de antes del editor (escenas sin id ni duración) se convierte a clips una sola vez
+  const clips = useMemo(
+    () => (Array.isArray(guardados) && guardados.length > 0 && guardados.every(esClip) ? guardados : normalizarClips(guardados, segundosViejos)),
+    [guardados, segundosViejos]
+  );
+  useEffect(() => {
+    if (clips !== guardados) setClips(clips);
+  }, [clips, guardados, setClips]);
+  // Siempre la lista más reciente, también dentro de tareas que tardan (subir foto, crear imagen)
+  const clipsRef = useRef(clips);
+  clipsRef.current = clips;
+  const [elegido, setElegido] = useState(-1);
+
   // id guardado → foto que tiene (para saber si cambió)
   const savedImages = useRef(new Map<string, string>());
   const restored = useRef(false);
 
-  // Al abrir la app: recuperar las fotos de las escenas desde el dispositivo.
+  // Deshacer y rehacer (solo en memoria, hasta 50 pasos)
+  const hist = useRef<{ pasado: Clip[][]; futuro: Clip[][] }>({ pasado: [], futuro: [] });
+  const [pasos, setPasos] = useState({ atras: 0, adelante: 0 });
+  const ultimaEdicion = useRef({ llave: "", t: 0 });
+  const poner = (lista: Clip[]) => {
+    clipsRef.current = lista;
+    setClips(lista);
+  };
+  // Cambio interno (el «Creando…», el id de la foto guardada): no cuenta como paso para deshacer
+  const interno = (fn: (c: Clip[]) => Clip[]) => poner(fn(clipsRef.current));
+  // Cambio hecho por la persona: se puede deshacer. Con `llave`, los cambios seguidos del mismo
+  // campo (escribir un texto, arrastrar la duración) cuentan como un solo paso.
+  function editar(fn: (c: Clip[]) => Clip[], llave = "") {
+    const antes = clipsRef.current;
+    const nuevo = fn(antes);
+    if (nuevo === antes) return;
+    const ahora = Date.now();
+    const junta = !!llave && ultimaEdicion.current.llave === llave && ahora - ultimaEdicion.current.t < 1500;
+    ultimaEdicion.current = { llave, t: ahora };
+    if (!junta) hist.current = { pasado: anotar({ pasado: hist.current.pasado, presente: antes, futuro: [] }, nuevo).pasado, futuro: [] };
+    else hist.current = { pasado: hist.current.pasado, futuro: [] };
+    setPasos({ atras: hist.current.pasado.length, adelante: 0 });
+    poner(nuevo);
+  }
+  // Al volver a un paso anterior: cada clip recupera su foto guardada (o se vuelve a guardar si ya se borró)
+  function reconciliar(lista: Clip[]): Clip[] {
+    const usados = new Set<string>();
+    return lista.map((c) => {
+      const limpio: Clip = { ...c, loading: false };
+      if (!c.image) return limpio;
+      let id = c.imageId && savedImages.current.get(c.imageId) === c.image ? c.imageId : undefined;
+      if (!id) for (const [k, v] of savedImages.current) if (v === c.image && !usados.has(k)) id = k;
+      if (id && usados.has(id)) id = undefined;
+      if (id) usados.add(id);
+      // Una foto que llegó por enlace y sigue igual conserva su id aunque no esté en la lista de esta sesión
+      if (!id && c.imageId && !savedImages.current.has(c.imageId) && !c.image.startsWith("data:") && !borradas.current.has(c.imageId)) id = c.imageId;
+      if (id) limpio.imageId = id;
+      else delete limpio.imageId;
+      return limpio;
+    });
+  }
+  const borradas = useRef(new Set<string>()); // fotos guardadas que ya se quitaron del dispositivo
+  function pasoHistorial(fn: typeof deshacer) {
+    const h = fn({ pasado: hist.current.pasado, presente: clipsRef.current, futuro: hist.current.futuro });
+    if (h.presente === clipsRef.current) return;
+    hist.current = { pasado: h.pasado, futuro: h.futuro };
+    ultimaEdicion.current = { llave: "", t: 0 };
+    setPasos({ atras: h.pasado.length, adelante: h.futuro.length });
+    const lista = reconciliar(h.presente);
+    poner(lista);
+    setElegido((e) => Math.min(e, lista.length - 1));
+  }
+  // Quita del dispositivo la foto guardada de un clip (si se deshace, se vuelve a guardar sola)
+  function olvidarFoto(id?: string) {
+    if (!id) return;
+    savedImages.current.delete(id);
+    borradas.current.add(id);
+    deleteFile(id).catch(() => {});
+  }
+
+  // Al abrir la app: recuperar las fotos de los clips desde el dispositivo.
   useEffect(() => {
     if (restored.current) return;
-    const missing = scenes.filter((sc) => sc.imageId && !sc.image);
+    const missing = clips.filter((sc) => sc.imageId && !sc.image);
     const t = setTimeout(async () => {
       restored.current = true;
       for (const sc of missing) {
@@ -90,36 +183,33 @@ export default function ReelStudio({
         if (!blob) continue;
         const url = await blobToDataUrl(blob);
         savedImages.current.set(sc.imageId!, url);
-        setScenes((all) => all.map((x) => (x.imageId === sc.imageId && !x.image ? { ...x, image: url } : x)));
+        interno((all) => all.map((x) => (x.imageId === sc.imageId && !x.image ? { ...x, image: url } : x)));
       }
     }, 400); // espera a que se cargue el borrador guardado
     return () => clearTimeout(t);
-  }, [scenes, setScenes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clips]);
 
   // Cada foto nueva o cambiada se guarda en el dispositivo.
   useEffect(() => {
     if (!restored.current) return;
-    scenes.forEach((sc, i) => {
+    clips.forEach((sc) => {
       if (!sc.image) return;
       if (sc.imageId && savedImages.current.get(sc.imageId) === sc.image) return;
       if (sc.imageId && !savedImages.current.has(sc.imageId) && !sc.image.startsWith("data:")) return;
       const old = sc.imageId;
       const id = `reel-${Math.random().toString(36).slice(2, 10)}`;
       savedImages.current.set(id, sc.image);
-      setScenes((all) => all.map((x, j) => (j === i && x.image === sc.image ? { ...x, imageId: id } : x)));
+      interno((all) => all.map((x) => (x.id === sc.id && x.image === sc.image ? { ...x, imageId: id } : x)));
       (async () => {
         const blob = await toBlob(sc.image);
         if (blob) await putFile(id, blob).catch(() => {});
-        if (old) {
-          savedImages.current.delete(old);
-          deleteFile(old).catch(() => {});
-        }
+        // La foto anterior se borra solo si ningún otro clip la sigue usando
+        if (old && !clipsRef.current.some((x) => x.imageId === old)) olvidarFoto(old);
       })();
     });
-  }, [scenes, setScenes]);
-  const [seconds, setSeconds] = usePersistentState("reel:segundos", 3);
-  // 0 = automática (segundos por escena); 10, 15, 20 o 30 = video de duración fija
-  const [duracion, setDuracion] = usePersistentState<number>("reel:duracion", 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clips]);
   const [pendientes, setPendientes] = usePersistentState<TomasPendientes>("reel:tomas-pendientes", null);
   const [estadoIa, setEstadoIa] = useState("");
   const [invitarPlan, setInvitarPlan] = useState(false);
@@ -132,7 +222,7 @@ export default function ReelStudio({
   const { activo: cuentasOn, cuenta, abrirPlanes } = useCuenta();
   const conCuenta = cuentasOn && !!cuenta?.usuario;
   const esDemo = !!cuenta?.usuario && cuenta.efectivo.plan === "prueba";
-  const tomasMarcadas = scenes.filter((s) => s.image && s.ia).length;
+  const tomasMarcadas = clips.filter((s) => s.image && s.tipo === "toma").length;
   const [brandName, setBrandName] = usePersistentState("reel:negocio", brand.name);
   const [cta, setCta] = usePersistentState("reel:cta", "");
   // Color, logo y letra vienen de «Mi marca»; el color se puede cambiar solo para este reel.
@@ -183,19 +273,19 @@ export default function ReelStudio({
 
   useEffect(() => {
     // Si la app se cerró mientras se creaba una imagen, quitamos el «Creando…».
-    const t = setTimeout(() => setScenes((s) => s.map((sc) => (sc.loading ? { ...sc, loading: false } : sc))), 0);
+    const t = setTimeout(() => setClips((s) => s.map((sc) => (sc.loading ? { ...sc, loading: false } : sc))), 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // Imagen enviada desde «Animar en video»: va a la primera escena libre.
+  // Imagen enviada desde «Animar en video»: va al primer clip libre (o a uno nuevo al final).
   useEffect(() => {
     if (!handoff) return;
-    setScenes((s) => {
+    setClips((s) => {
       const free = s.findIndex((sc) => !sc.image);
-      const i = free >= 0 ? free : 0;
-      return s.map((sc, j) => (j === i ? { ...sc, image: handoff.url, loading: false } : sc));
+      if (free < 0) return [...s, nuevoClip({ image: handoff.url })];
+      return s.map((sc, j) => (j === free ? { ...sc, image: handoff.url, loading: false } : sc));
     });
-  }, [handoff, setScenes]);
+  }, [handoff, setClips]);
   useEffect(() => setBrandName((b) => b || brand.name), [brand.name]);
   // Al salir del Creador de Reels ya no hay demo a la vista
   useEffect(() => () => marcarDemoALaVista(false), []);
@@ -206,20 +296,15 @@ export default function ReelStudio({
   // Escena que vuelve del editor
   useEffect(() => {
     if (!sceneUpdate) return;
-    setScenes((s) => s.map((sc, j) => (j === sceneUpdate.scene ? { ...sc, image: sceneUpdate.url, loading: false } : sc)));
-  }, [sceneUpdate, setScenes]);
+    setClips((s) => s.map((sc, j) => (j === sceneUpdate.scene ? { ...sc, image: sceneUpdate.url, loading: false } : sc)));
+  }, [sceneUpdate, setClips]);
 
   const canRecord = typeof window === "undefined" ? true : supportedRecording() !== null;
   const galleryImages = gallery.filter((g) => g.kind === "imagen");
   const cfHeaders = { "x-cf-account": settings.cfAccountId, "x-cf-token": settings.cfToken };
 
-  const setScene = (i: number, patch: Partial<Scene>) =>
-    setScenes((s) => s.map((sc, j) => (j === i ? { ...sc, ...patch } : sc)));
-
-  function resize(n: number) {
-    setCount(n);
-    setScenes((s) => (s.length >= n ? s.slice(0, n) : [...s, ...Array.from({ length: n - s.length }, emptyScene)]));
-  }
+  // Cambia un clip por su id (sirve aunque se haya movido mientras se cargaba o creaba su foto)
+  const porId = (id: string, cambios: Partial<Clip>) => (c: Clip[]) => cambiar(c, c.findIndex((x) => x.id === id), cambios);
 
   async function writeWithAi(): Promise<{ captions: string[]; imagePrompts: string[] } | null> {
     const res = await fetch("/api/text", {
@@ -230,7 +315,7 @@ export default function ReelStudio({
           : { "content-type": "application/json", "x-anthropic-key": settings.anthropicKey },
       body: JSON.stringify({
         mode: "reel",
-        scenes: scenes.length,
+        scenes: clips.length,
         prompt: topic,
         brand: brandContext(brand),
         provider: settings.textProvider,
@@ -239,17 +324,15 @@ export default function ReelStudio({
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
-    setScenes((s) =>
-      s.map((sc, i) => ({ ...sc, caption: data.captions[i] ?? sc.caption, prompt: data.imagePrompts?.[i] ?? sc.prompt }))
-    );
+    editar((s) => s.map((sc, i) => ({ ...sc, caption: data.captions[i] ?? sc.caption, prompt: data.imagePrompts?.[i] ?? sc.prompt })));
     if (data.cta) setCta(data.cta);
     if (data.voiceover) setScript(data.voiceover);
     return data;
   }
 
-  async function makeImage(i: number, promptText: string) {
+  async function makeImage(id: string, promptText: string) {
     if (!promptText.trim()) throw new Error("Escribe primero el tema del reel o los textos.");
-    setScene(i, { loading: true });
+    interno(porId(id, { loading: true }));
     try {
       const cf = settings.imageProvider === "cloudflare";
       const res = await fetch("/api/image", {
@@ -269,10 +352,11 @@ export default function ReelStudio({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       const url = data.urls[0];
-      setScene(i, { image: url, loading: false });
+      interno(porId(id, { loading: false }));
+      editar(porId(id, { image: url }));
       onImages([{ kind: "imagen", url, prompt: promptText, date: new Date().toISOString() }]);
     } catch (e) {
-      setScene(i, { loading: false });
+      interno(porId(id, { loading: false }));
       throw e;
     }
   }
@@ -294,15 +378,15 @@ export default function ReelStudio({
       if (!topic.trim()) throw new Error("Escribe de qué trata el reel.");
       const data = await writeWithAi();
       if (!data) return;
-      // Solo crea imágenes para las escenas que aún no tienen una.
-      // De 3 en 3 para no saturar el límite gratuito de Cloudflare (hasta 8 escenas).
-      const pending = scenes.map((sc, i) => i).filter((i) => !scenes[i].image);
+      // Solo crea imágenes para los clips que aún no tienen una.
+      // De 3 en 3 para no saturar el límite gratuito de Cloudflare.
+      const pending = clipsRef.current.map((sc, i) => ({ id: sc.id, i, vacio: !sc.image })).filter((x) => x.vacio);
       let failed: unknown = null;
       for (let k = 0; k < pending.length; k += 3) {
         const batch = pending.slice(k, k + 3);
         setBusy(`Creando imágenes ${k + 1}–${k + batch.length} de ${pending.length}…`);
         const results = await Promise.allSettled(
-          batch.map((i) => makeImage(i, data.imagePrompts?.[i] || `${topic}, ${data.captions[i] || ""}`))
+          batch.map((x) => makeImage(x.id, data.imagePrompts?.[x.i] || `${topic}, ${data.captions[x.i] || ""}`))
         );
         const bad = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
         if (bad && !failed) failed = bad.reason;
@@ -340,102 +424,146 @@ export default function ReelStudio({
     void makeVoice(id);
   }
 
-  // Marca o desmarca una foto «con IA» (máximo 4). Las tomas necesitan un video de duración fija.
-  function marcarIa(i: number, on: boolean) {
-    if (on && tomasMarcadas >= MAX_TOMAS) return setError(`Puedes marcar máximo ${MAX_TOMAS} fotos con IA por video.`);
-    setError("");
-    setScene(i, { ia: on });
-    if (on) {
-      // Si con una toma más ya no caben en la duración elegida, se pasa a la más corta donde sí caben
-      const fotos = scenes.filter((s) => s.image).length;
-      const minima = duracionMinima(fotos, tomasMarcadas + 1, 3) ?? DURACIONES[DURACIONES.length - 1];
-      if (!duracion || duracion < minima) setDuracion(minima);
-    }
+  // Lo que comparten grabar y la vista previa: las escenas con su duración, la marca, la voz y la música.
+  function opcionesReel(lista: Clip[], clipsIa?: Record<string, string | null>): ReelOptions {
+    return {
+      escenas: aEscenas(lista, clipsIa),
+      cierre: cierreDe(lista),
+      format,
+      accent,
+      brandName,
+      cta,
+      logo: (useLogo && logo) || undefined,
+      font: brand.font || undefined,
+      voice: voice || undefined,
+      subtitles: voice && subtitlesOn ? { script, highlight: accent } : null,
+      music: musicOn ? { style: musicStyle, seed: musicSeed, volume: musicVolume, song: musicSource === "library" ? songId : undefined } : null,
+    };
   }
 
-  // Graba el video. clips: el clip de IA de cada escena lista (null = animación normal).
-  async function grabar(clips?: (string | null)[], dur: number = duracion) {
-    {
-      const ready = scenes.filter((s) => s.image);
-      if (ready.length === 0) throw new Error("Agrega al menos una imagen a las escenas.");
-      setResult(null);
-      setProgress(0);
-      if (result) URL.revokeObjectURL(result.url);
-      const r = await renderReel({
-        images: ready.map((s) => s.image),
-        captions: ready.map((s) => s.caption),
-        secondsPerSlide: seconds,
-        duracion: dur || undefined,
-        tomas: dur ? ready.flatMap((s, i) => (s.ia ? [i] : [])) : undefined,
-        clips,
-        format,
-        accent,
-        brandName,
-        cta,
-        logo: (useLogo && logo) || undefined,
-        font: brand.font || undefined,
-        voice: voice || undefined,
-        subtitles: voice && subtitlesOn ? { script, highlight: accent } : null,
-        music: musicOn ? { style: musicStyle, seed: musicSeed, volume: musicVolume, song: musicSource === "library" ? songId : undefined } : null,
-        onStatus: (m) => setBusy(m || "Grabando tu reel…"),
-        onProgress: setProgress,
-        previewCanvas: preview.current || undefined,
-      });
-      setResult({ url: r.url, ext: r.ext, seconds: r.seconds });
-      setVozCambio(false);
-      onVideo(r.blob, `Reel: ${topic || brandName || "sin título"}`); // se guarda solo en la galería
+  // Vista previa: se ve y se oye el video sin grabarlo (no gasta nada; las tomas con IA se ven con zoom).
+  const [viendo, setViendo] = useState(false);
+  const [estadoPrevia, setEstadoPrevia] = useState("");
+  const previa = useRef<AbortController | null>(null);
+  const lienzoPrevia = useRef<HTMLCanvasElement>(null);
+  function detenerPrevia() {
+    previa.current?.abort();
+    previa.current = null;
+    setViendo(false);
+  }
+  async function verPrevia() {
+    const lista = clipsRef.current;
+    const problema = validar(lista);
+    if (problema) return setError(problema);
+    setError("");
+    stopListen();
+    const control = new AbortController();
+    previa.current = control;
+    setViendo(true);
+    setEstadoPrevia("Preparando la vista previa…");
+    try {
+      await vistaPrevia({ ...opcionesReel(lista), onStatus: setEstadoPrevia, previewCanvas: lienzoPrevia.current || undefined }, control.signal);
+    } catch (e) {
+      setError(friendlyError((e as Error).message));
+    } finally {
+      if (previa.current === control) {
+        previa.current = null;
+        setViendo(false);
+      }
     }
+  }
+  // Al salir del Creador de Reels la vista previa se detiene
+  useEffect(() => () => previa.current?.abort(), []);
+
+  // Cuánto dura la voz: si es más larga que el video, se avisa y se ofrece alargar las fotos.
+  const [vozSegundos, setVozSegundos] = useState(0);
+  useEffect(() => {
+    setVozSegundos(0);
+    if (!voice) return;
+    let vivo = true;
+    (async () => {
+      try {
+        const bytes = await (await fetch(voice)).arrayBuffer();
+        const buf = await new OfflineAudioContext(1, 1, 44100).decodeAudioData(bytes);
+        if (vivo) setVozSegundos(buf.duration);
+      } catch {
+        /* sin duración no hay aviso */
+      }
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [voice]);
+  const total = duracionTotal(clips);
+  const segundosClips = total - cierreDe(clips);
+  const vozLarga = vozSegundos > 0 && segundosClips > 0 && vozSegundos > segundosClips + 0.05;
+  const repartidos = vozLarga ? ajustarAVoz(clips, vozSegundos) : clips;
+  const sePuedeRepartir = repartidos.some((c, i) => c.segundos !== clips[i]?.segundos);
+
+  // Graba el video. clipsIa: id del clip → su toma con IA ya generada (sin ella, la foto se anima con zoom).
+  async function grabar(lista: Clip[], clipsIa?: Record<string, string | null>) {
+    const problema = validar(lista);
+    if (problema) throw new Error(problema);
+    detenerPrevia();
+    setResult(null);
+    setProgress(0);
+    if (result) URL.revokeObjectURL(result.url);
+    const r = await renderReel({
+      ...opcionesReel(lista, clipsIa),
+      onStatus: (m) => setBusy(m || "Grabando tu reel…"),
+      onProgress: setProgress,
+      previewCanvas: preview.current || undefined,
+    });
+    setResult({ url: r.url, ext: r.ext, seconds: r.seconds });
+    setVozCambio(false);
+    onVideo(r.blob, `Reel: ${topic || brandName || "sin título"}`); // se guarda solo en la galería
   }
 
   const buildReel = () =>
     run("Grabando tu reel…", async () => {
-      // Con fotos marcadas «con IA» la duración se acomoda sola para que quepan
-      await grabar(undefined, tomasMarcadas > 0 ? duracionAjustada() : duracion);
-      if (tomasMarcadas > 0) setEstadoIa(textoEstado({ tipo: "previa" }));
+      await grabar(clipsRef.current);
+      if (tomasMarcadas > 0) setEstadoIa("Video listo sin IA: las fotos marcadas se ven con zoom.");
     });
-
-  // La duración con la que se arma un video con tomas de IA: la elegida si caben las fotos; si no,
-  // la más corta donde caben. La deja puesta en el selector para que se vea.
-  function duracionAjustada(): number {
-    const fotos = scenes.filter((s) => s.image).length;
-    const d = duracionPara(duracion, fotos, tomasMarcadas, 3);
-    if (d !== duracion) setDuracion(d);
-    return d;
-  }
 
   // Genera las tomas con IA (sube las fotos marcadas, espera los clips) y graba el video final.
   const generarConIa = () =>
     run("Preparando las tomas con IA…", async () => {
-      const ready = scenes.filter((s) => s.image);
-      const marcadas = ready.flatMap((s, i) => (s.ia ? [{ i, s }] : []));
+      const lista = clipsRef.current; // el video se arma con los clips tal como están al empezar
+      const problema = validar(lista);
+      if (problema) throw new Error(problema);
+      const marcadas = lista.filter((c) => c.image && c.tipo === "toma");
       if (marcadas.length === 0) throw new Error("Marca de 1 a 4 fotos «con IA».");
-      const dur = duracionAjustada();
       setInvitarPlan(false);
       if (esDemo) marcarDemoALaVista(true); // si la prueba vence mientras tanto, no se tapa el video
-      const fotos = await Promise.all(marcadas.map((m) => prepararFoto(m.s.image)));
-      const firma = firmaTomas(marcadas.map((m, k) => ({ sha256: fotos[k].sha256, movimiento: m.s.movimiento ?? "" })));
-      // Mismas fotos y movimientos que el último video (por ejemplo, solo cambió la voz):
+      const preparadas = await Promise.all(marcadas.map((m) => prepararFoto(m.image)));
+      // Siempre en el mismo orden (por foto y movimiento): así mover los clips no vuelve a pedir ni a cobrar las tomas
+      const llaveDe = (t: { foto: { sha256: string }; movimiento: string }) => `${t.foto.sha256}|${t.movimiento}`;
+      const tomas = marcadas
+        .map((m, k) => ({ clip: m, foto: preparadas[k], movimiento: m.movimiento ?? "" }))
+        .sort((a, b) => (llaveDe(a) < llaveDe(b) ? -1 : llaveDe(a) > llaveDe(b) ? 1 : 0));
+      const firma = firmaTomas(tomas.map((t) => ({ sha256: t.foto.sha256, movimiento: t.movimiento })));
+      const porClip = (urls: (string | null)[]) => Object.fromEntries(tomas.map((t, k) => [t.clip.id, urls[k] ?? null]));
+      // Mismas fotos y movimientos que el último video (por ejemplo, solo cambió la voz o el orden):
       // se vuelve a grabar con los clips que ya se tienen, sin pedir nada ni gastar tomas.
-      const firmaVideo = `${firma}@${marcadas.map((m) => m.i).join(",")}/${ready.length}`;
       const previos = ultimosClips.current;
-      if (previos && previos.firma === firmaVideo && Date.now() - previos.cuando < 50 * 60 * 1000) {
+      if (previos && previos.firma === firma && Date.now() - previos.cuando < 50 * 60 * 1000) {
         setBusy("Grabando tu reel…");
-        await grabar(previos.clips, dur);
-        setEstadoIa(textoEstado({ tipo: "trabajos", trabajos: marcadas.map((_, k) => ({ id: String(k), estado: "listo", desdeCache: true })), topeHoy: false }));
+        await grabar(lista, porClip(previos.clips));
+        setEstadoIa(textoEstado({ tipo: "trabajos", trabajos: tomas.map((_, k) => ({ id: String(k), estado: "listo", desdeCache: true })), topeHoy: false }));
         return;
       }
       let ids = pendientes && pendientes.firma === firma ? pendientes.ids : null;
       if (!ids) {
         const llaves: string[] = [];
-        for (const [k, f] of fotos.entries()) {
-          let llave = subidas.current.get(f.sha256);
+        for (const [k, t] of tomas.entries()) {
+          let llave = subidas.current.get(t.foto.sha256);
           if (!llave) {
-            llave = await subirFoto(f, (pct) => setBusy(textoEstado({ tipo: "subiendo", pct: (k * 100 + pct) / fotos.length })));
-            subidas.current.set(f.sha256, llave);
+            llave = await subirFoto(t.foto, (pct) => setBusy(textoEstado({ tipo: "subiendo", pct: (k * 100 + pct) / tomas.length })));
+            subidas.current.set(t.foto.sha256, llave);
           }
           llaves.push(llave);
         }
-        ids = await pedirTomas(marcadas.map((m, k) => ({ imagenKey: llaves[k], movimiento: m.s.movimiento ?? "" })));
+        ids = await pedirTomas(tomas.map((t, k) => ({ imagenKey: llaves[k], movimiento: t.movimiento })));
         setPendientes({ ids, firma });
         void refrescarCuenta(); // actualiza «te quedan X tomas»
       }
@@ -462,16 +590,113 @@ export default function ReelStudio({
       }
       setPendientes(null);
       void refrescarCuenta();
-      const porId = new Map(vistos.map((t) => [t.id, t]));
-      const clips: (string | null)[] = ready.map(() => null);
-      marcadas.forEach((m, k) => (clips[m.i] = porId.get(ids![k])?.clipUrl ?? null));
+      const trabajos = new Map(vistos.map((t) => [t.id, t]));
+      const urls = ids.map((id) => trabajos.get(id)?.clipUrl ?? null);
       // Solo se guardan si salieron todas: así un intento posterior vuelve a pedir la que falló
-      if (marcadas.every((m) => clips[m.i])) ultimosClips.current = { firma: firmaVideo, clips, cuando: Date.now() };
+      if (urls.every(Boolean)) ultimosClips.current = { firma, clips: urls, cuando: Date.now() };
       setBusy("Grabando tu reel…");
-      await grabar(clips, dur);
+      await grabar(lista, porClip(urls));
       setEstadoIa(textoEstado({ tipo: "trabajos", trabajos: vistos, topeHoy: false }));
       setInvitarPlan(esDemo);
     });
+
+  // Lo que se hace con los clips desde la línea de tiempo
+  const alMover = (de: number, a: number) => {
+    editar((c) => mover(c, de, a));
+    setElegido(a);
+  };
+  const alDuplicar = (i: number) => {
+    editar((c) => duplicar(c, i));
+    setElegido(i + 1);
+  };
+  const alBorrar = (i: number) => {
+    const id = clipsRef.current[i]?.imageId;
+    editar((c) => borrar(c, i));
+    if (id && !clipsRef.current.some((x) => x.imageId === id)) olvidarFoto(id);
+    setElegido(Math.min(i, clipsRef.current.length - 1));
+    setPicking(null);
+  };
+  const alCambiar = (i: number, cambios: Partial<Clip>) => {
+    const campo = Object.keys(cambios).join(",");
+    // Escribir o arrastrar la duración: varios cambios seguidos cuentan como un solo paso
+    const seguido = campo === "caption" || campo === "movimiento" || campo === "segundos";
+    editar((c) => cambiar(c, i, cambios), seguido ? `${clipsRef.current[i]?.id}:${campo}` : "");
+  };
+  const alAgregar = () => {
+    editar((c) => [...c, nuevoClip()]);
+    setElegido(clipsRef.current.length - 1);
+  };
+
+  // La foto del clip elegido y sus botones
+  const panelImagen = (i: number) => {
+    const sc = clips[i];
+    if (!sc) return null;
+    return (
+      <>
+        <div className="scene-img" style={{ aspectRatio: ratioStyle }}>
+          {sc.loading ? <span className="muted">Creando…</span> : sc.image ? <img src={sc.image} alt={`Escena ${i + 1}`} /> : <span className="muted">Sin foto todavía</span>}
+        </div>
+        <div className="actions">
+          <label className="btn ghost small" style={{ margin: 0 }}>
+            Subir foto
+            <input
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) run("Cargando foto…", async () => editar(porId(sc.id, { image: await fileToResizedDataUrl(f, 1280) })));
+              }}
+            />
+          </label>
+          <button className="btn ghost small" onClick={() => setPicking(picking === i ? null : i)}>
+            Galería
+          </button>
+          <button
+            className="btn ghost small"
+            disabled={!!busy || sc.loading}
+            onClick={() => run("Creando imagen…", () => makeImage(sc.id, sc.prompt || `${topic}, ${sc.caption}, advertising photography`))}
+          >
+            Crear con IA
+          </button>
+          {sc.image && (
+            <button className="btn small" onClick={() => onEditScene(i, sc.image)}>
+              Editar
+            </button>
+          )}
+          {sc.image && (
+            <button
+              className="btn ghost small"
+              onClick={() => {
+                editar(porId(sc.id, { image: "", imageId: undefined }));
+                olvidarFoto(sc.imageId);
+              }}
+            >
+              Quitar
+            </button>
+          )}
+        </div>
+        {picking === i && (
+          <div className="picker">
+            {galleryImages.length === 0 && <span className="muted">Tu galería está vacía.</span>}
+            {galleryImages.slice(0, 24).map((g, k) => (
+              <img
+                key={g.url + k}
+                src={g.url}
+                alt={g.prompt}
+                onClick={async () => {
+                  const image = await toDataUrl(g.url);
+                  editar(porId(sc.id, { image }));
+                  setPicking(null);
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </>
+    );
+  };
 
   const ratioStyle = format === "9:16" ? "9 / 16" : format === "1:1" ? "1 / 1" : "16 / 9";
 
@@ -486,8 +711,12 @@ export default function ReelStudio({
             if (!confirm("¿Empezar un reel nuevo? Se borrarán el tema, las escenas y el guion actuales.")) return;
             clearDrafts("reel:");
             setTopic("");
-            scenes.forEach((sc) => sc.imageId && deleteFile(sc.imageId).catch(() => {}));
-            setScenes(Array.from({ length: count }, emptyScene));
+            detenerPrevia();
+            clips.forEach((sc) => olvidarFoto(sc.imageId));
+            poner(clipsIniciales().map((c) => nuevoClip({ ...c, id: "" })));
+            hist.current = { pasado: [], futuro: [] };
+            setPasos({ atras: 0, adelante: 0 });
+            setElegido(-1);
             setCta("");
             setScript("");
             setVoice("");
@@ -521,16 +750,6 @@ export default function ReelStudio({
       />
       <div className="row">
         <div>
-          <label>Escenas</label>
-          <select value={count} onChange={(e) => resize(Number(e.target.value))}>
-            {[2, 3, 4, 5, 6, 7, 8].map((n) => (
-              <option key={n} value={n}>
-                {n} escenas
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
           <label>Formato</label>
           <select value={format} onChange={(e) => setFormat(e.target.value as ReelFormat)}>
             <option value="9:16">Vertical 9:16 (Reels, TikTok, Historias)</option>
@@ -538,29 +757,6 @@ export default function ReelStudio({
             <option value="16:9">Horizontal 16:9 (YouTube, web)</option>
           </select>
         </div>
-        <div>
-          <label>Duración del video</label>
-          <select value={duracion} onChange={(e) => setDuracion(Number(e.target.value))}>
-            <option value={0}>Automática</option>
-            {DURACIONES.map((n) => (
-              <option key={n} value={n}>
-                {n} s
-              </option>
-            ))}
-          </select>
-        </div>
-        {!duracion && (
-          <div>
-            <label>Segundos por escena</label>
-            <select value={seconds} onChange={(e) => setSeconds(Number(e.target.value))}>
-              {[2, 3, 4, 5, 6].map((n) => (
-                <option key={n} value={n}>
-                  {n} s
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
       </div>
       <div className="actions">
         <button className="btn" disabled={!!busy || !topic.trim()} onClick={createAll}>
@@ -575,94 +771,65 @@ export default function ReelStudio({
         </button>
       </div>
       <p className="hint" style={{ marginTop: 8 }}>
-        «Crear todo» escribe los textos, el cierre y el guion de voz, y crea una imagen para cada escena vacía.
+        «Crear todo» escribe los textos, el cierre y el guion de voz, y crea una imagen para cada clip vacío. Si quieres más escenas, agrega clips abajo antes de tocarlo.
       </p>
 
-      {/* 2. Escenas */}
+      {/* 2. Escenas: la línea de tiempo */}
       <h3 className="step">2. Escenas</h3>
-      <div className="scenes">
-        {scenes.map((sc, i) => (
-          <div className="scene" key={i}>
-            <div className="scene-img" style={{ aspectRatio: ratioStyle }}>
-              {sc.loading ? (
-                <span className="muted">Creando…</span>
-              ) : sc.image ? (
-                <img src={sc.image} alt={`Escena ${i + 1}`} />
-              ) : (
-                <span className="muted">Escena {i + 1}</span>
-              )}
-            </div>
-            <input
-              value={sc.caption}
-              onChange={(e) => setScene(i, { caption: e.target.value })}
-              placeholder={`Texto en pantalla ${i + 1}`}
-            />
-            <div className="actions">
-              <label className="btn ghost small" style={{ margin: 0 }}>
-                Subir
-                <input
-                  type="file"
-                  accept="image/*"
-                  hidden
-                  onChange={async (e) => {
-                    const f = e.target.files?.[0];
-                    e.target.value = "";
-                    if (f) run("Cargando foto…", async () => setScene(i, { image: await fileToResizedDataUrl(f, 1280) }));
-                  }}
-                />
-              </label>
-              <button className="btn ghost small" onClick={() => setPicking(picking === i ? null : i)}>
-                Galería
-              </button>
-              <button
-                className="btn ghost small"
-                disabled={!!busy || sc.loading}
-                onClick={() =>
-                  run("Creando imagen…", () => makeImage(i, sc.prompt || `${topic}, ${sc.caption}, advertising photography`))
-                }
-              >
-                Crear con IA
-              </button>
-              {sc.image && (
-                <button className="btn small" onClick={() => onEditScene(i, sc.image)}>
-                  Editar
-                </button>
-              )}
-              {sc.image && (
-                <button className="btn ghost small" onClick={() => (sc.imageId && deleteFile(sc.imageId).catch(() => {}), setScene(i, { image: "", imageId: undefined }))}>
-                  Quitar
-                </button>
-              )}
-            </div>
-            {conCuenta && sc.image && (
-              <label className="check scene-ia">
-                <input type="checkbox" checked={!!sc.ia} disabled={!!busy} onChange={(e) => marcarIa(i, e.target.checked)} />
-                Con IA (movimiento real, 5 s)
-              </label>
-            )}
-            {conCuenta && sc.image && sc.ia && (
-              <input
-                value={sc.movimiento ?? ""}
-                maxLength={300}
-                onChange={(e) => setScene(i, { movimiento: e.target.value })}
-                placeholder="Movimiento (opcional). Ej.: la cámara se acerca despacio"
-              />
-            )}
-            {picking === i && (
-              <div className="picker">
-                {galleryImages.length === 0 && <span className="muted">Tu galería está vacía.</span>}
-                {galleryImages.slice(0, 24).map((g, k) => (
-                  <img
-                    key={g.url + k}
-                    src={g.url}
-                    alt={g.prompt}
-                    onClick={async () => (setScene(i, { image: await toDataUrl(g.url) }), setPicking(null))}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
+      <p className="hint" style={{ marginTop: 0 }}>
+        Cada clip es una foto de tu video. Toca uno para cambiar su foto, su texto y cuánto dura; muévelo con «Antes» y «Después» (en computadora también puedes arrastrarlo).
+      </p>
+      <div className="lt-barra">
+        <span className={`lt-tiempo${total > MAX_VIDEO ? " pasado" : ""}`} data-no-translate aria-label={`${formatoTiempo(total)} / ${formatoTiempo(MAX_VIDEO)}`}>
+          {formatoTiempo(total)} / {formatoTiempo(MAX_VIDEO)}
+        </span>
+        <button className="btn ghost small" disabled={!!busy || pasos.atras === 0} onClick={() => pasoHistorial(deshacer)}>
+          <Undo2 size={15} aria-hidden /> Deshacer
+        </button>
+        <button className="btn ghost small" disabled={!!busy || pasos.adelante === 0} onClick={() => pasoHistorial(rehacer)}>
+          <Redo2 size={15} aria-hidden /> Rehacer
+        </button>
+        {viendo ? (
+          <button className="btn small" onClick={detenerPrevia}>
+            <Square size={14} aria-hidden /> Detener
+          </button>
+        ) : (
+          <button className="btn small" disabled={!!busy || !clips.some((s) => s.image)} onClick={verPrevia}>
+            <Eye size={15} aria-hidden /> Vista previa
+          </button>
+        )}
+      </div>
+      {total > MAX_VIDEO && <div className="error">{validar(clips)}</div>}
+      <LineaTiempo
+        clips={clips}
+        elegido={elegido}
+        onElegir={(i) => (setElegido(i), setPicking(null))}
+        onMover={alMover}
+        onDuplicar={alDuplicar}
+        onBorrar={alBorrar}
+        onCambiar={alCambiar}
+        onAgregar={alAgregar}
+        conIa={conCuenta}
+        tomasMarcadas={tomasMarcadas}
+        ocupado={!!busy}
+        panelImagen={panelImagen}
+      />
+      {vozLarga && (
+        <div className="acct-upsell">
+          <span>
+            {`La voz dura ${formatoTiempo(vozSegundos)} y tus clips ${formatoTiempo(segundosClips)}: la voz se cortaría.`}
+            {!sePuedeRepartir && " Agrega más fotos para cubrirla."}
+          </span>
+          {sePuedeRepartir && (
+            <button className="btn small" disabled={!!busy} onClick={() => editar(() => repartidos)}>
+              Repartir las fotos para cubrir la voz
+            </button>
+          )}
+        </div>
+      )}
+      <div className="reel-output" style={{ display: viendo ? "flex" : "none" }}>
+        <canvas ref={lienzoPrevia} className="reel-canvas" style={{ aspectRatio: ratioStyle }} aria-label="Vista previa del video" />
+        {estadoPrevia && <span className="muted">{estadoPrevia}</span>}
       </div>
 
       {/* 3. Cierre */}
@@ -737,7 +904,7 @@ export default function ReelStudio({
             Subtítulos de la voz, palabra por palabra (estilo TikTok)<ProTag h="subtitulos" />
           </label>
           <p className="hint" style={{ marginTop: 6 }}>
-            El reel durará lo necesario para que la voz se escuche completa. Si cambias el guion, vuelve a generar la voz para que los subtítulos coincidan.
+Si la voz dura más que el video, te avisamos en el paso 2 para alargar las fotos. Si cambias el guion, vuelve a generar la voz para que los subtítulos coincidan.
           </p>
         </>
       )}
@@ -807,23 +974,20 @@ export default function ReelStudio({
       <h3 className="step">6. Crear el video</h3>
       {tomasMarcadas > 0 && (
         <p className="hint">
-          La vista previa es gratis: las fotos con IA se ven con zoom hasta que las generes. Solo «Generar con IA» usa tus tomas con IA.
+Crear el reel sin IA es gratis: las fotos marcadas con IA se ven con zoom hasta que las generes. Solo «Generar con IA» usa tus tomas con IA.
         </p>
       )}
       <div className="actions">
-        <button className="btn" disabled={!!busy || !canRecord || !scenes.some((s) => s.image)} onClick={buildReel}>
-          <Clapperboard size={16} aria-hidden /> {tomasMarcadas > 0 ? "Vista previa gratis" : "Crear reel"}
+        <button className="btn" disabled={!!busy || viendo || !canRecord || !clips.some((s) => s.image)} onClick={buildReel}>
+          <Clapperboard size={16} aria-hidden /> {tomasMarcadas > 0 ? "Crear reel sin IA (gratis)" : "Crear reel"}
         </button>
         {conCuenta && tomasMarcadas > 0 && (
-          <button className="btn" disabled={!!busy || !canRecord} onClick={generarConIa}>
+          <button className="btn" disabled={!!busy || viendo || !canRecord} onClick={generarConIa}>
             <Sparkles size={16} aria-hidden /> Generar con IA
             {esDemo && <span className="acct-pro">Demo gratis</span>}
           </button>
         )}
       </div>
-      {duracion > 0 && voice && (
-        <p className="hint" style={{ marginTop: 6 }}>Con duración fija, la voz se corta si dura más que el video.</p>
-      )}
       {!busy && vozCambio && (
         <div className="acct-upsell">
           <span>Cambiaste la voz. Actualiza el video para escucharla: no gasta tomas con IA.</span>
