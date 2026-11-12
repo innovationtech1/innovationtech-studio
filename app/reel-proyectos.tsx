@@ -113,13 +113,13 @@ export default function ReelProyectos(props: Props) {
                 ))}
               </select>
               <button className="btn ghost small" disabled={bloqueado || proyectos.length >= MAX_PROYECTOS} onClick={nuevo} title={proyectos.length >= MAX_PROYECTOS ? `Máximo ${MAX_PROYECTOS} videos guardados` : undefined}>
-                <FolderPlus size={15} aria-hidden /> Nuevo video
+                <FolderPlus size={15} aria-hidden /> Nuevo
               </button>
-              <button className="btn ghost small" disabled={bloqueado} onClick={() => (setNombre(actual?.nombre ?? ""), setModo("renombrar"))}>
-                <Pencil size={15} aria-hidden /> Renombrar
+              <button className="btn ghost small proy-icono" disabled={bloqueado} title="Renombrar" aria-label="Renombrar" onClick={() => (setNombre(actual?.nombre ?? ""), setModo("renombrar"))}>
+                <Pencil size={16} aria-hidden />
               </button>
-              <button className="btn ghost small" disabled={bloqueado} onClick={() => setModo("borrar")}>
-                <Trash2 size={15} aria-hidden /> Borrar
+              <button className="btn ghost small proy-icono" disabled={bloqueado} title="Borrar este video" aria-label="Borrar este video" onClick={() => setModo("borrar")}>
+                <Trash2 size={16} aria-hidden />
               </button>
             </>
           )}

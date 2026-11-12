@@ -33,7 +33,7 @@ Cada persona usa **sus propias claves de API** y paga solo lo que genera. El có
 | 🌎 Idiomas | Interfaz en español e inglés; la IA escribe en el idioma elegido | — |
 | 📁 Galería | Guarda **permanentemente** en tu dispositivo todas tus imágenes, diseños y reels (IndexedDB, cientos de MB); copia los archivos para que no caduquen; filtros, vista grande, editar, descargar y eliminar | Navegador |
 
-**Flujo 100% gratis:** en *Videos → Reel con mis imágenes*, escribe el tema y presiona **✨ Crear todo con IA**: la IA escribe los textos de cada escena, el cierre y el guion de voz, y crea las imágenes. Luego genera la voz y presiona **🎬 Crear reel**.
+**Flujo 100% gratis:** en *Videos → Crear video*, escribe o dicta tu idea en **¿Qué video quieres?** y presiona **Enviar**: la IA arma los clips, los textos, el cierre, el guion y la voz (confirma antes de gastar). Luego presiona **🎬 Crear reel** en la barra de abajo.
 
 El flujo ideal: escribes la idea en **Textos**, la IA te da el copy y las descripciones visuales, y con un clic pasas a **Imágenes** y luego a **Videos** (incluso puedes animar la imagen que generaste).
 

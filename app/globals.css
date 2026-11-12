@@ -211,11 +211,34 @@ h3.step { margin: 22px 0 6px; font-size: 16px; }
 .btn .acct-pro { margin-left: 6px; }
 .scene-img { width: 100%; max-height: 300px; border-radius: 8px; overflow: hidden; background: var(--navy-800); display: flex; align-items: center; justify-content: center; }
 .scene-img img { width: 100%; height: 100%; object-fit: cover; }
+/* Secciones que se abren cuando se necesitan (marca, sonido, formato) */
+.plegable { border: 1px solid var(--navy-700); border-radius: 10px; margin-top: 12px; background: var(--navy-900); }
+.plegable > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-height: 48px; padding: 8px 14px; cursor: pointer; list-style: none; }
+.plegable > summary::-webkit-details-marker { display: none; }
+.plegable > summary::after { content: "▸"; margin-left: auto; color: var(--muted); }
+.plegable[open] > summary::after { content: "▾"; }
+.plegable[open] > summary { border-bottom: 1px solid var(--navy-700); }
+.plegable > :not(summary) { margin-left: 14px; margin-right: 14px; }
+.plegable > :last-child { margin-bottom: 14px; }
+.plegable h4.sub { margin: 14px 14px 6px; font-size: 15px; }
+/* Barra de crear: fija abajo de la pantalla mientras se trabaja en el video */
+.reel-barra { position: sticky; bottom: 0; z-index: 30; margin: 16px -28px -28px; padding: 10px 28px 12px; background: var(--deck); border-top: 1px solid var(--line); border-radius: 0 0 var(--radius) var(--radius); display: flex; flex-direction: column; gap: 8px; }
+.reel-barra .notice, .reel-barra .error, .reel-barra .acct-upsell { margin: 0; }
+.reel-barra-fila { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.reel-barra-fila .btn { margin-top: 0; min-height: 44px; }
+.reel-barra-fila .lt-tiempo { margin-right: auto; }
+@media (max-width: 760px) {
+  .reel-barra { bottom: calc(62px + env(safe-area-inset-bottom)); margin: 14px -16px -20px; padding: 8px 12px 10px; border-radius: 0 0 16px 16px; }
+  .reel-barra-fila .btn { flex: 1 1 auto; padding-left: 10px; padding-right: 10px; }
+}
 /* Proyectos del Creador de Reels y portada del video */
 .proy { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
-.proy select, .proy input { flex: 1 1 180px; min-width: 0; min-height: 44px; margin: 0; }
+.proy select, .proy input { flex: 1 1 110px; min-width: 0; min-height: 44px; margin: 0; }
+.proy { flex-wrap: nowrap; }
+.proy:has(.proy-aviso) { flex-wrap: wrap; }
 .proy .btn { margin-top: 0; min-height: 44px; }
 .proy-aviso { flex: 1 1 100%; margin: 0; }
+.proy .proy-icono { min-width: 44px; padding-left: 0; padding-right: 0; justify-content: center; }
 .portada { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .portada .slider { width: 100%; margin: 0; }
 .portada .btn { margin-top: 0; min-height: 44px; }
@@ -258,7 +281,13 @@ h3.step { margin: 22px 0 6px; font-size: 16px; }
 .lt-panel-cab { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
 .lt-panel-cab .actions { margin: 0; }
 .lt-panel-cab .actions .btn, .lt-panel-foto .actions .btn { margin-top: 0; min-height: 44px; }
-.lt-panel-cuerpo { display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr); gap: 14px; }
+.lt-panel-cuerpo { display: block; }
+.lt-pestanas { display: flex; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--navy-700); }
+.lt-pestanas button { flex: 0 1 auto; min-height: 44px; padding: 8px 12px; background: transparent; border: 0; border-bottom: 3px solid transparent; color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; }
+.lt-pestanas button.activa { color: var(--paper); border-bottom-color: var(--red); }
+.lt-grupo { display: flex; flex-direction: column; gap: 8px; }
+.lt-grupo[hidden], .lt-panel-foto[hidden] { display: none; }
+.lt-panel-foto .scene-img { max-width: 260px; }
 .lt-panel-foto { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .lt-panel-datos { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .lt-panel-datos label { margin: 0; }

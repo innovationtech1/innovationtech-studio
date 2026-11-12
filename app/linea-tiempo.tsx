@@ -61,6 +61,10 @@ export default function LineaTiempo({
   const clip = elegido >= 0 && elegido < clips.length ? clips[elegido] : null;
   const esToma = clip?.tipo === "toma";
   const esVideo = clip?.tipo === "video";
+  // El panel del clip va en pestañas para que no sea una lista larga: imagen o video, texto y animar con IA
+  const [pestana, setPestana] = useState<"medio" | "texto" | "ia">("medio");
+  const hayIa = conIa && !esVideo;
+  const vista = pestana === "ia" && !hayIa ? "medio" : pestana;
 
   return (
     <div className="lt">
@@ -144,9 +148,23 @@ export default function LineaTiempo({
             </div>
           </div>
 
+          <div className="lt-pestanas" role="tablist">
+            <button type="button" role="tab" aria-selected={vista === "medio"} className={vista === "medio" ? "activa" : ""} onClick={() => setPestana("medio")}>
+              {esVideo ? "Video" : "Imagen o video"}
+            </button>
+            <button type="button" role="tab" aria-selected={vista === "texto"} className={vista === "texto" ? "activa" : ""} onClick={() => setPestana("texto")}>
+              Texto
+            </button>
+            {hayIa && (
+              <button type="button" role="tab" aria-selected={vista === "ia"} className={vista === "ia" ? "activa" : ""} onClick={() => setPestana("ia")}>
+                Animar con IA
+              </button>
+            )}
+          </div>
           <div className="lt-panel-cuerpo">
-            <div className="lt-panel-foto">{esVideo ? panelVideo(elegido) : panelImagen(elegido)}</div>
             <div className="lt-panel-datos">
+              <div hidden={vista !== "medio"} className="lt-panel-foto">{esVideo ? panelVideo(elegido) : panelImagen(elegido)}</div>
+              <div hidden={vista !== "texto"} className="lt-grupo">
               <label htmlFor="lt-texto">Texto en pantalla</label>
               <input
                 id="lt-texto"
@@ -172,8 +190,9 @@ export default function LineaTiempo({
                   </select>
                 </div>
               </div>
+              </div>
 
-              {esVideo && clip && (
+              {esVideo && clip && vista === "medio" && (
                 <PanelVideo
                   key={clip.id}
                   clip={clip}
@@ -188,6 +207,7 @@ export default function LineaTiempo({
 
               {!esVideo && (
                 <>
+                <div hidden={vista !== "medio"} className="lt-grupo">
                 {esToma ? (
                     <div>
                       <label htmlFor="lt-estirar">Duración de la foto animada</label>
@@ -225,8 +245,10 @@ export default function LineaTiempo({
                   onChange={(e) => onCambiar(elegido, { prompt: e.target.value })}
                   placeholder="Qué debe verse en la foto. Se usa al tocar «Crear con IA»."
                 />
-
-                {conIa && clip.image && (
+                </div>
+                <div hidden={vista !== "ia"} className="lt-grupo">
+                  {!clip.image && <p className="hint" style={{ margin: 0 }}>Primero ponle una foto a este clip.</p>}
+                  {conIa && clip.image && (
                   <>
                     <label className="check" style={{ margin: "4px 0 0" }}>
                       <input
@@ -301,6 +323,7 @@ export default function LineaTiempo({
                     )}
                   </>
                 )}
+                </div>
                 </>
               )}
             </div>

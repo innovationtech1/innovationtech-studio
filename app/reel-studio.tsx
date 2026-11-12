@@ -327,6 +327,9 @@ export default function ReelStudio({
   useEffect(() => onOcupado?.(!!busy), [busy, onOcupado]);
   // Portada: un cuadro del video terminado, para descargarlo como imagen
   const videoFinal = useRef<HTMLVideoElement>(null);
+  const salida = useRef<HTMLDivElement>(null);
+  // Al empezar a grabar y al terminar, la pantalla baja a donde se ve el video
+  const aLaVista = (el: HTMLElement | null) => el?.scrollIntoView({ behavior: "smooth", block: "center" });
   const [momentoPortada, setMomentoPortada] = useState(0);
   function descargarPortada() {
     const v = videoFinal.current;
@@ -533,6 +536,7 @@ export default function ReelStudio({
     previa.current = control;
     setViendo(true);
     setEstadoPrevia("Preparando la vista previa…");
+    setTimeout(() => aLaVista(lienzoPrevia.current), 50);
     try {
       const tomas = await fuentesTomas(lista);
       if (control.signal.aborted) return;
@@ -691,6 +695,7 @@ export default function ReelStudio({
     setProgress(0);
     if (result) URL.revokeObjectURL(result.url);
     const tomas = await fuentesTomas(lista);
+    aLaVista(salida.current);
     const r = await renderReel({
       ...opcionesReel(lista, tomas),
       onStatus: (m) => setBusy(m || "Grabando tu reel…"),
@@ -699,6 +704,7 @@ export default function ReelStudio({
     });
     setResult({ url: r.url, ext: r.ext, seconds: r.seconds });
     setVozCambio(false);
+    setTimeout(() => aLaVista(salida.current), 100);
     onVideo(r.blob, `Reel: ${topic || brandName || "sin título"}`); // se guarda solo en la galería
   }
 
@@ -1144,7 +1150,7 @@ export default function ReelStudio({
   return (
     <section className="card">
       <div className="card-head">
-        <h2>Creador de Reels · gratis</h2>
+        <h2>Creador de Reels</h2>
         <button
           className="btn ghost small"
           disabled={!!busy}
@@ -1184,15 +1190,13 @@ export default function ReelStudio({
           Empezar nuevo
         </button>
       </div>
-      <p className="hint">
-        Arma un video con tus imágenes animadas, textos en pantalla, tu marca y voz en off. Se crea en tu navegador: sin
-        costo y sin límite.
-      </p>
+      <p className="hint">Pídele el video a la IA o ármalo tú con tus fotos y videos. Se crea en tu navegador.</p>
       {!canRecord && (
         <div className="error">Este navegador no puede grabar video. Usa Chrome, Edge o Safari actualizados.</div>
       )}
 
       <Director
+        sugerida={incomingTopic ?? null}
         ocupado={!!busy}
         cfHeaders={cfHeaders}
         onEnviar={enviarOrden}
@@ -1201,45 +1205,8 @@ export default function ReelStudio({
         onDeshacer={hayDeshacerOrden ? deshacerOrden : null}
       />
 
-      {/* 1. Tema */}
-      <h3 className="step">1. ¿De qué trata el reel?</h3>
-      <textarea
-        value={topic}
-        onChange={(e) => setTopic(e.target.value)}
-        placeholder="Ej.: Promoción 2x1 en tortas los martes en Tortas Tortuga"
-        style={{ minHeight: 80 }}
-      />
-      <div className="row">
-        <div>
-          <label>Formato</label>
-          <select value={format} onChange={(e) => setFormat(e.target.value as ReelFormat)}>
-            <option value="9:16">Vertical 9:16 (Reels, TikTok, Historias)</option>
-            <option value="1:1">Cuadrado 1:1 (feed)</option>
-            <option value="16:9">Horizontal 16:9 (YouTube, web)</option>
-          </select>
-        </div>
-      </div>
-      <div className="actions">
-        <button className="btn" disabled={!!busy || !topic.trim()} onClick={createAll}>
-          <Sparkles size={16} aria-hidden /> Crear todo con IA
-        </button>
-        <button
-          className="btn ghost"
-          disabled={!!busy || !topic.trim()}
-          onClick={() => run("Escribiendo textos…", writeWithAi)}
-        >
-          Solo escribir textos
-        </button>
-      </div>
-      <p className="hint" style={{ marginTop: 8 }}>
-        «Crear todo» escribe los textos, el cierre y el guion de voz, y crea una imagen para cada clip vacío. Si quieres más escenas, agrega clips abajo antes de tocarlo.
-      </p>
-
       {/* 2. Escenas: la línea de tiempo */}
-      <h3 className="step">2. Escenas</h3>
-      <p className="hint" style={{ marginTop: 0 }}>
-        Cada clip es una foto de tu video. Toca uno para cambiar su foto, su texto y cuánto dura; muévelo con «Antes» y «Después» (en computadora también puedes arrastrarlo).
-      </p>
+      <h3 className="step">Clips</h3>
       <div className="lt-barra">
         <span className={`lt-tiempo${total > MAX_VIDEO ? " pasado" : ""}`} data-no-translate aria-label={`${formatoTiempo(total)} / ${formatoTiempo(MAX_VIDEO)}`}>
           {formatoTiempo(total)} / {formatoTiempo(MAX_VIDEO)}
@@ -1250,15 +1217,6 @@ export default function ReelStudio({
         <button className="btn ghost small" disabled={!!busy || pasos.adelante === 0} onClick={() => pasoHistorial(rehacer)}>
           <Redo2 size={15} aria-hidden /> Rehacer
         </button>
-        {viendo ? (
-          <button className="btn small" onClick={detenerPrevia}>
-            <Square size={14} aria-hidden /> Detener
-          </button>
-        ) : (
-          <button className="btn small" disabled={!!busy || !clips.some(presente)} onClick={verPrevia}>
-            <Eye size={15} aria-hidden /> Vista previa
-          </button>
-        )}
       </div>
       {total > MAX_VIDEO && <div className="error">{validar(clips)}</div>}
       <LineaTiempo
@@ -1312,8 +1270,12 @@ export default function ReelStudio({
         {estadoPrevia && <span className="muted">{estadoPrevia}</span>}
       </div>
 
-      {/* 3. Cierre */}
-      <h3 className="step">3. Cierre con tu marca</h3>
+      {/* Marca y cierre */}
+      <details className="plegable">
+        <summary>
+          <strong>Marca y cierre</strong>
+          <span className="muted" data-no-translate>{[brandName, cta].filter(Boolean).join(" · ")}</span>
+        </summary>
       <div className="row">
         <div>
           <label>Nombre del negocio</label>
@@ -1351,8 +1313,16 @@ export default function ReelStudio({
         </button>
       )}
 
-      {/* 4. Voz */}
-      <h3 className="step">4. Voz en off (opcional, gratis con Cloudflare)<ProTag h="voz" /></h3>
+      </details>
+
+      {/* Sonido: voz y música */}
+      <details className="plegable">
+        <summary>
+          <strong>Sonido</strong>
+          <span className="muted">{voice ? "Con voz" : "Sin voz"}</span>
+          <span className="muted">{musicOn ? "Con música" : "Sin música"}</span>
+        </summary>
+      <h4 className="sub">Voz en off (opcional)<ProTag h="voz" /></h4>
       <textarea
         value={script}
         onChange={(e) => (setScript(e.target.value), setVoice(""))}
@@ -1396,8 +1366,7 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
         </>
       )}
 
-      {/* 5. Música */}
-      <h3 className="step">5. Música de fondo (gratis, sin derechos de autor)</h3>
+      <h4 className="sub">Música de fondo (gratis, sin derechos de autor)</h4>
       <div className="seg">
         <button className={!musicOn ? "active" : ""} onClick={() => (stopListen(), setMusicOn(false))}>
           Sin música
@@ -1457,58 +1426,22 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
         </>
       )}
 
-      {/* 6. Crear */}
-      <h3 className="step">6. Crear el video</h3>
-      {tomasMarcadas > 0 && (
-        <p className="hint">
-«Crear reel» es gratis: usa las fotos que ya animaste y deja con zoom las que falten. «Generar con IA» anima las que faltan (usa tus tomas) y graba el video.
-        </p>
-      )}
-      <div className="actions">
-        <button className="btn" disabled={!!busy || viendo || !canRecord || !clips.some(presente)} onClick={buildReel}>
-          <Clapperboard size={16} aria-hidden /> Crear reel
-        </button>
-        {conCuenta && tomasMarcadas > 0 && (
-          <button className="btn" disabled={!!busy || viendo || !canRecord} onClick={generarConIa}>
-            <Sparkles size={16} aria-hidden /> Generar con IA
-            {esDemo && <span className="acct-pro">Demo gratis</span>}
-          </button>
-        )}
-      </div>
-      {!busy && vozCambio && (
-        <div className="acct-upsell">
-          <span>Cambiaste la voz. Actualiza el video para escucharla: no gasta tomas con IA.</span>
-          <button className="btn small" disabled={!canRecord} onClick={conCuenta && tomasMarcadas > 0 ? generarConIa : buildReel}>
-            Actualizar video
-          </button>
-        </div>
-      )}
-      {!busy && estadoIa && tomasMarcadas > 0 && <div className="notice">{estadoIa}</div>}
-      {!busy && invitarPlan && (
-        <div className="acct-upsell">
-          <span>Elige un plan para seguir creando videos con IA</span>
-          <button className="btn small" onClick={abrirPlanes}>
-            Ver planes
-          </button>
-        </div>
-      )}
-      {busy && (
-        <div className="notice">
-          {busy}
-          {busy.startsWith("Grabando") && (
-            <>
-              {" "}
-              {Math.round(progress * 100)}% · Mantén esta pantalla abierta hasta que termine.
-              <div className="bar">
-                <div style={{ width: `${Math.round(progress * 100)}%` }} />
-              </div>
-            </>
-          )}
-        </div>
-      )}
-      {error && <div className="error">{error}</div>}
+      </details>
 
-      <div className="reel-output">
+      {/* Formato */}
+      <details className="plegable">
+        <summary>
+          <strong>Formato</strong>
+          <span className="muted">{format === "9:16" ? "Vertical 9:16" : format === "1:1" ? "Cuadrado 1:1" : "Horizontal 16:9"}</span>
+        </summary>
+        <select value={format} aria-label="Formato" onChange={(e) => setFormat(e.target.value as ReelFormat)}>
+          <option value="9:16">Vertical 9:16 (Reels, TikTok, Historias)</option>
+          <option value="1:1">Cuadrado 1:1 (feed)</option>
+          <option value="16:9">Horizontal 16:9 (YouTube, web)</option>
+        </select>
+      </details>
+
+      <div className="reel-output" ref={salida}>
         <canvas
           ref={preview}
           className="reel-canvas"
@@ -1559,6 +1492,64 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
           abre, crea el reel desde Safari o desde Chrome actualizado, que graban en MP4.
         </p>
       )}
+      {/* Crear: barra fija abajo, siempre a la vista */}
+      <div className="reel-barra">
+        {!busy && vozCambio && (
+          <div className="acct-upsell">
+            <span>Cambiaste la voz. Actualiza el video para escucharla: no gasta tomas con IA.</span>
+            <button className="btn small" disabled={!canRecord} onClick={buildReel}>
+              Actualizar video
+            </button>
+          </div>
+        )}
+        {!busy && estadoIa && tomasMarcadas > 0 && <div className="notice">{estadoIa}</div>}
+        {!busy && invitarPlan && (
+          <div className="acct-upsell">
+            <span>Elige un plan para seguir creando videos con IA</span>
+            <button className="btn small" onClick={abrirPlanes}>
+              Ver planes
+            </button>
+          </div>
+        )}
+        {busy && (
+          <div className="notice">
+            {busy}
+            {busy.startsWith("Grabando") && (
+              <>
+                {" "}
+                {Math.round(progress * 100)}% · Mantén esta pantalla abierta hasta que termine.
+                <div className="bar">
+                  <div style={{ width: `${Math.round(progress * 100)}%` }} />
+                </div>
+              </>
+            )}
+          </div>
+        )}
+        {error && <div className="error">{error}</div>}
+        <div className="reel-barra-fila">
+          <span className={`lt-tiempo${total > MAX_VIDEO ? " pasado" : ""}`} data-no-translate>
+            {formatoTiempo(total)}
+          </span>
+          {viendo ? (
+            <button className="btn ghost" onClick={detenerPrevia}>
+              <Square size={14} aria-hidden /> Detener
+            </button>
+          ) : (
+            <button className="btn ghost" disabled={!!busy || !clips.some(presente)} onClick={verPrevia}>
+              <Eye size={15} aria-hidden /> Vista previa
+            </button>
+          )}
+          <button className="btn" disabled={!!busy || viendo || !canRecord || !clips.some(presente)} onClick={buildReel}>
+            <Clapperboard size={16} aria-hidden /> Crear reel
+          </button>
+          {conCuenta && tomasMarcadas > 0 && (
+            <button className="btn" disabled={!!busy || viendo || !canRecord} onClick={generarConIa} title="Anima las fotos marcadas que faltan (usa tus tomas) y graba el video">
+              <Sparkles size={16} aria-hidden /> Generar con IA
+              {esDemo && <span className="acct-pro">Demo gratis</span>}
+            </button>
+          )}
+        </div>
+      </div>
     </section>
   );
 }
