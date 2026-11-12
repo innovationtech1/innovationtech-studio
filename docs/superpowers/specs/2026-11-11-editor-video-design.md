@@ -31,6 +31,15 @@ Es para él y para sus clientes de Studio, en celular y en computadora por igual
 | Vista previa | Reproduce la línea de tiempo sin grabar |
 | Proyecto | Se guarda solo en el dispositivo |
 | Precios de los planes | No cambian |
+| Dividir un clip | Parte un video (o una toma) en dos en el punto elegido |
+| Deshacer / rehacer | Hasta 50 pasos, mientras la pantalla siga abierta |
+| Volúmenes | Tres controles: voz en off, música y sonido de los clips |
+| Velocidad de un video propio | ×0.5, ×1, ×1.5 o ×2 |
+| Texto de cada clip | Posición (arriba, centro, abajo) y tamaño (chico, normal, grande) |
+| Proyectos | Varios guardados en el dispositivo (hasta 20), con nombre |
+| Congelar un cuadro | Saca una foto de un momento de un video y la agrega como clip de foto |
+| Armar desde el guion | La IA de texto propone clips, duración y texto (cuenta 1 texto) |
+| Portada | Elegir un cuadro del video y descargarlo como imagen |
 
 ## Qué queda fuera (a propósito)
 
@@ -38,14 +47,14 @@ Varias pistas o capas encimadas; filtros y corrección de color (ya existe el Ed
 
 ## Cómo se ve
 
-Una fila horizontal de clips, de izquierda a derecha, con desplazamiento lateral. Cada clip muestra miniatura, tipo (Foto / IA / Video) y duración. Arriba de la fila: duración total («0:42 de 2:00») y el botón **Vista previa**.
+Una fila horizontal de clips, de izquierda a derecha, con desplazamiento lateral. Cada clip muestra miniatura, tipo (Foto / IA / Video) y duración. Arriba de la fila: duración total («0:42 de 2:00»), **Deshacer** y **Rehacer**, y el botón **Vista previa**. Junto al título, el nombre del proyecto con un menú para cambiar de proyecto, crear uno nuevo, renombrar o borrar.
 
 Al tocar un clip se abre su panel debajo de la fila:
 
-- **Todos:** mover ← →, duplicar, borrar, texto en pantalla.
+- **Todos:** mover ← →, duplicar, borrar, texto en pantalla con su posición y tamaño.
 - **Foto:** duración (1.5 a 15 s), «Animar con IA» (la convierte en toma), «Sustituir por…».
 - **Toma con IA:** movimiento, «Rehacer con IA», «Volver a la anterior» (si hay una), cómo se reproduce (normal, lenta, ida y vuelta, repetir), recorte de inicio y fin, «Sustituir por…».
-- **Video propio:** recorte de inicio y fin, interruptor **Sonido** (encendido por defecto), «Sustituir por…».
+- **Video propio:** recorte de inicio y fin, **dividir**, **velocidad**, interruptor **Sonido** (encendido por defecto), **congelar cuadro**, «Sustituir por…».
 
 En computadora los clips también se arrastran para reordenar. En celular se reordenan con ← → (arrastrar con el dedo choca con el desplazamiento de la página).
 
@@ -77,6 +86,9 @@ type Clip = {
   archivoId?: string;        // el archivo guardado en el dispositivo (media-store)
   duracionOriginal?: number; // segundos del archivo o de la toma (5)
   sinSonido?: boolean;       // solo video propio: true = no se oye en el video final
+  velocidad?: number;        // solo video propio: 0.5, 1, 1.5 o 2 (por defecto 1)
+  textoPos?: "arriba" | "centro" | "abajo"; // por defecto, abajo (como hoy)
+  textoTam?: "chico" | "normal" | "grande"; // por defecto, normal
   // toma y video
   inicio?: number;           // recorte, en segundos del original
   fin?: number;
@@ -85,10 +97,12 @@ type Clip = {
 
 Funciones puras, todas con pruebas:
 
-- `duracionClip(clip)`: foto = `segundos`; video = `fin − inicio`; toma = `(fin − inicio) × factor` (lenta ×2, ida y vuelta ×2, repetir ×2 o ×3).
+- `duracionClip(clip)`: foto = `segundos`; video = `(fin − inicio) ÷ velocidad`; toma = `(fin − inicio) × factor` (lenta ×2, ida y vuelta ×2, repetir ×2 o ×3).
 - `duracionTotal(clips, cierre)` y `validar(clips, cierre)`: errores claros si pasa de 120 s, si una foto queda fuera de 1.5–15 s, si un recorte queda de menos de 1 s, o si hay más de 8 tomas distintas.
 - `mover(clips, de, a)`, `duplicar(clips, i)`, `borrar(clips, i)`, `sustituir(clips, i, nuevo)`.
 - `recortar(clip, inicio, fin)`: acota al original y a un mínimo de 1 s.
+- `dividir(clips, i, segundo)`: parte el clip `i` (video o toma) en dos clips seguidos con el mismo archivo o `trabajoId` y recortes contiguos; no divide si alguna mitad quedaría de menos de 1 s. Las dos mitades de una toma cuentan como una sola toma.
+- `historial`: `crear(estado)`, `anotar(h, estado)`, `deshacer(h)`, `rehacer(h)`; máximo 50 pasos; anotar después de deshacer descarta lo «rehacible».
 - `aEscenas(clips)`: lo que necesita el motor para dibujar (ver abajo).
 - `desdeEscenasViejas(scenes)`: convierte el borrador actual (`reel:escenas`) para que nadie pierda su trabajo.
 
@@ -102,11 +116,14 @@ Hoy `renderReel` recibe `images`, `clips` y `duracion`, y reparte el tiempo con 
 type EscenaRender = {
   imagen: string;        // foto, o respaldo si el video no carga
   texto: string;
+  textoPos: "arriba" | "centro" | "abajo";
+  textoTam: "chico" | "normal" | "grande";
   segundos: number;      // lo que dura en pantalla
   video?: { src: string; inicio: number; fin: number; velocidad: number; idaVuelta: boolean; repeticiones: number; sonido: boolean };
 };
 ReelOptions.escenas?: EscenaRender[];   // si viene, define el video completo
 ReelOptions.soloVista?: boolean;        // reproduce en el lienzo de vista previa sin grabar
+ReelOptions.volumenes?: { voz: number; musica: number; clips: number }; // de 0 a 1; por defecto 1, 1 y 1
 ```
 
 - La lista de tiempos (`durs`, `starts`) sale de `escenas[i].segundos`. El cierre de 3 s se agrega si el total no pasa de 120 s.
@@ -117,6 +134,15 @@ ReelOptions.soloVista?: boolean;        // reproduce en el lienzo de vista previ
 - El selector «Duración del video» desaparece en la entrega 1: la duración es la suma de los clips. La pantalla siempre llama al motor con `escenas`; el camino viejo (`images` + `duracion` + `clips`) se retira en esa misma entrega junto con su reparto automático (`lib/reel-escenas.ts` queda solo con lo que la línea de tiempo siga usando).
 
 **Riesgo conocido — ida y vuelta.** Retroceder un video moviendo `currentTime` no es fluido en todos los navegadores (sobre todo en celulares). Se prueba al llegar a la entrega 3; si no se ve bien, se entrega sin «ida y vuelta» y se avisa a Hector. Cámara lenta y repetir no tienen ese riesgo.
+
+## Extras de edición
+
+- **Volúmenes.** Tres deslizadores en el paso de audio. Se aplican en la mezcla del motor; la música sigue bajando sola cuando hay voz o sonido de un clip, sobre el volumen elegido.
+- **Velocidad.** `playbackRate` del video; el sonido del clip se acelera o alenta con él (a ×0.5 y ×2 se oye distinto: se avisa en el panel).
+- **Congelar un cuadro.** En el panel de un video, un deslizador elige el momento; «Usar este cuadro» lo dibuja en un lienzo, lo guarda como JPG (en la galería, como las fotos de la cámara) y lo inserta como clip de foto después del video. Desde ahí se puede animar con IA.
+- **Portada.** En el resultado, «Elegir portada»: un deslizador sobre el video terminado y «Descargar portada» (JPG al tamaño del video).
+- **Armar desde el guion.** Botón junto a «Sugerir ideas»: manda el tema (y el guion de la voz, si hay) a la ruta de textos que ya existe y recibe una lista `{ titulo, texto, segundos, descripcionDeImagen }` (de 3 a 12 elementos, sumando como máximo 110 s). Crea esos clips de foto **vacíos** con su texto, duración y descripción para «Crear con IA»; no genera imágenes ni tomas por su cuenta. Si ya hay clips, pregunta antes de reemplazarlos (y se puede deshacer).
+- **Proyectos.** Cada proyecto guarda nombre, clips, formato, voz elegida, guion, música y volúmenes. El borrador actual se convierte en el primer proyecto («Mi video»). Borrar un proyecto borra sus videos propios que ningún otro proyecto use.
 
 ## Tomas con IA por clip
 
@@ -139,7 +165,7 @@ Se reutiliza todo lo de `lib/video-ia.ts`, `lib/video-ia-cliente.ts` y `/api/vid
 
 ## Guardado
 
-El proyecto (lista de clips) se guarda con `usePersistentState("reel:clips")`; las fotos, como hoy; los videos propios, en `media-store`. «Empezar nuevo» borra los clips y los archivos de video que solo usaba ese proyecto.
+Los proyectos se guardan en el dispositivo (`reel:proyectos` y `reel:proyecto-activo`); las fotos, como hoy; los videos propios, en `media-store`. «Empezar nuevo» crea un proyecto en blanco y deja los demás como están. El historial de deshacer vive solo en memoria: se pierde al recargar.
 
 ## Errores
 
@@ -157,12 +183,13 @@ El proyecto (lista de clips) se guarda con `usePersistentState("reel:clips")`; l
 
 Cada una se publica en la versión de prueba y Hector la prueba antes de la siguiente.
 
-1. **Línea de tiempo.** Modelo de clips, fila de clips, mover / duplicar / borrar, duración por foto, total hasta 2 min, motor con `escenas`, vista previa sin grabar, migración del borrador viejo. Las tomas con IA siguen funcionando como hoy: se marcan por clip y se generan todas juntas al tocar «Generar con IA», con el tope actual de 4 por video (el de 8 llega en la entrega 3, cuando se piden de una en una).
-2. **Videos propios, cámara y recorte.** Subir video, usar los de la galería, **grabar con la cámara de Studio**, recorte de inicio y fin, **sonido del clip con interruptor**, «Sustituir por…». En «Videos» el botón de grabar aparece desde esta entrega, porque antes un video grabado no tendría dónde usarse.
+1. **Línea de tiempo.** Modelo de clips, fila de clips, mover / duplicar / borrar, duración por foto, total hasta 2 min, **deshacer y rehacer**, **texto con posición y tamaño**, motor con `escenas`, vista previa sin grabar, migración del borrador viejo. Las tomas con IA siguen funcionando como hoy: se marcan por clip y se generan todas juntas al tocar «Generar con IA», con el tope actual de 4 por video (el de 8 llega en la entrega 3, cuando se piden de una en una).
+2. **Videos propios, cámara y sonido.** Subir video, usar los de la galería, **grabar con la cámara de Studio**, recorte de inicio y fin, **dividir**, **velocidad**, **sonido del clip con interruptor**, **volúmenes**, **congelar un cuadro**, «Sustituir por…». En «Videos» el botón de grabar aparece desde esta entrega, porque antes un video grabado no tendría dónde usarse.
 3. **IA por clip y estirar.** Animar y rehacer un solo clip, `variacion`, «Volver a la anterior», tope de 8, cámara lenta, repetir e ida y vuelta (con la prueba de fluidez).
+4. **Proyectos y ayudas.** Varios proyectos, **armar desde el guion** y **portada del video**.
 
 ## Pruebas
 
-- **Automáticas (node:test):** todo `lib/linea-tiempo.ts` (duraciones, validación, mover, duplicar, recortar, conversión a escenas, migración) y el cambio de `variacion` en `lib/video-ia.ts` (llave del caché distinta; sin variación, igual que hoy).
+- **Automáticas (node:test):** todo `lib/linea-tiempo.ts` (duraciones con velocidad, validación, mover, duplicar, recortar, dividir, historial de deshacer, conversión a escenas, migración), el guardado de proyectos y la lectura de la propuesta «desde el guion» y el cambio de `variacion` en `lib/video-ia.ts` (llave del caché distinta; sin variación, igual que hoy).
 - **En navegador (Chrome con Playwright):** exportar un video con foto + video propio recortado y comprobar la duración; grabar con cámara y micrófono simulados y comprobar que el archivo final trae pista de audio (y que no la trae del clip al apagar su sonido); cámara lenta y repetir con un clip de prueba midiendo lo que se ve en el lienzo; vista previa sin grabar.
 - **Con Hector, en la versión de prueba:** cada entrega en celular y computadora; la entrega 3 con una toma real.
