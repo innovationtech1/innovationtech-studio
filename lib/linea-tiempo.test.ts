@@ -6,6 +6,8 @@ import {
   borrar,
   cambiar,
   cierreDe,
+  clipDeVideo,
+  dividir,
   duplicar,
   duracionClip,
   duracionTotal,
@@ -13,6 +15,9 @@ import {
   mover,
   normalizarClips,
   nuevoClip,
+  recortar,
+  sustituir,
+  tramo,
   validar,
   type Clip,
 } from "./linea-tiempo";
@@ -178,9 +183,9 @@ test("aEscenas: la toma dura 5 s; con clip lleva video, sin clip se queda como f
   const t1 = foto({ tipo: "toma", segundos: 9 });
   const t2 = foto({ tipo: "toma" });
   const t3 = foto({ tipo: "toma" });
-  const r = aEscenas([t1, t2, t3], { [t1.id]: "https://clip", [t2.id]: null });
+  const r = aEscenas([t1, t2, t3], { tomas: { [t1.id]: "https://clip", [t2.id]: null } });
   assert.equal(r[0].segundos, 5);
-  assert.equal(r[0].video, "https://clip");
+  assert.deepEqual(r[0].video, { src: "https://clip", inicio: 0, fin: 5, velocidad: 1, sonido: false });
   assert.equal(r[1].segundos, 5);
   assert.equal(r[1].video, undefined);
   assert.equal(r[2].video, undefined);
@@ -217,4 +222,138 @@ test("formatoTiempo", () => {
 
 test("normalizarClips: un borrador de antes del editor sin duración guardada conserva sus 3 s", () => {
   assert.equal(normalizarClips([{ image: "x", caption: "", prompt: "" }])[0].segundos, 3);
+});
+
+// ---------- Clips de video propio ----------
+
+const video = (extra: Partial<Clip> = {}): Clip => ({ ...clipDeVideo({ archivoId: "reelvid-1", duracion: 10, portada: "data:p" }), ...extra });
+
+test("clipDeVideo: recorte completo, velocidad normal y con sonido", () => {
+  const c = clipDeVideo({ archivoId: "v1", duracion: 12.4, portada: "data:p" });
+  assert.equal(c.tipo, "video");
+  assert.equal(c.archivoId, "v1");
+  assert.equal(c.duracionOriginal, 12.4);
+  assert.deepEqual(tramo(c), { inicio: 0, fin: 12.4 });
+  assert.equal(c.velocidad, 1);
+  assert.ok(!c.sinSonido);
+  assert.equal(c.image, "data:p");
+  assert.ok(c.id);
+});
+
+test("duracionClip de un video: recorte entre velocidad", () => {
+  assert.equal(duracionClip(video()), 10);
+  assert.equal(duracionClip(video({ inicio: 2, fin: 8, velocidad: 2 })), 3);
+  assert.equal(duracionClip(video({ inicio: 2, fin: 8, velocidad: 0.5 })), 12);
+  assert.equal(duracionClip(video({ image: "" })), 10); // aunque la portada no haya cargado
+  assert.equal(duracionClip(video({ duracionOriginal: 0 })), 0);
+  assert.equal(duracionClip(video({ duracionOriginal: undefined })), 0);
+  assert.equal(duracionClip(video({ velocidad: 7 })), 10); // velocidad imposible: normal
+});
+
+test("tramo: se acota al original", () => {
+  assert.deepEqual(tramo(video({ inicio: -3, fin: 99 })), { inicio: 0, fin: 10 });
+  assert.deepEqual(tramo(video({ inicio: 8, fin: 2 })), { inicio: 0, fin: 10 });
+});
+
+test("recortar: acota y nunca deja menos de 1 s", () => {
+  const lista = [video()];
+  assert.deepEqual(tramo(recortar(lista, 0, 2, 8)[0]), { inicio: 2, fin: 8 });
+  assert.deepEqual(tramo(recortar(lista, 0, -5, 40)[0]), { inicio: 0, fin: 10 });
+  assert.deepEqual(tramo(recortar(lista, 0, 4, 4.2)[0]), { inicio: 4, fin: 5 });
+  assert.deepEqual(tramo(recortar(lista, 0, 9.8, 10)[0]), { inicio: 9, fin: 10 });
+  assert.deepEqual(tramo(lista[0]), { inicio: 0, fin: 10 }); // no modifica lo que recibe
+  const fotos1 = [foto()];
+  assert.equal(recortar(fotos1, 0, 1, 2), fotos1);
+  assert.equal(recortar(lista, 5, 1, 2), lista);
+});
+
+test("dividir: dos clips seguidos con el mismo archivo y recortes contiguos", () => {
+  const v = video({ inicio: 2, fin: 8, caption: "Hola", velocidad: 2, sinSonido: true });
+  const r = dividir([foto(), v, foto()], 1, 5);
+  assert.equal(r.length, 4);
+  assert.deepEqual([tramo(r[1]), tramo(r[2])], [{ inicio: 2, fin: 5 }, { inicio: 5, fin: 8 }]);
+  assert.equal(r[1].id, v.id);
+  assert.notEqual(r[2].id, v.id);
+  assert.equal(r[2].archivoId, "reelvid-1");
+  assert.equal(r[2].velocidad, 2);
+  assert.equal(r[2].sinSonido, true);
+  assert.equal(r[1].caption, "Hola");
+  assert.equal(r[2].caption, ""); // el texto no se repite
+  assert.equal(r[2].imageId, undefined);
+});
+
+test("dividir: no deja mitades de menos de 1 s ni divide fotos o tomas", () => {
+  const lista = [video({ inicio: 2, fin: 8 })];
+  assert.equal(dividir(lista, 0, 2.5), lista);
+  assert.equal(dividir(lista, 0, 7.5), lista);
+  assert.equal(dividir(lista, 0, 20), lista);
+  const otros = [foto(), foto({ tipo: "toma" })];
+  assert.equal(dividir(otros, 0, 1.5), otros);
+  assert.equal(dividir(otros, 1, 2.5), otros);
+});
+
+test("sustituir: el clip nuevo hereda lugar, id, texto y estilo del texto", () => {
+  const viejo = foto({ caption: "Promo", textoPos: "arriba", textoTam: "grande" });
+  const r = sustituir([foto(), viejo], 1, video());
+  assert.equal(r[1].tipo, "video");
+  assert.equal(r[1].id, viejo.id);
+  assert.equal(r[1].caption, "Promo");
+  assert.equal(r[1].textoPos, "arriba");
+  assert.equal(r[1].textoTam, "grande");
+  assert.equal(r[1].archivoId, "reelvid-1");
+  assert.equal(r[1].imageId, undefined);
+  const igual = [foto()];
+  assert.equal(sustituir(igual, 4, video()), igual);
+});
+
+test("duplicar un video: comparte el archivo (no se copia)", () => {
+  const r = duplicar([video({ inicio: 1, fin: 4 })], 0);
+  assert.equal(r[1].archivoId, "reelvid-1");
+  assert.deepEqual(tramo(r[1]), { inicio: 1, fin: 4 });
+});
+
+test("validar y total con videos", () => {
+  assert.equal(duracionTotal([foto({ segundos: 3 }), video({ inicio: 2, fin: 8, velocidad: 2 })]), 9); // 3 + 3 + cierre
+  assert.equal(validar([video()]), null); // un video solo ya es un video
+  assert.equal(validar([video({ duracionOriginal: 0.6, fin: 0.6 })]), "Un video quedó de menos de 1 segundo: alarga su recorte.");
+  assert.equal(validar(Array.from({ length: 13 }, () => video())), "Tu video dura 2:10. El máximo es 2:00: quita o acorta algún clip.");
+});
+
+test("aEscenas con videos: con su archivo lleva el tramo; sin archivo se ve la portada", () => {
+  const v = video({ inicio: 2, fin: 8, velocidad: 2, caption: "Hola" });
+  const mudo = video({ archivoId: "reelvid-2", sinSonido: true });
+  const falta = video({ archivoId: "reelvid-3" });
+  const r = aEscenas([v, mudo, falta], { videos: { "reelvid-1": "blob:a", "reelvid-2": "blob:b" } });
+  assert.deepEqual(r[0], { imagen: "data:p", texto: "Hola", textoPos: "abajo", textoTam: "normal", segundos: 3, video: { src: "blob:a", inicio: 2, fin: 8, velocidad: 2, sonido: true } });
+  assert.equal(r[1].video?.sonido, false);
+  assert.equal(r[2].video, undefined);
+  assert.equal(r[2].segundos, 10);
+});
+
+test("normalizarClips conserva los videos y corrige valores imposibles", () => {
+  const [a] = normalizarClips([video({ inicio: 2, fin: 8, velocidad: 1.5, sinSonido: true })]);
+  assert.equal(a.tipo, "video");
+  assert.equal(a.archivoId, "reelvid-1");
+  assert.equal(a.duracionOriginal, 10);
+  assert.deepEqual(tramo(a), { inicio: 2, fin: 8 });
+  assert.equal(a.velocidad, 1.5);
+  assert.equal(a.sinSonido, true);
+  const [b] = normalizarClips([{ ...video(), velocidad: 7, inicio: 9, fin: 3 }]);
+  assert.equal(b.velocidad, 1);
+  assert.deepEqual(tramo(b), { inicio: 0, fin: 10 });
+  // un «video» sin archivo guardado vuelve a ser un clip de foto
+  const [c] = normalizarClips([{ id: "x", tipo: "video", image: "", caption: "", prompt: "", segundos: 3 }]);
+  assert.equal(c.tipo, "foto");
+});
+
+test("ajustarAVoz con videos: no los toca y los descuenta", () => {
+  const v = video({ inicio: 0, fin: 6 });
+  const r = ajustarAVoz([foto({ segundos: 3 }), v, foto({ segundos: 3 })], 20);
+  assert.deepEqual(r.map((c) => c.segundos), [7.25, v.segundos, 7.25]);
+  assert.deepEqual(tramo(r[1]), { inicio: 0, fin: 6 });
+});
+
+test("cambiar: la velocidad solo acepta las cuatro permitidas", () => {
+  assert.equal(cambiar([video()], 0, { velocidad: 2 })[0].velocidad, 2);
+  assert.equal(cambiar([video()], 0, { velocidad: 3 })[0].velocidad, 1);
 });

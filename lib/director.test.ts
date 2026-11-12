@@ -14,7 +14,7 @@ import {
   type Catalogo,
   type Estado,
 } from "./director";
-import { nuevoClip, type Clip } from "./linea-tiempo";
+import { clipDeVideo, nuevoClip, type Clip } from "./linea-tiempo";
 
 const cat: Catalogo = {
   estilos: ["pop", "lofi", "cumbia"],
@@ -514,4 +514,36 @@ test("instrucciones: las tomas con IA solo si la persona lo pide", () => {
   assert.match(system, /"generar_ia"/);
   assert.match(system, /"con_ia"/);
   assert.match(system, /solo si la persona lo pide/i);
+});
+
+// ---------- Videos propios en la línea de tiempo ----------
+
+const videoPropio = (extra: Partial<Clip> = {}): Clip => ({ ...clipDeVideo({ archivoId: "reelvid-1", duracion: 10, portada: "data:p" }), ...extra });
+
+test("resumen: un video propio aparece como video con lo que dura en pantalla", () => {
+  const r = resumenProyecto(estado([videoPropio({ inicio: 2, fin: 8, velocidad: 2, caption: "Hola" })]));
+  assert.deepEqual(r.clips, [{ n: 1, tipo: "video", segundos: 3, foto: true, texto: "Hola" }]);
+});
+
+test("duracion_total descuenta los videos propios y no los toca", () => {
+  const v = videoPropio({ inicio: 0, fin: 6 });
+  const r = aplicar(estado([foto(), v, foto()]), [{ tipo: "duracion_total", segundos: 29 }]);
+  assert.deepEqual(r.estado.clips.map((c) => c.segundos), [10, v.segundos, 10]);
+  assert.equal(r.estado.clips[1].fin, 6);
+});
+
+test("duración y animar no aplican a un video propio", () => {
+  let r = aplicar(estado([videoPropio()]), [{ tipo: "duracion", clip: 1, segundos: 4 }]);
+  assert.deepEqual(r.avisos, ["El clip 1 es un video: su duración se cambia recortándolo"]);
+  r = aplicar(estado([videoPropio()]), [{ tipo: "animar", clip: 1, activar: true }]);
+  assert.equal(r.estado.clips[0].tipo, "video");
+  assert.deepEqual(r.avisos, ["El clip 1 es un video: solo se animan fotos"]);
+});
+
+test("armar conserva los videos propios y no les pide imagen", () => {
+  const v = videoPropio();
+  const r = aplicar(estado([v, nuevoClip()]), [armar({ clips: 2, textos: ["t1", "t2"], imagenes: ["i1", "i2"] })]);
+  assert.equal(r.estado.clips[0].tipo, "video");
+  assert.equal(r.estado.clips[0].archivoId, "reelvid-1");
+  assert.equal(costoDe(r.pendientes).imagenes, 1);
 });

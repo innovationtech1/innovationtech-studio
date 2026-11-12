@@ -441,7 +441,7 @@ export default function ReelStudio({
   // Lo que comparten grabar y la vista previa: las escenas con su duración, la marca, la voz y la música.
   function opcionesReel(lista: Clip[], clipsIa?: Record<string, string | null>): ReelOptions {
     return {
-      escenas: aEscenas(lista, clipsIa),
+      escenas: aEscenas(lista, { tomas: clipsIa }),
       cierre: cierreDe(lista),
       format,
       accent,
