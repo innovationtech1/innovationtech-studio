@@ -1193,6 +1193,8 @@ export const EN: Record<string, string> = {
   "Máximo 4 fotos con IA por video": "Maximum 4 AI photos per video",
   "Cambió el guion: genera la voz de nuevo": "The script changed: generate the voice again",
   "Agrega fotos antes de fijar la duración del video": "Add photos before setting the video length",
+  "Descripción para crear la imagen con IA": "Description to create the image with AI",
+  "Qué debe verse en la foto. Se usa al tocar «Crear con IA».": "What should be seen in the photo. Used when you tap “Create with AI”.",
 };
 
 // Textos con números u otras partes que cambian

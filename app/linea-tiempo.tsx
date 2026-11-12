@@ -174,6 +174,16 @@ export default function LineaTiempo({
                 </div>
               )}
 
+              <label htmlFor="lt-prompt">Descripción para crear la imagen con IA</label>
+              <textarea
+                id="lt-prompt"
+                value={clip.prompt}
+                maxLength={400}
+                rows={2}
+                onChange={(e) => onCambiar(elegido, { prompt: e.target.value })}
+                placeholder="Qué debe verse en la foto. Se usa al tocar «Crear con IA»."
+              />
+
               {conIa && clip.image && (
                 <>
                   <label className="check" style={{ margin: "4px 0 0" }}>

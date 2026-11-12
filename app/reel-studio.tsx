@@ -633,6 +633,7 @@ export default function ReelStudio({
 
   const ajustesActuales = (): Ajustes => ({
     formato: format,
+    tema: topic,
     negocio: brandName,
     cta,
     guion: script,
@@ -645,6 +646,7 @@ export default function ReelStudio({
   });
   function ponerAjustes(a: Ajustes) {
     setFormat(a.formato);
+    setTopic(a.tema);
     setBrandName(a.negocio);
     setCta(a.cta);
     setScript(a.guion);
@@ -806,7 +808,7 @@ export default function ReelStudio({
   const alCambiar = (i: number, cambios: Partial<Clip>) => {
     const campo = Object.keys(cambios).join(",");
     // Escribir o arrastrar la duración: varios cambios seguidos cuentan como un solo paso
-    const seguido = campo === "caption" || campo === "movimiento" || campo === "segundos";
+    const seguido = campo === "caption" || campo === "movimiento" || campo === "segundos" || campo === "prompt";
     editar((c) => cambiar(c, i, cambios), seguido ? `${clipsRef.current[i]?.id}:${campo}` : "");
   };
   const alAgregar = () => {
