@@ -1,6 +1,7 @@
 import { cuesFromWords, drawCue, wordsFromScript } from "./captions";
 import { renderMusic, MusicStyleId } from "./music";
 import { loadSong } from "./library";
+import { conLimite } from "./limite";
 import fixWebmDuration from "fix-webm-duration";
 import type { EscenaRender, TextoPos, TextoTam } from "./linea-tiempo";
 import { medidasTexto } from "./reel-texto";
@@ -36,7 +37,8 @@ export type ReelOptions = {
   previewCanvas?: HTMLCanvasElement; // para ver el reel mientras se graba
 };
 
-export type ReelResult = { url: string; blob: Blob; ext: "mp4" | "webm"; seconds: number };
+// avisos: cosas que no salieron como se pidió (un video que no cargó y quedó como imagen fija…)
+export type ReelResult = { url: string; blob: Blob; ext: "mp4" | "webm"; seconds: number; avisos: string[] };
 
 const SIZES: Record<ReelFormat, [number, number]> = {
   "9:16": [720, 1280],
@@ -74,10 +76,12 @@ async function loadImage(src: string): Promise<HTMLImageElement> {
     if (!res || !res.ok) throw new Error("No se pudo cargar una de las imágenes (quizá el enlace ya caducó). Descárgala y súbela desde tu dispositivo.");
     url = URL.createObjectURL(await res.blob());
   }
+  // La imagen ya cargada no necesita su enlace temporal: se suelta para no acumular memoria
+  const soltar = () => url !== src && URL.revokeObjectURL(url);
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("Una de las imágenes no se pudo abrir."));
+    img.onload = () => (soltar(), resolve(img));
+    img.onerror = () => (soltar(), reject(new Error("Una de las imágenes no se pudo abrir.")));
     img.src = url;
   });
 }
@@ -94,16 +98,36 @@ async function loadClip(src: string, conSonido = false): Promise<HTMLVideoElemen
     url = URL.createObjectURL(await res.blob());
     bajado = true;
   }
-  return new Promise((resolve, reject) => {
-    const v = document.createElement("video");
-    v.muted = !conSonido;
-    v.playsInline = true;
-    v.preload = "auto";
-    if (bajado) v.dataset.bajado = "1";
+  const v = document.createElement("video");
+  v.muted = !conSonido;
+  v.playsInline = true;
+  v.preload = "auto";
+  if (bajado) v.dataset.bajado = "1";
+  const listo = new Promise<HTMLVideoElement>((resolve, reject) => {
     v.onloadeddata = () => resolve(v);
+    v.oncanplay = () => resolve(v);
+    // En iPhone a veces solo llegan los datos básicos hasta que el video se reproduce: con eso basta para seguir
+    v.onloadedmetadata = () => setTimeout(() => resolve(v), 2500);
     v.onerror = () => reject(new Error("Un video no se pudo abrir."));
     v.src = url;
+    v.load();
   });
+  try {
+    // Con límite: un video que el teléfono no termina de abrir no deja la grabación colgada
+    return await conLimite(listo, 20_000, "Un video tardó demasiado en abrir.");
+  } catch (e) {
+    soltarVideo(v);
+    throw e;
+  }
+}
+
+// Suelta un video cargado (y su archivo temporal, si se bajó de internet)
+function soltarVideo(c: HTMLVideoElement) {
+  c.onloadeddata = c.oncanplay = c.onloadedmetadata = c.onerror = null;
+  c.pause();
+  if (c.dataset.bajado) URL.revokeObjectURL(c.src); // los archivos del dispositivo son de quien los abrió
+  c.removeAttribute("src");
+  c.load();
 }
 
 // Deja el video detenido en el segundo indicado (para que su primer cuadro esté listo al entrar a su escena)
@@ -291,11 +315,26 @@ type Montaje = {
   voiceBuffer: AudioBuffer | null;
   musicBuffer: AudioBuffer | null;
   efectosBuffer: AudioBuffer | null;
+  avisos: string[]; // lo que no salió como se pidió
   draw: (time: number) => void;
   soltar: () => void;
 };
 
+// Lo que montar() va abriendo: si algo falla a medias, se cierra todo (audio y videos) en vez de quedar vivo
+type Abiertos = { audio: AudioContext | null; videos: HTMLVideoElement[] };
 async function montar(o: ReelOptions): Promise<Montaje> {
+  const abiertos: Abiertos = { audio: null, videos: [] };
+  try {
+    return await montarCon(o, abiertos);
+  } catch (e) {
+    abiertos.videos.forEach(soltarVideo);
+    abiertos.audio?.close().catch(() => {});
+    throw e;
+  }
+}
+async function montarCon(o: ReelOptions, abiertos: Abiertos): Promise<Montaje> {
+  const nuevoAudio = () => (abiertos.audio = new AudioContext());
+  const avisos: string[] = [];
   const SYSTEM = `system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
   FONT_STACK = SYSTEM;
   if (o.font && typeof document !== "undefined") {
@@ -325,7 +364,7 @@ async function montar(o: ReelOptions): Promise<Montaje> {
   let audioCtx: AudioContext | null = null;
   let voiceBuffer: AudioBuffer | null = null;
   if (o.voice) {
-    audioCtx = new AudioContext();
+    audioCtx = nuevoAudio();
     const bytes = await (await fetch(o.voice)).arrayBuffer();
     voiceBuffer = await audioCtx.decodeAudioData(bytes);
   }
@@ -340,14 +379,18 @@ async function montar(o: ReelOptions): Promise<Montaje> {
         if (!e.video) return;
         // Si un video no carga, esa escena se queda con su imagen animada con zoom
         const v = await loadClip(e.video.src, e.video.sonido).catch(() => null);
-        if (!v) return;
+        if (!v) {
+          avisos.push(`El video del clip ${i + 1} no se pudo abrir: en esa parte se ve su imagen fija.`);
+          return;
+        }
+        abiertos.videos.push(v);
         await irA(v, e.video.inicio);
         clips[i] = v;
       }),
     );
   }
   // El sonido de un video propio necesita la mezcla de audio aunque no haya voz ni música
-  if (!audioCtx && escenas.some((e, i) => e.video?.sonido && clips[i])) audioCtx = new AudioContext();
+  if (!audioCtx && escenas.some((e, i) => e.video?.sonido && clips[i])) audioCtx = nuevoAudio();
   const starts: number[] = [];
   durs.reduce((a, d, i) => ((starts[i] = a), a + d), 0);
   const slidesTime = durs.reduce((a, d) => a + d, 0);
@@ -359,7 +402,7 @@ async function montar(o: ReelOptions): Promise<Montaje> {
   // Música de fondo (se compone a la medida exacta del reel)
   let musicBuffer: AudioBuffer | null = null;
   if (o.music) {
-    if (!audioCtx) audioCtx = new AudioContext();
+    if (!audioCtx) audioCtx = nuevoAudio();
     if (o.music.propia) {
       o.onStatus?.("🎵 Cargando canción…");
       musicBuffer = await audioCtx.decodeAudioData(await (await fetch(o.music.propia)).arrayBuffer());
@@ -370,7 +413,7 @@ async function montar(o: ReelOptions): Promise<Montaje> {
       o.onStatus?.("🎵 Componiendo música…");
       musicBuffer = await renderMusic({ style: o.music.style, seed: o.music.seed, duration: total + 0.3 });
     }
-    if (!audioCtx) audioCtx = new AudioContext();
+    if (!audioCtx) audioCtx = nuevoAudio();
   }
 
   // Efectos de sonido: se arman en una sola pista del largo del video
@@ -378,7 +421,7 @@ async function montar(o: ReelOptions): Promise<Montaje> {
   if (o.efectos?.length) {
     const items = o.efectos.map((e, i) => ({ id: String(i), kind: e.kind, at: e.at, volume: 1 })) as unknown as SfxItem[];
     efectosBuffer = await renderSfx(items, total).catch(() => null);
-    if (efectosBuffer && !audioCtx) audioCtx = new AudioContext();
+    if (efectosBuffer && !audioCtx) audioCtx = nuevoAudio();
   }
 
   const canvas = document.createElement("canvas");
@@ -452,16 +495,10 @@ async function montar(o: ReelOptions): Promise<Montaje> {
   };
 
   const soltar = () => {
-    clips.forEach((c) => {
-      if (!c) return;
-      c.pause();
-      if (c.dataset.bajado) URL.revokeObjectURL(c.src); // los archivos del dispositivo son de quien los abrió
-      c.removeAttribute("src");
-      c.load();
-    });
+    clips.forEach((c) => c && soltarVideo(c));
     audioCtx?.close().catch(() => {});
   };
-  return { W, H, total, slidesTime, starts, canvas, clips, escenas, durs, ganancias: escenas.map(() => null), audioCtx, voiceBuffer, musicBuffer, efectosBuffer, draw, soltar };
+  return { W, H, total, slidesTime, starts, canvas, clips, escenas, durs, ganancias: escenas.map(() => null), audioCtx, voiceBuffer, musicBuffer, efectosBuffer, avisos, draw, soltar };
 }
 
 // Conecta la voz, la música y el sonido de los videos propios a `salida` (la grabación o las bocinas)
@@ -630,6 +667,8 @@ async function exportarRapido(o: ReelOptions): Promise<ReelResult | null> {
   }
   const { Muxer, ArrayBufferTarget } = await import("mp4-muxer");
   const m = await montar(o);
+  // Los codificadores se cierran pase lo que pase (si no, se quedan ocupando memoria del teléfono)
+  const codificadores: { state: string; close: () => void }[] = [];
   try {
     const conAudio = !!(m.voiceBuffer || m.musicBuffer || m.efectosBuffer);
     if (conAudio && typeof AudioEncoder === "undefined") return null;
@@ -646,6 +685,7 @@ async function exportarRapido(o: ReelOptions): Promise<ReelResult | null> {
 
     // Imagen
     const codVideo = new VideoEncoder({ output: (c, meta) => muxer.addVideoChunk(c, meta), error: (e) => (fallo = e) });
+    codificadores.push(codVideo);
     codVideo.configure(video);
     o.onStatus?.("");
     const cuadros = cuadrosDe(m.total);
@@ -673,6 +713,7 @@ async function exportarRapido(o: ReelOptions): Promise<ReelResult | null> {
       prepararAudio(m, o, mezcla.destination, mezcla)();
       const pista = await mezcla.startRendering();
       const codAudio = new AudioEncoder({ output: (c, meta) => muxer.addAudioChunk(c, meta), error: (e) => (fallo = e) });
+      codificadores.push(codAudio);
       codAudio.configure(audio);
       const izq = pista.getChannelData(0);
       const der = pista.numberOfChannels > 1 ? pista.getChannelData(1) : izq;
@@ -708,8 +749,9 @@ async function exportarRapido(o: ReelOptions): Promise<ReelResult | null> {
       throw new Error("el archivo no se abre");
     }
     o.onProgress?.(1);
-    return { url, blob, ext: "mp4", seconds: Math.round(m.total) };
+    return { url, blob, ext: "mp4", seconds: Math.round(m.total), avisos: m.avisos };
   } finally {
+    for (const c of codificadores) if (c.state !== "closed") try { c.close(); } catch { /* ya estaba cerrado */ }
     m.soltar();
   }
 }
@@ -738,38 +780,49 @@ async function grabarEnVivo(o: ReelOptions): Promise<ReelResult> {
   if (!rec) throw new Error("Este navegador no puede grabar video. Usa Chrome, Edge o Safari actualizados.");
   const m = await montar(o);
   const { audioCtx, total } = m;
+  let stream: MediaStream | null = null;
+  let recorder: MediaRecorder | null = null;
+  try {
+    m.draw(0);
+    stream = m.canvas.captureStream(FPS);
+    let arrancarAudio = () => {};
+    if (audioCtx) {
+      const dest = audioCtx.createMediaStreamDestination();
+      arrancarAudio = prepararAudio(m, o, dest);
+      for (const tr of dest.stream.getAudioTracks()) stream.addTrack(tr);
+    }
 
-  m.draw(0);
-  const stream = m.canvas.captureStream(FPS);
-  let arrancarAudio = () => {};
-  if (audioCtx) {
-    const dest = audioCtx.createMediaStreamDestination();
-    arrancarAudio = prepararAudio(m, o, dest);
-    dest.stream.getAudioTracks().forEach((tr) => stream.addTrack(tr));
+    recorder = new MediaRecorder(stream, { mimeType: rec.mime, videoBitsPerSecond: 6_000_000 });
+    const chunks: Blob[] = [];
+    recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    const grabadora = recorder;
+    const done = new Promise<Blob>((resolve) => {
+      grabadora.onstop = () => resolve(new Blob(chunks, { type: rec.mime.split(";")[0] }));
+    });
+
+    recorder.start(250);
+    o.onStatus?.("");
+    if (audioCtx) {
+      // Con límite: en iPhone el audio puede no arrancar si pasó mucho desde el toque; el video no se cuelga por eso
+      await conLimite(audioCtx.resume(), 2000, null, undefined).catch(() => {});
+      if (audioCtx.state !== "running") m.avisos.push("El sonido no pudo arrancar en este dispositivo. Toca «Crear reel» otra vez para grabarlo con sonido.");
+    }
+    arrancarAudio();
+    await reproducir(m, o);
+
+    await new Promise((r) => setTimeout(r, 300));
+    recorder.stop();
+    let blob = await done;
+    // WebM grabado en el navegador no trae la duración: se la escribimos
+    if (rec.ext === "webm") blob = await fixWebmDuration(blob, total * 1000, { logger: false }).catch(() => blob);
+    o.onProgress?.(1);
+    return { url: URL.createObjectURL(blob), blob, ext: rec.ext, seconds: Math.round(total), avisos: m.avisos };
+  } finally {
+    // Pase lo que pase: se apaga la grabadora, se sueltan la imagen y el audio
+    if (recorder && recorder.state !== "inactive") try { recorder.stop(); } catch { /* ya estaba detenida */ }
+    stream?.getTracks().forEach((t) => t.stop());
+    m.soltar();
   }
-
-  const recorder = new MediaRecorder(stream, { mimeType: rec.mime, videoBitsPerSecond: 6_000_000 });
-  const chunks: Blob[] = [];
-  recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-  const done = new Promise<Blob>((resolve) => {
-    recorder.onstop = () => resolve(new Blob(chunks, { type: rec.mime.split(";")[0] }));
-  });
-
-  recorder.start(250);
-  o.onStatus?.("");
-  if (audioCtx) await audioCtx.resume();
-  arrancarAudio();
-  await reproducir(m, o);
-
-  await new Promise((r) => setTimeout(r, 300));
-  recorder.stop();
-  stream.getTracks().forEach((t) => t.stop());
-  let blob = await done;
-  // WebM grabado en el navegador no trae la duración: se la escribimos
-  if (rec.ext === "webm") blob = await fixWebmDuration(blob, total * 1000, { logger: false }).catch(() => blob);
-  m.soltar();
-  o.onProgress?.(1);
-  return { url: URL.createObjectURL(blob), blob, ext: rec.ext, seconds: Math.round(total) };
 }
 
 // Vista previa: reproduce el video en `previewCanvas` con su sonido, sin grabar nada.
@@ -783,7 +836,7 @@ export async function vistaPrevia(o: ReelOptions, signal: AbortSignal): Promise<
     o.onStatus?.("");
     if (m.audioCtx) {
       const arrancar = prepararAudio(m, o, m.audioCtx.destination);
-      await m.audioCtx.resume();
+      await conLimite(m.audioCtx.resume(), 2000, null, undefined).catch(() => {});
       arrancar();
     }
     await reproducir(m, o, signal);

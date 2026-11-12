@@ -43,6 +43,7 @@ import {
   nuevoClip,
   ponerToma,
   ponerEnLibre,
+  sinFuente,
   presente,
   quitarToma,
   recortar,
@@ -169,6 +170,7 @@ export default function ReelStudio({
   const savedImages = useRef(new Map<string, string>());
   const restored = useRef(false);
   const [recuperado, setRecuperado] = useState(false); // ya se recuperaron las fotos guardadas
+  const [avisosVideo, setAvisosVideo] = useState<string[]>([]); // lo que no salió como se pidió en el último video
   const [sinEspacio, setSinEspacio] = useState(false); // un guardado en el dispositivo no entró
   const guardando = useRef(new Map<string, string>()); // id del clip → foto que se está guardando
   const noGuardadas = useRef(new Map<string, string>()); // id del clip → foto que no se pudo guardar (no se reintenta sola)
@@ -809,9 +811,22 @@ export default function ReelStudio({
     if (problema) throw new Error(problema);
     detenerPrevia();
     setResult(null);
+    setAvisosVideo([]);
     setProgress(0);
     if (result) URL.revokeObjectURL(result.url);
     const tomas = await fuentesTomas(lista);
+    // Nada se vuelve imagen fija en silencio: un video que ya no está en el dispositivo detiene la grabación;
+    // una toma con IA que no se pudo traer (sin conexión) se avisa al terminar.
+    // Si los videos del proyecto aún se están abriendo (recién cargada la app), se espera un momento
+    const idsVideo = lista.flatMap((c) => (c.tipo === "video" && c.archivoId ? [c.archivoId] : []));
+    for (let k = 0; k < 50 && idsVideo.some((id) => !(id in urlsRef.current)); k++) await new Promise((r) => setTimeout(r, 100));
+    const faltan = sinFuente(lista, { tomas, videos: urlsRef.current });
+    if (faltan.videos.length) {
+      throw new Error(`El video del clip ${faltan.videos.join(", ")} no está en este dispositivo. Vuelve a subirlo o quita ese clip.`);
+    }
+    const avisos = faltan.tomas.length
+      ? [`No se pudo traer la toma con IA del clip ${faltan.tomas.join(", ")} (revisa tu conexión): ahí la foto se ve con zoom. Vuelve a crear el video cuando tengas señal; no se cobra de nuevo.`]
+      : [];
     aLaVista(salida.current);
     const r = await renderReel({
       // Las opciones se leen AHORA (no las de cuando se tocó el botón): tras esperar las tomas con IA,
@@ -822,6 +837,7 @@ export default function ReelStudio({
       previewCanvas: preview.current || undefined,
     });
     setResult({ url: r.url, ext: r.ext, seconds: r.seconds });
+    setAvisosVideo([...avisos, ...r.avisos]);
     setVozCambio(false);
     setTimeout(() => aLaVista(salida.current), 100);
     onVideo(r.blob, `Reel: ${topic || brandName || "sin título"}`); // se guarda solo en la galería
@@ -1685,6 +1701,11 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
             )}
           </div>
         )}
+        {!busy && result && avisosVideo.map((a) => (
+          <div className="notice" key={a}>
+            {a}
+          </div>
+        ))}
         {sinEspacio && (
           <div className="notice">
             {AVISO_SIN_ESPACIO}{" "}
