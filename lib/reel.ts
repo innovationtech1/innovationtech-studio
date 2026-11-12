@@ -4,6 +4,7 @@ import { loadSong } from "./library";
 import fixWebmDuration from "fix-webm-duration";
 import type { EscenaRender, TextoPos, TextoTam } from "./linea-tiempo";
 import { medidasTexto } from "./reel-texto";
+import { bajadasDeMusica, gananciaClip, tramosConSonido } from "./reel-sonido";
 // Motor de reels: arma un video animado dentro del navegador, gratis y sin límite.
 // Dibuja cada escena en un <canvas> (zoom/movimiento suave + transiciones + textos)
 // y lo graba con MediaRecorder, incluyendo la voz en off si existe.
@@ -14,6 +15,8 @@ export type ReelOptions = {
   // Una escena por clip, en orden, cada una con su duración (lib/linea-tiempo.ts → aEscenas)
   escenas: EscenaRender[];
   cierre: number; // segundos del cierre con la marca (3, o 0 si no cabe)
+  // Volumen de la voz en off y del sonido de los videos propios (0 a 1; por defecto 1). La música usa music.volume.
+  volumenes?: { voz: number; clips: number };
   format: ReelFormat;
   accent: string; // color de acento (hex)
   brandName: string;
@@ -74,19 +77,37 @@ async function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-// Carga un clip de IA como <video>. Se baja como archivo (igual que las imágenes) para poder grabarlo.
-async function loadClip(src: string): Promise<HTMLVideoElement> {
-  const res = await fetch(src).catch(() => null);
-  if (!res || !res.ok) throw new Error("No se pudo cargar una toma con IA (quizá el enlace ya caducó).");
-  const url = URL.createObjectURL(await res.blob());
+// Carga un video (toma con IA o video propio) como <video>. Un enlace de internet se baja como archivo
+// (igual que las imágenes) para poder grabarlo; un archivo del dispositivo se usa tal cual.
+// conSonido: el video no se silencia, porque su audio entra a la mezcla del reel.
+async function loadClip(src: string, conSonido = false): Promise<HTMLVideoElement> {
+  let url = src;
+  let bajado = false;
+  if (!src.startsWith("blob:") && !src.startsWith("data:")) {
+    const res = await fetch(src).catch(() => null);
+    if (!res || !res.ok) throw new Error("No se pudo cargar una toma con IA (quizá el enlace ya caducó).");
+    url = URL.createObjectURL(await res.blob());
+    bajado = true;
+  }
   return new Promise((resolve, reject) => {
     const v = document.createElement("video");
-    v.muted = true;
+    v.muted = !conSonido;
     v.playsInline = true;
     v.preload = "auto";
+    if (bajado) v.dataset.bajado = "1";
     v.onloadeddata = () => resolve(v);
-    v.onerror = () => reject(new Error("Una toma con IA no se pudo abrir."));
+    v.onerror = () => reject(new Error("Un video no se pudo abrir."));
     v.src = url;
+  });
+}
+
+// Deja el video detenido en el segundo indicado (para que su primer cuadro esté listo al entrar a su escena)
+function irA(v: HTMLVideoElement, segundo: number): Promise<void> {
+  return new Promise((res) => {
+    const listo = () => res();
+    v.addEventListener("seeked", listo, { once: true });
+    setTimeout(listo, 1500);
+    v.currentTime = segundo;
   });
 }
 
@@ -258,6 +279,9 @@ type Montaje = {
   starts: number[];
   canvas: HTMLCanvasElement;
   clips: (HTMLVideoElement | null)[];
+  escenas: EscenaRender[];
+  durs: number[];
+  ganancias: (GainNode | null)[]; // el volumen del sonido de cada video propio (se mueve cuadro a cuadro)
   audioCtx: AudioContext | null;
   voiceBuffer: AudioBuffer | null;
   musicBuffer: AudioBuffer | null;
@@ -284,6 +308,8 @@ async function montar(o: ReelOptions): Promise<Montaje> {
   const cargadas = new Map<string, Promise<HTMLImageElement>>();
   const imgs = await Promise.all(
     escenas.map((e) => {
+      // Un video propio puede no tener portada todavía: se verá el video (o negro si tampoco carga)
+      if (!e.imagen) return null;
       if (!cargadas.has(e.imagen)) cargadas.set(e.imagen, loadImage(e.imagen));
       return cargadas.get(e.imagen)!;
     }),
@@ -302,14 +328,20 @@ async function montar(o: ReelOptions): Promise<Montaje> {
   const outro = Math.max(0, o.cierre);
   const clips: (HTMLVideoElement | null)[] = escenas.map(() => null);
   if (escenas.some((e) => e.video)) {
-    o.onStatus?.("🎬 Cargando tomas con IA…");
+    o.onStatus?.("🎬 Cargando videos…");
     await Promise.all(
       escenas.map(async (e, i) => {
-        // Si un clip no carga, esa escena se queda con la animación normal
-        if (e.video) clips[i] = await loadClip(e.video).catch(() => null);
+        if (!e.video) return;
+        // Si un video no carga, esa escena se queda con su imagen animada con zoom
+        const v = await loadClip(e.video.src, e.video.sonido).catch(() => null);
+        if (!v) return;
+        await irA(v, e.video.inicio);
+        clips[i] = v;
       }),
     );
   }
+  // El sonido de un video propio necesita la mezcla de audio aunque no haya voz ni música
+  if (!audioCtx && escenas.some((e, i) => e.video?.sonido && clips[i])) audioCtx = new AudioContext();
   const starts: number[] = [];
   durs.reduce((a, d, i) => ((starts[i] = a), a + d), 0);
   const slidesTime = durs.reduce((a, d) => a + d, 0);
@@ -347,11 +379,12 @@ async function montar(o: ReelOptions): Promise<Montaje> {
     // Una escena: su clip de IA si lo tiene; si no, la foto con zoom y paneo
     const scene = (k: number, t: number) => {
       const clip = clips[k];
+      const img = imgs[k];
       if (clip) drawClip(ctx, clip, W, H);
-      else drawKenBurns(ctx, imgs[k], W, H, t, k);
+      else if (img) drawKenBurns(ctx, img, W, H, t, k);
     };
     if (time < slidesTime || outro === 0) {
-      let i = imgs.length - 1;
+      let i = escenas.length - 1;
       while (i > 0 && time < starts[i]) i--;
       const per = durs[i];
       const local = Math.min(per, time - starts[i]);
@@ -359,7 +392,7 @@ async function montar(o: ReelOptions): Promise<Montaje> {
       const fade = Math.min(FADE, per / 3);
       scene(i, local / per);
       // transición: la siguiente escena aparece encima
-      if (local > per - fade && i < imgs.length - 1) {
+      if (local > per - fade && i < escenas.length - 1) {
         ctx.save();
         ctx.globalAlpha = (local - (per - fade)) / fade;
         scene(i + 1, 0);
@@ -387,7 +420,7 @@ async function montar(o: ReelOptions): Promise<Montaje> {
     } else {
       const t = time - slidesTime;
       if (t < FADE) {
-        scene(imgs.length - 1, 1);
+        scene(escenas.length - 1, 1);
         ctx.save();
         ctx.globalAlpha = t / FADE;
         drawOutro(ctx, W, H, t, { brandName: o.brandName, cta: o.cta, accent: o.accent, logo });
@@ -401,24 +434,30 @@ async function montar(o: ReelOptions): Promise<Montaje> {
     clips.forEach((c) => {
       if (!c) return;
       c.pause();
-      URL.revokeObjectURL(c.src);
+      if (c.dataset.bajado) URL.revokeObjectURL(c.src); // los archivos del dispositivo son de quien los abrió
+      c.removeAttribute("src");
+      c.load();
     });
     audioCtx?.close().catch(() => {});
   };
-  return { W, H, total, slidesTime, starts, canvas, clips, audioCtx, voiceBuffer, musicBuffer, draw, soltar };
+  return { W, H, total, slidesTime, starts, canvas, clips, escenas, durs, ganancias: escenas.map(() => null), audioCtx, voiceBuffer, musicBuffer, draw, soltar };
 }
 
-// Conecta la voz y la música a `salida` (la grabación o las bocinas) y devuelve cómo arrancarlas.
+// Conecta la voz, la música y el sonido de los videos propios a `salida` (la grabación o las bocinas)
+// y devuelve cómo arrancar la voz y la música.
 function prepararAudio(m: Montaje, o: ReelOptions, salida: AudioNode): () => void {
   const { audioCtx, voiceBuffer, musicBuffer, total } = m;
   if (!audioCtx) return () => {};
+  const vol = { voz: o.volumenes?.voz ?? 1, clips: o.volumenes?.clips ?? 1 };
   let source: AudioBufferSourceNode | null = null;
   let musicSource: AudioBufferSourceNode | null = null;
   let musicGain: GainNode | null = null;
   if (voiceBuffer) {
     source = audioCtx.createBufferSource();
     source.buffer = voiceBuffer;
-    source.connect(salida);
+    const g = audioCtx.createGain();
+    g.gain.value = Math.max(0, Math.min(1, vol.voz));
+    source.connect(g).connect(salida);
   }
   if (musicBuffer && o.music) {
     musicSource = audioCtx.createBufferSource();
@@ -428,22 +467,37 @@ function prepararAudio(m: Montaje, o: ReelOptions, salida: AudioNode): () => voi
     musicGain.gain.value = o.music.volume;
     musicSource.connect(musicGain).connect(salida);
   }
+  // Sonido de los videos propios: cada uno con su volumen, que empieza en cero (lo mueve `reproducir`)
+  m.escenas.forEach((e, i) => {
+    const v = m.clips[i];
+    if (!v || !e.video?.sonido) return;
+    try {
+      const g = audioCtx.createGain();
+      g.gain.value = 0;
+      audioCtx.createMediaElementSource(v).connect(g).connect(salida);
+      m.ganancias[i] = g;
+    } catch {
+      v.muted = true; // si el navegador no deja mezclarlo, ese video va sin sonido
+    }
+  });
+  const conSonido = tramosConSonido(m.escenas.map((e, i) => ({ segundos: m.durs[i], video: e.video && m.ganancias[i] ? { sonido: true } : undefined })));
   return () => {
     if (musicSource && musicGain && o.music) {
       const now = audioCtx.currentTime;
+      const v = o.music.volume;
       musicSource.start(now);
-      if (voiceBuffer) {
-        // La música baja mientras habla la voz y vuelve a subir al terminar
-        const v = o.music.volume;
-        musicGain.gain.setValueAtTime(v, now);
-        musicGain.gain.linearRampToValueAtTime(v * 0.35, now + 0.3);
-        musicGain.gain.setValueAtTime(v * 0.35, now + 0.3 + voiceBuffer.duration);
-        musicGain.gain.linearRampToValueAtTime(v, now + 0.8 + voiceBuffer.duration);
+      musicGain.gain.setValueAtTime(v, now);
+      // La música baja mientras habla la voz o suena un video propio, y vuelve a subir al terminar
+      for (const b of bajadasDeMusica(voiceBuffer?.duration ?? null, conSonido)) {
+        musicGain.gain.setValueAtTime(v, now + Math.max(0, b.desde - 0.3));
+        musicGain.gain.linearRampToValueAtTime(v * 0.35, now + Math.max(0.05, b.desde));
+        musicGain.gain.setValueAtTime(v * 0.35, now + b.hasta);
+        musicGain.gain.linearRampToValueAtTime(v, now + b.hasta + 0.5);
       }
       if (o.music.song) {
         // La canción de la biblioteca se desvanece al terminar el reel
         const fadeAt = Math.max(now + 0.9 + (voiceBuffer?.duration || 0), now + total - 1.5);
-        musicGain.gain.setValueAtTime(o.music.volume, fadeAt);
+        musicGain.gain.setValueAtTime(v, fadeAt);
         musicGain.gain.linearRampToValueAtTime(0, now + total);
       }
     }
@@ -454,24 +508,48 @@ function prepararAudio(m: Montaje, o: ReelOptions, salida: AudioNode): () => voi
 // Recorre el video en tiempo real dibujando cada cuadro. Termina al llegar al final o si se cancela.
 function reproducir(m: Montaje, o: ReelOptions, signal?: AbortSignal): Promise<void> {
   const { total, slidesTime, starts, clips } = m;
+  const volClips = Math.max(0, Math.min(1, o.volumenes?.clips ?? 1));
   const start = performance.now();
   // Usamos un temporizador (no requestAnimationFrame) para que siga grabando
   // aunque la ventana pierda el foco por un momento.
-  let sonando = -1; // escena cuyo clip se está reproduciendo
+  let sonando = -1; // escena cuyo video se está reproduciendo
+  const parar = (k: number) => {
+    if (k < 0) return;
+    clips[k]?.pause();
+    const g = m.ganancias[k];
+    if (g) g.gain.value = 0;
+  };
   return new Promise<void>((resolve) => {
     const tick = () => {
-      if (signal?.aborted) return resolve();
+      if (signal?.aborted) {
+        parar(sonando);
+        return resolve();
+      }
       const time = (performance.now() - start) / 1000;
-      // Al entrar a una escena con clip, el clip arranca desde el principio
       let actual = starts.length - 1;
       while (actual > 0 && time < starts[actual]) actual--;
-      if (time < slidesTime && actual !== sonando) {
-        if (sonando >= 0) clips[sonando]?.pause();
-        sonando = actual;
+      if (time >= slidesTime) {
+        parar(sonando);
+        sonando = -1;
+      } else {
+        const tramo = m.escenas[actual].video;
+        // Al entrar a una escena con video, arranca desde el inicio de su recorte y a su velocidad
+        if (actual !== sonando) {
+          parar(sonando);
+          sonando = actual;
+          const clip = clips[actual];
+          if (clip && tramo) {
+            clip.currentTime = tramo.inicio;
+            clip.playbackRate = tramo.velocidad;
+            clip.play().catch(() => {});
+          }
+        }
         const clip = clips[actual];
-        if (clip) {
-          clip.currentTime = 0;
-          clip.play().catch(() => {});
+        if (clip && tramo) {
+          // Al llegar al final de su recorte se queda en ese cuadro
+          if (clip.currentTime >= tramo.fin && !clip.paused) clip.pause();
+          const g = m.ganancias[actual];
+          if (g) g.gain.value = gananciaClip(time - starts[actual], m.durs[actual]) * volClips;
         }
       }
       if (time >= total) {
@@ -497,7 +575,7 @@ export async function renderReel(o: ReelOptions): Promise<ReelResult> {
   m.draw(0);
   const stream = m.canvas.captureStream(FPS);
   let arrancarAudio = () => {};
-  if (audioCtx && (m.voiceBuffer || m.musicBuffer)) {
+  if (audioCtx) {
     const dest = audioCtx.createMediaStreamDestination();
     arrancarAudio = prepararAudio(m, o, dest);
     dest.stream.getAudioTracks().forEach((tr) => stream.addTrack(tr));
