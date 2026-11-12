@@ -11,6 +11,7 @@ import {
   duplicar,
   duracionClip,
   duracionTotal,
+  efectosDe,
   formatoTiempo,
   mover,
   normalizarClips,
@@ -178,8 +179,8 @@ test("aEscenas: omite los vacíos y pone los valores por defecto del texto", () 
   const b = foto({ caption: "dos", textoPos: "arriba", textoTam: "grande" });
   const r = aEscenas([a, nuevoClip(), b]);
   assert.deepEqual(r, [
-    { imagen: "data:x", texto: "uno", textoPos: "abajo", textoTam: "normal", segundos: 4 },
-    { imagen: "data:x", texto: "dos", textoPos: "arriba", textoTam: "grande", segundos: 8 },
+    { imagen: "data:x", texto: "uno", textoPos: "abajo", textoTam: "normal", segundos: 4, transicion: "fundido" },
+    { imagen: "data:x", texto: "dos", textoPos: "arriba", textoTam: "grande", segundos: 8, transicion: "fundido" },
   ]);
 });
 
@@ -328,7 +329,7 @@ test("aEscenas con videos: con su archivo lleva el tramo; sin archivo se ve la p
   const mudo = video({ archivoId: "reelvid-2", sinSonido: true });
   const falta = video({ archivoId: "reelvid-3" });
   const r = aEscenas([v, mudo, falta], { videos: { "reelvid-1": "blob:a", "reelvid-2": "blob:b" } });
-  assert.deepEqual(r[0], { imagen: "data:p", texto: "Hola", textoPos: "abajo", textoTam: "normal", segundos: 3, video: { src: "blob:a", inicio: 2, fin: 8, velocidad: 2, sonido: true } });
+  assert.deepEqual(r[0], { imagen: "data:p", texto: "Hola", textoPos: "abajo", textoTam: "normal", segundos: 3, transicion: "fundido", video: { src: "blob:a", inicio: 2, fin: 8, velocidad: 2, sonido: true } });
   assert.equal(r[1].video?.sonido, false);
   assert.equal(r[2].video, undefined);
   assert.equal(r[2].segundos, 10);
@@ -442,4 +443,29 @@ test("normalizarClips conserva los datos de la toma", () => {
   const [b] = normalizarClips([{ ...toma(), reproduccion: "al-reves", variacion: -4 }]);
   assert.equal(b.reproduccion, undefined);
   assert.equal(b.variacion, undefined);
+});
+
+// ---------- Transiciones y efectos de sonido por clip ----------
+
+test("aEscenas: cada escena lleva su transición (fundido si no se eligió)", () => {
+  const r = aEscenas([foto({ transicion: "deslizar" }), foto()]);
+  assert.equal(r[0].transicion, "deslizar");
+  assert.equal(r[1].transicion, "fundido");
+});
+
+test("normalizarClips conserva transición y efecto, y descarta los que no existen", () => {
+  const [a, b] = normalizarClips([{ ...foto(), transicion: "barrido", efecto: "whoosh" }, { ...foto(), transicion: "explosión", efecto: 7 }]);
+  assert.equal(a.transicion, "barrido");
+  assert.equal(a.efecto, "whoosh");
+  assert.equal(b.transicion, undefined);
+  assert.equal(b.efecto, undefined);
+});
+
+test("efectosDe: cada efecto suena al empezar su clip", () => {
+  const lista = [foto({ segundos: 3, efecto: "whoosh" }), nuevoClip({ efecto: "ding" }), foto({ segundos: 4 }), foto({ efecto: "pop" })];
+  assert.deepEqual(efectosDe(lista), [
+    { kind: "whoosh", at: 0 },
+    { kind: "pop", at: 7 },
+  ]);
+  assert.deepEqual(efectosDe([foto()]), []);
 });

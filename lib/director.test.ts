@@ -428,7 +428,7 @@ const instr = (extra: Partial<Parameters<typeof instruccionesDirector>[0]> = {})
 
 test("instrucciones: nombran todo el catálogo y las reglas de costo", () => {
   const { system } = instr();
-  assert.equal(TIPOS_DE_ACCION.length, 20);
+  assert.equal(TIPOS_DE_ACCION.length, 21);
   for (const t of TIPOS_DE_ACCION) assert.ok(system.includes(`"${t}"`), `falta ${t}`);
   assert.match(system, /Responde SOLO con un objeto JSON/);
   assert.ok(system.includes("pop") && system.includes("lofi") && system.includes("es-selena"));
@@ -546,4 +546,17 @@ test("armar conserva los videos propios y no les pide imagen", () => {
   assert.equal(r.estado.clips[0].tipo, "video");
   assert.equal(r.estado.clips[0].archivoId, "reelvid-1");
   assert.equal(costoDe(r.pendientes).imagenes, 1);
+});
+
+test("transición por orden: un clip o todos", () => {
+  assert.deepEqual(una({ tipo: "transicion", clip: "todos", valor: "deslizar" }), { tipo: "transicion", clip: "todos", valor: "deslizar" });
+  descartada({ tipo: "transicion", clip: 1, valor: "explosión" });
+  descartada({ tipo: "transicion", valor: "corte" });
+  let r = aplicar(estado([foto(), foto()]), [{ tipo: "transicion", clip: "todos", valor: "deslizar" }]);
+  assert.ok(r.estado.clips.every((c) => c.transicion === "deslizar"));
+  assert.deepEqual(r.hecho, ["Puse la transición «Deslizar» en todos los clips"]);
+  r = aplicar(estado([foto(), foto()]), [{ tipo: "transicion", clip: 2, valor: "corte" }]);
+  assert.deepEqual(r.estado.clips.map((c) => c.transicion), [undefined, "corte"]);
+  r = aplicar(estado([foto()]), [{ tipo: "transicion", clip: 5, valor: "corte" }]);
+  assert.deepEqual(r.avisos, ["No existe el clip 5"]);
 });

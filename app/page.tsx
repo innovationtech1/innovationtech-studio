@@ -213,7 +213,7 @@ export default function Home() {
   };
   // Las secciones pesadas se montan la primera vez que se abren y después se quedan (no se pierde nada al cambiar de pestaña)
   const [abiertas, setAbiertas] = useState<string[]>([]);
-  const marca = `${tab}|${tab === "video" ? (videoMode === "editor" ? "editor" : "reel") : tab === "texto" ? textMode : ""}`;
+  const marca = `${tab}|${tab === "video" ? "reel" : tab === "texto" ? textMode : ""}`;
   useEffect(() => setAbiertas((a) => (a.includes(marca) ? a : [...a, marca])), [marca]);
   const abierta = (m: string) => abiertas.includes(m) || marca === m;
   const go = (id: Tab) => {
@@ -398,15 +398,7 @@ export default function Home() {
         )}
       </div>
       <div hidden={tab !== "video"}>
-          <div className="mode-switch" role="tablist">
-            <button className={videoMode !== "editor" ? "active" : ""} onClick={() => setVideoMode("reel")}>
-              <Film size={16} aria-hidden /> Crear video<ProTag h="reels" />
-            </button>
-            <button className={videoMode === "editor" ? "active" : ""} onClick={() => setVideoMode("editor")}>
-              <Scissors size={16} aria-hidden /> Editar mis videos<ProTag h="editor_video" />
-            </button>
-          </div>
-          <div hidden={videoMode === "editor"}>
+          <div>
             <MejorarPro h="reels" />
             {abierta("video|reel") && (
             <ReelProyectos
@@ -420,17 +412,6 @@ export default function Home() {
               incomingTopic={reelTopic}
               onEditScene={(i, src) => openInEditor(src, { scene: i })}
               onOpenBrand={() => go("marca")}
-            />
-            )}
-          </div>
-          <div hidden={videoMode !== "editor"}>
-            <MejorarPro h="editor_video" />
-            {abierta("video|editor") && (
-            <VideoEditor
-              gallery={gallery}
-              settings={settings}
-              accent={brandAccent(brand)}
-              onVideo={(blob, prompt) => galleryStore.add([{ kind: "video", blob, prompt }])}
             />
             )}
           </div>

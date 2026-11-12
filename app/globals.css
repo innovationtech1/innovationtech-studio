@@ -295,6 +295,12 @@ h3.step { margin: 22px 0 6px; font-size: 16px; }
 .lt-pestanas button { flex: 0 1 auto; min-height: 44px; padding: 8px 12px; background: transparent; border: 0; border-bottom: 3px solid transparent; color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; }
 .lt-pestanas button.activa { color: var(--paper); border-bottom-color: var(--red); }
 .lt-grupo { display: flex; flex-direction: column; gap: 8px; }
+.lt-grupo label { margin: 0; }
+.lt-efecto { display: flex; gap: 8px; align-items: center; }
+.lt-efecto select { flex: 1; min-width: 0; margin: 0; }
+.lt-efecto .btn { margin: 0; min-height: 44px; flex: 0 0 auto; }
+.lt-pestanas { overflow-x: auto; }
+.lt-pestanas button { white-space: nowrap; }
 .lt-grupo[hidden], .lt-panel-foto[hidden] { display: none; }
 .lt-panel-foto .scene-img { max-width: 260px; }
 .lt-panel-foto { display: flex; flex-direction: column; gap: 8px; min-width: 0; }

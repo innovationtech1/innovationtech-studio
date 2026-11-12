@@ -25,3 +25,12 @@ Primera carga de la app: de 270 kB a 218 kB de JavaScript (la página, de 134 kB
 ## Lo que no cambió
 
 Textos, Imágenes, Editor, Galería y Configuración. Ninguna otra función se quitó.
+
+## Segunda vuelta (aprobada por Hector: «ok vamos a darle»): un solo editor
+
+«Editar mis videos» se quitó de la pantalla y Videos quedó con una sola vista. A «Crear video» pasaron:
+transiciones entre clips (seis), efecto de sonido al empezar un clip y música con canción propia.
+No pasaron, por decisión de Hector: filtros de color, stickers animados y textos libres (el texto por clip cubre lo principal).
+El código del editor anterior (`app/video-editor.tsx`, `lib/video-engine.ts`) sigue en el repositorio sin cargarse;
+el proyecto que alguien tuviera guardado ahí (`video:proyecto`) ya no se puede abrir desde la app.
+También: la voz generada se guarda en el dispositivo y se recupera al recargar.

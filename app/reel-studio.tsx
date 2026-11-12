@@ -35,6 +35,7 @@ import {
   dividir,
   duplicar,
   duracionTotal,
+  efectosDe,
   formatoTiempo,
   mover,
   normalizarClips,
@@ -290,7 +291,41 @@ export default function ReelStudio({
   const [musicStyle, setMusicStyle] = usePersistentState<MusicStyleId>("reel:musica-estilo", "pop");
   const [musicSeed, setMusicSeed] = usePersistentState("reel:musica-version", 1);
   const [musicVolume, setMusicVolume] = usePersistentState("reel:musica-volumen", 0.6);
-  const [musicSource, setMusicSource] = usePersistentState<"generated" | "library">("reel:musica-fuente", "generated");
+  const [musicSource, setMusicSource] = usePersistentState<"generated" | "library" | "propia">("reel:musica-fuente", "generated");
+  // Canción propia: se guarda en el dispositivo y se usa como música de fondo
+  const [cancionPropia, setCancionPropia] = usePersistentState<{ id: string; nombre: string } | null>("reel:cancion-propia", null);
+  const [urlCancion, setUrlCancion] = useState("");
+  useEffect(() => {
+    if (!cancionPropia?.id) return setUrlCancion("");
+    let vivo = true;
+    let enlace = "";
+    (async () => {
+      const blob = await getFile(cancionPropia.id).catch(() => null);
+      if (!vivo) return;
+      if (!blob) return setCancionPropia(null); // ya no está en este dispositivo
+      enlace = URL.createObjectURL(blob);
+      setUrlCancion(enlace);
+    })();
+    return () => {
+      vivo = false;
+      if (enlace) URL.revokeObjectURL(enlace);
+    };
+  }, [cancionPropia, setCancionPropia]);
+  const subirCancion = (f: File) =>
+    run("Guardando tu canción…", async () => {
+      if (f.size > 25 * 1024 * 1024) throw new Error("Esa canción pesa más de 25 MB.");
+      // Se comprueba que el navegador la puede abrir antes de guardarla
+      await new OfflineAudioContext(1, 1, 44100).decodeAudioData(await f.arrayBuffer()).catch(() => {
+        throw new Error("Ese archivo de audio no se puede abrir en tu navegador.");
+      });
+      const id = `reelsong-${Math.random().toString(36).slice(2, 10)}`;
+      await putFile(id, f);
+      if (cancionPropia?.id) deleteFile(cancionPropia.id).catch(() => {});
+      setCancionPropia({ id, nombre: f.name.slice(0, 60) });
+      setMusicSource("propia");
+      setMusicOn(true);
+    });
+  const conCancionPropia = musicSource === "propia" && !!urlCancion;
   const [songId, setSongId] = usePersistentState("reel:cancion", "advertime");
   const listenNode = useRef<AudioBufferSourceNode | null>(null);
   const listenCtx = useRef<AudioContext | null>(null);
@@ -547,7 +582,9 @@ export default function ReelStudio({
       font: brand.font || undefined,
       voice: voice || undefined,
       subtitles: voice && subtitlesOn ? { script, highlight: accent } : null,
-      music: musicOn ? { style: musicStyle, seed: musicSeed, volume: musicVolume, song: musicSource === "library" ? songId : undefined } : null,
+      // Con «Mi canción» elegida pero sin archivo, se usa la música compuesta por la app
+      music: musicOn ? { style: musicStyle, seed: musicSeed, volume: musicVolume, song: musicSource === "library" ? songId : undefined, propia: conCancionPropia ? urlCancion : undefined } : null,
+      efectos: efectosDe(lista),
     };
   }
 
@@ -1412,6 +1449,9 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
         <button className={musicOn && musicSource === "library" ? "active" : ""} onClick={() => (setMusicOn(true), setMusicSource("library"))}>
           Biblioteca de canciones
         </button>
+        <button className={musicOn && musicSource === "propia" ? "active" : ""} onClick={() => (stopListen(), setMusicOn(true), setMusicSource("propia"))}>
+          Mi canción
+        </button>
       </div>
       {musicOn && musicSource === "generated" && (
         <>
@@ -1426,6 +1466,31 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
           />
         </>
       )}
+      {musicOn && musicSource === "propia" && (
+        <div className="lt-grupo" style={{ marginTop: 8 }}>
+          {cancionPropia && urlCancion ? (
+            <>
+              <span className="muted" data-no-translate>{cancionPropia.nombre}</span>
+              <audio src={urlCancion} controls style={{ height: 36, maxWidth: "100%" }} />
+            </>
+          ) : (
+            <p className="hint" style={{ margin: 0 }}>Sube una canción tuya (MP3, M4A o WAV, hasta 25 MB). Se queda en tu dispositivo. Usa solo música que tengas derecho a usar.</p>
+          )}
+          <label className="btn ghost small" style={{ margin: 0, alignSelf: "flex-start" }}>
+            {cancionPropia ? "Cambiar canción" : "Subir canción"}
+            <input
+              type="file"
+              accept="audio/*"
+              hidden
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) void subirCancion(f);
+              }}
+            />
+          </label>
+        </div>
+      )}
       {musicOn && musicSource === "library" && (
         <LibraryPicker
           value={songId}
@@ -1437,7 +1502,7 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
       )}
       {musicOn && (
         <>
-          <div className="actions">
+          <div className="actions" style={{ display: musicSource === "propia" ? "none" : undefined }}>
             <button className="btn ghost small" disabled={!!busy} onClick={() => listenMusic(musicSeed, musicStyle, musicSource === "library" ? songId : undefined)}>
               <Play size={15} aria-hidden /> Escuchar
             </button>
