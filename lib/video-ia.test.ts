@@ -394,7 +394,14 @@ test("si no se pueden guardar los trabajos, la toma descontada se devuelve", asy
 
 test("si el despacho truena al crear, igual se devuelven los ids (las tomas quedan en fila)", async () => {
   const m = mundo();
-  const roto = { ...m.videos, tomarCandado: async () => { throw new Error("Firestore caído"); } };
+  // Solo truena el candado del despacho; el del pedido (crear-video:…) sí funciona
+  const roto = {
+    ...m.videos,
+    tomarCandado: async (...a: Parameters<typeof m.videos.tomarCandado>) => {
+      if (!a[0].startsWith("crear-video:")) throw new Error("Firestore caído");
+      return m.videos.tomarCandado(...a);
+    },
+  };
   const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, { ...m.deps, videos: roto });
   assert.ok(r.ok && r.trabajos[0].estado === "en_fila");
 });
@@ -489,4 +496,74 @@ test("con las cuentas apagadas, despachar no hace nada (ni lee ni escribe en la 
   process.env.STUDIO_CUENTAS = "off";
   assert.deepEqual(await despachar({ ...m.deps, videos: vigilado }), { enviados: 0 });
   assert.equal(tocado, 0);
+});
+
+// ---------- Sin cobros dobles ----------
+
+test("pedir otra vez una toma que sigue en camino no se cobra de nuevo: devuelve el mismo trabajo", async () => {
+  const m = mundo();
+  const toma = { imagenKey: foto("a"), movimiento: "zoom lento" };
+  const r1 = await crearVideo(req(), { tomas: [toma] }, m.deps);
+  const r2 = await crearVideo(req(), { tomas: [toma] }, m.deps);
+  assert.ok(r1.ok && r2.ok);
+  if (!r1.ok || !r2.ok) return;
+  assert.equal(r2.trabajos[0].id, r1.trabajos[0].id);
+  assert.equal(m.store.uso("n1", MES).tomas_ia, 1);
+  assert.equal(m.enviados.length, 1);
+  assert.equal(await m.videos.getGasto(HOY), COSTO);
+});
+
+test("la misma foto dos veces en un solo pedido es una sola toma", async () => {
+  const m = mundo();
+  const toma = { imagenKey: foto("a"), movimiento: "zoom" };
+  const r = await crearVideo(req(), { tomas: [toma, toma] }, m.deps);
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  assert.equal(r.trabajos.length, 2);
+  assert.equal(r.trabajos[0].id, r.trabajos[1].id);
+  assert.equal(m.store.uso("n1", MES).tomas_ia, 1);
+  assert.equal(m.enviados.length, 1);
+});
+
+test("otra variación u otro movimiento sí es una toma nueva y se cobra", async () => {
+  const m = mundo();
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "zoom" }] }, m.deps);
+  const r2 = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "zoom", variacion: 1 }] }, m.deps);
+  const r3 = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "paneo" }] }, m.deps);
+  assert.ok(r2.ok && r3.ok);
+  assert.equal(m.store.uso("n1", MES).tomas_ia, 3);
+  assert.equal(m.enviados.length, 3);
+});
+
+test("si la toma en camino falló, pedirla otra vez sí crea una nueva", async () => {
+  const m = mundo();
+  const toma = { imagenKey: foto("a"), movimiento: "zoom" };
+  const r1 = await crearVideo(req(), { tomas: [toma] }, m.deps);
+  assert.ok(r1.ok);
+  // falla dos veces (un reintento automático y luego se devuelve el crédito)
+  await m.aviso(0, m.ERROR);
+  await m.aviso(1, m.ERROR);
+  if (!r1.ok) return;
+  assert.equal((await m.videos.getTrabajo(r1.trabajos[0].id))!.estado, "fallo");
+  const r2 = await crearVideo(req(), { tomas: [toma] }, m.deps);
+  assert.ok(r2.ok);
+  if (!r2.ok) return;
+  assert.notEqual(r2.trabajos[0].id, r1.trabajos[0].id);
+});
+
+test("dos pedidos del mismo negocio al mismo tiempo: el segundo espera, no se cobra", async () => {
+  const m = mundo();
+  await m.videos.tomarCandado("crear-video:n1", 30_000, AHORA); // el primer pedido sigue en curso
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "zoom" }] }, m.deps);
+  assert.ok(!r.ok);
+  if (r.ok) return;
+  assert.equal(r.status, 409);
+  assert.equal(m.store.uso("n1", MES).tomas_ia ?? 0, 0);
+  assert.equal(m.enviados.length, 0);
+});
+
+test("al terminar un pedido (bien o rechazado) el candado queda libre para el siguiente", async () => {
+  const m = mundo();
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "zoom" }] }, m.deps);
+  assert.equal(await m.videos.tomarCandado("crear-video:n1", 30_000, AHORA), true);
 });

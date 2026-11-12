@@ -396,7 +396,7 @@ export default function ReelStudio({
   const [result, setResult] = useState<{ url: string; ext: string; seconds: number } | null>(null);
   const [error, setError] = useState("");
   const preview = useRef<HTMLCanvasElement>(null);
-  useEffect(() => onOcupado?.(!!busy), [busy, onOcupado]);
+
   // Portada: un cuadro del video terminado, para descargarlo como imagen
   const videoFinal = useRef<HTMLVideoElement>(null);
   const salida = useRef<HTMLDivElement>(null);
@@ -658,6 +658,10 @@ export default function ReelStudio({
   const enlacesToma = useRef(new Map<string, { url: string; cuando: number }>());
   const [estadoToma, setEstadoToma] = useState<Record<string, string>>({}); // id del clip → qué está pasando
   const [animando, setAnimando] = useState<string[]>([]); // clips con una toma en camino
+  // El mismo dato, pero al instante: dos toques seguidos no deben pedir (ni cobrar) dos tomas
+  const animandoYa = useRef(new Set<string>());
+  // Mientras se graba o se anima una toma no se cambia de proyecto ni se empieza otro
+  useEffect(() => onOcupado?.(!!busy || animando.length > 0), [busy, animando, onOcupado]);
 
   // Consulta tomas y guarda el enlace de las que ya están listas
   async function verTomas(ids: string[]): Promise<{ vistos: TrabajoVisto[]; topeHoy: boolean }> {
@@ -713,10 +717,11 @@ export default function ReelStudio({
 
   // Anima (o rehace) la foto de un solo clip. El resto del editor sigue usable mientras tanto.
   async function animarClip(clipId: string, rehacer = false) {
-    if (animando.includes(clipId)) return;
+    if (busy || animandoYa.current.has(clipId)) return;
     const lugar = () => clipsRef.current.findIndex((x) => x.id === clipId);
     let c = clipsRef.current[lugar()];
     if (!c || c.tipo !== "toma" || !c.image) return;
+    animandoYa.current.add(clipId);
     const pinta = (t: string) => setEstadoToma((e) => ({ ...e, [clipId]: t }));
     setAnimando((a) => [...a, clipId]);
     setError("");
@@ -756,6 +761,7 @@ export default function ReelStudio({
       pinta("");
       setError(friendlyError((e as Error).message));
     } finally {
+      animandoYa.current.delete(clipId);
       setAnimando((a) => a.filter((x) => x !== clipId));
     }
   }
@@ -790,8 +796,19 @@ export default function ReelStudio({
     });
 
   // Genera las tomas con IA que falten (una por foto distinta), espera los clips y graba el video final.
-  const generarConIa = () =>
+  const generandoYa = useRef(false); // dos toques seguidos al botón = un solo pedido
+  const generarConIa = async () => {
+    if (generandoYa.current) return;
+    generandoYa.current = true;
+    try {
+      await generarTodo();
+    } finally {
+      generandoYa.current = false;
+    }
+  };
+  const generarTodo = () =>
     run("Preparando las tomas con IA…", async () => {
+      if (animandoYa.current.size > 0) throw new Error("Espera a que termine la toma que se está animando y vuelve a intentar.");
       const problema = validar(clipsRef.current);
       if (problema) throw new Error(problema);
       const marcadas = clipsRef.current.filter((c) => c.tipo === "toma" && c.image);
@@ -1227,7 +1244,7 @@ export default function ReelStudio({
         <h2>Creador de Reels</h2>
         <button
           className="btn ghost small"
-          disabled={!!busy}
+          disabled={!!busy || animando.length > 0}
           onClick={() => {
             if (!confirm("¿Empezar un reel nuevo? Se borrarán el tema, las escenas y el guion actuales.")) return;
             clearDrafts("reel:");
@@ -1647,7 +1664,7 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
             <Clapperboard size={16} aria-hidden /> Crear reel
           </button>
           {conCuenta && tomasMarcadas > 0 && (
-            <button className="btn" disabled={!!busy || viendo || !canRecord} onClick={generarConIa} title="Anima las fotos marcadas que faltan (usa tus tomas) y graba el video">
+            <button className="btn" disabled={!!busy || viendo || !canRecord || animando.length > 0} onClick={generarConIa} title="Anima las fotos marcadas que faltan (usa tus tomas) y graba el video">
               <Sparkles size={16} aria-hidden /> Generar con IA
               {esDemo && <span className="acct-pro">Demo gratis</span>}
             </button>
