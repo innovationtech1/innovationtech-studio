@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { baseDePedido, consultar, crearVideo, despachar, procesarAviso, resumenVideo, type DepsVideo } from "./video-ia";
+import { ajustarVideo, baseDePedido, consultar, crearVideo, despachar, procesarAviso, resumenVideo, type DepsVideo } from "./video-ia";
 import type { Usuario } from "./account-store";
 import { memoryStore } from "./account-store-memory";
 import { memoryVideoStore } from "./video-store-memory";
@@ -35,6 +35,8 @@ const req = (uid = "u1") => new Request("https://studio.example/api/video-ia", {
 function mundo(n1: Partial<Negocio> = {}, opciones: { gasto?: Record<string, number>; n2?: Partial<Negocio> } = {}) {
   const store = memoryStore({ usuarios: [u1, u2], negocios: [negocio(n1), negocio({ id: "n2", duenoUid: "u2", miembros: ["u2"], ...opciones.n2 })] });
   const videos = memoryVideoStore({ gasto: opciones.gasto });
+  // Las pruebas de tope usan $5 al día y un límite por cliente amplio; las del límite por cliente ponen el suyo
+  void store.guardarConfig({ videoIa: { ...DEFAULT_CONFIG.videoIa, topeDiarioCentavos: 500, tomasPorNegocioDia: 500 } });
   const enviados: { modelo: string; input: Record<string, unknown>; webhook: string; requestId: string }[] = [];
   const subidas: { origen: string; llave: string; tipo: string }[] = [];
   const estado = { falFalla: false, subirFalla: false, estadoFal: "IN_PROGRESS", firmaValida: true, now: AHORA };
@@ -566,4 +568,95 @@ test("al terminar un pedido (bien o rechazado) el candado queda libre para el si
   const m = mundo();
   await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "zoom" }] }, m.deps);
   assert.equal(await m.videos.tomarCandado("crear-video:n1", 30_000, AHORA), true);
+});
+
+// ---------- Límite por cliente y tope del día ----------
+
+const conAdmin = async (f: () => Promise<void>) => {
+  const antes = process.env.STUDIO_ADMIN_EMAILS;
+  process.env.STUDIO_ADMIN_EMAILS = "admin@ejemplo.com";
+  try {
+    await f();
+  } finally {
+    if (antes === undefined) delete process.env.STUDIO_ADMIN_EMAILS;
+    else process.env.STUDIO_ADMIN_EMAILS = antes;
+  }
+};
+
+test("un cliente no puede pasar de su límite de tomas por día: se rechaza sin cobrar", async () => {
+  const m = mundo();
+  const cfg = await m.store.getConfig();
+  await m.store.guardarConfig({ videoIa: { ...cfg.videoIa, tomasPorNegocioDia: 2 } });
+  const pide = (l: string) => crearVideo(req(), { tomas: [{ imagenKey: foto(l), movimiento: "zoom" }] }, m.deps);
+  assert.ok((await pide("a")).ok);
+  assert.ok((await pide("b")).ok);
+  const r = await pide("c");
+  assert.ok(!r.ok);
+  if (r.ok) return;
+  assert.equal(r.status, 429);
+  assert.equal(r.codigo, "LIMITE_DIA");
+  assert.equal(m.store.uso("n1", MES).tomas_ia, 2);
+});
+
+test("el límite del día cuenta el pedido completo: 2 usadas + 2 pedidas con límite 3 no entra ninguna", async () => {
+  const m = mundo();
+  const cfg = await m.store.getConfig();
+  await m.store.guardarConfig({ videoIa: { ...cfg.videoIa, tomasPorNegocioDia: 3 } });
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "zoom" }, { imagenKey: foto("b"), movimiento: "zoom" }] }, m.deps);
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("c"), movimiento: "zoom" }, { imagenKey: foto("d"), movimiento: "zoom" }] }, m.deps);
+  assert.ok(!r.ok);
+  assert.equal(m.store.uso("n1", MES).tomas_ia, 2);
+});
+
+test("las tomas que salen de lo ya generado (sin costo) y las que fallaron no cuentan para el límite del día", async () => {
+  const m = mundo();
+  const cfg = await m.store.getConfig();
+  await m.store.guardarConfig({ videoIa: { ...cfg.videoIa, tomasPorNegocioDia: 1 } });
+  const toma = { imagenKey: foto("a"), movimiento: "zoom" };
+  await crearVideo(req(), { tomas: [toma] }, m.deps);
+  await m.aviso(0, m.ERROR);
+  await m.aviso(1, m.ERROR); // falló del todo: se devolvió
+  const r = await crearVideo(req(), { tomas: [toma] }, m.deps);
+  assert.ok(r.ok);
+});
+
+test("el límite es por día: al día siguiente se puede otra vez", async () => {
+  const m = mundo();
+  const cfg = await m.store.getConfig();
+  await m.store.guardarConfig({ videoIa: { ...cfg.videoIa, tomasPorNegocioDia: 1 } });
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "zoom" }] }, m.deps);
+  const manana = await crearVideo(req(), { tomas: [{ imagenKey: foto("b"), movimiento: "zoom" }] }, { ...m.deps, now: AHORA + 24 * 60 * 60 * 1000 });
+  assert.ok(manana.ok);
+});
+
+test("ajustarVideo: solo el administrador cambia el tope del día y el límite por cliente", async () => {
+  await conAdmin(async () => {
+    const m = mundo();
+    const no = await ajustarVideo("otro@x.com", true, { topeDiarioCentavos: 9000, tomasPorNegocioDia: 30 }, m.deps);
+    assert.ok(!no.ok);
+    const si = await ajustarVideo("admin@ejemplo.com", true, { topeDiarioCentavos: 9000, tomasPorNegocioDia: 30 }, m.deps);
+    assert.ok(si.ok);
+    const cfg = await m.store.getConfig();
+    assert.equal(cfg.videoIa.topeDiarioCentavos, 9000);
+    assert.equal(cfg.videoIa.tomasPorNegocioDia, 30);
+    assert.equal(cfg.videoIa.simultaneos, 3); // lo demás no se toca
+    const r = await resumenVideo("admin@ejemplo.com", true, m.deps);
+    assert.ok(r.ok && r.tomasPorNegocioDia === 30);
+  });
+});
+
+test("ajustarVideo: rechaza valores absurdos (cero, negativos, decimales, gigantes)", async () => {
+  await conAdmin(async () => {
+    const m = mundo();
+    for (const malo of [
+      { topeDiarioCentavos: 0, tomasPorNegocioDia: 20 },
+      { topeDiarioCentavos: 5000, tomasPorNegocioDia: 0 },
+      { topeDiarioCentavos: 50.5, tomasPorNegocioDia: 20 },
+      { topeDiarioCentavos: 10_000_000, tomasPorNegocioDia: 20 },
+      { topeDiarioCentavos: 5000, tomasPorNegocioDia: 5000 },
+    ]) {
+      const r = await ajustarVideo("admin@ejemplo.com", true, malo, m.deps);
+      assert.ok(!r.ok, JSON.stringify(malo));
+    }
+  });
 });

@@ -37,6 +37,7 @@ export type ConfigVideoIa = {
   modelos: Record<NivelModelo, ModeloVideo>;
   segundosToma: number;
   topeDiarioCentavos: number; // tope de gasto de todo Studio por día (hora de Chicago)
+  tomasPorNegocioDia: number; // lo más que un solo cliente puede generar en un día (para que no gaste lo de todos)
   umbralDemo: number; // la prueba se pausa al llegar a esta parte del tope (0.8 = 80%)
   simultaneos: number; // trabajos al mismo tiempo en fal.ai
   minutosAtorado: number;
@@ -96,7 +97,8 @@ export const DEFAULT_CONFIG: PlanesConfig = {
       estandar: { id: "minimax/h3-max-turbo/image-to-video", centavosPorSegundo: 4, resolucion: "768P" },
     },
     segundosToma: 5,
-    topeDiarioCentavos: 500,
+    topeDiarioCentavos: 3000, // $30 al día ≈ 150 tomas; se cambia en el panel de administrador
+    tomasPorNegocioDia: 20,
     umbralDemo: 0.8,
     simultaneos: 3,
     minutosAtorado: 15,
