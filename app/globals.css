@@ -183,6 +183,7 @@ button.pick { background: none; font: inherit; }
 .camara-vista > .muted { position: absolute; }
 .camara-ultima { position: absolute; right: 10px; bottom: 10px; width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 2px solid var(--paper); }
 .camara-botones { justify-content: center; }
+.camara-reloj { position: absolute; top: 10px; left: 10px; background: rgba(0, 0, 0, 0.6); color: #ff5a5a; font-weight: 700; padding: 4px 10px; border-radius: 99px; font-variant-numeric: tabular-nums; }
 
 .install-bar {
   position: fixed; left: 50%; transform: translateX(-50%);
