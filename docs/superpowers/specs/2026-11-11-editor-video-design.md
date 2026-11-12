@@ -1,6 +1,6 @@
 # Editor de video con línea de tiempo (Creador de Reels)
 
-Fecha: 11 de noviembre de 2026 · Diseñado con Hector en la conversación del 10–11 de noviembre. Aprobó la **opción A** (convertir el Creador de Reels en editor) y la parte 1 («ok aprobado»); para las partes 2 y 3 dio la regla «lo mejor al menor costo, con las funciones que realmente se necesitan».
+Fecha: 11 de noviembre de 2026 · Diseñado con Hector en la conversación del 10–11 de noviembre. Aprobó la **opción A** (convertir el Creador de Reels en editor) y la parte 1 («ok aprobado»); para las partes 2 y 3 dio la regla «lo mejor al menor costo, con las funciones que realmente se necesitan». El 11 de noviembre pidió además una **cámara que grabe video dentro de Studio** y que el **sonido de esos videos se oiga** en el video final, con opción de apagarlo por clip.
 
 ## Para qué
 
@@ -25,7 +25,8 @@ Es para él y para sus clientes de Studio, en celular y en computadora por igual
 | Duración de una foto | De 1.5 a 15 s, elegida por clip |
 | Tomas con IA distintas por video | Hasta 8 (cada una cuenta contra la cuota del mes) |
 | Estirar una toma | Normal 5 s · cámara lenta 10 s · ida y vuelta 10 s · repetir ×2 o ×3 |
-| Video propio | Subido del dispositivo o de la galería de Studio; máx. 100 MB; se queda en el dispositivo |
+| Video propio | Subido del dispositivo, de la galería de Studio o **grabado con la cámara dentro de Studio**; máx. 100 MB; se queda en el dispositivo |
+| Sonido de los videos propios | **Se oye en el video final**, mezclado con la voz y la música; cada clip tiene un interruptor para apagarlo |
 | Exportar | En el navegador, en tiempo real (2 min de video = 2 min de espera), MP4 |
 | Vista previa | Reproduce la línea de tiempo sin grabar |
 | Proyecto | Se guarda solo en el dispositivo |
@@ -33,7 +34,7 @@ Es para él y para sus clientes de Studio, en celular y en computadora por igual
 
 ## Qué queda fuera (a propósito)
 
-Varias pistas o capas encimadas; filtros y corrección de color (ya existe el Editor de imágenes); transiciones elaboradas (se queda el fundido actual); armar el video en un servidor (costaría por video); videos de más de 2 minutos; grabar video con la cámara dentro de Studio.
+Varias pistas o capas encimadas; filtros y corrección de color (ya existe el Editor de imágenes); transiciones elaboradas (se queda el fundido actual); armar el video en un servidor (costaría por video); videos de más de 2 minutos.
 
 ## Cómo se ve
 
@@ -44,11 +45,11 @@ Al tocar un clip se abre su panel debajo de la fila:
 - **Todos:** mover ← →, duplicar, borrar, texto en pantalla.
 - **Foto:** duración (1.5 a 15 s), «Animar con IA» (la convierte en toma), «Sustituir por…».
 - **Toma con IA:** movimiento, «Rehacer con IA», «Volver a la anterior» (si hay una), cómo se reproduce (normal, lenta, ida y vuelta, repetir), recorte de inicio y fin, «Sustituir por…».
-- **Video propio:** recorte de inicio y fin, «Sustituir por…».
+- **Video propio:** recorte de inicio y fin, interruptor **Sonido** (encendido por defecto), «Sustituir por…».
 
 En computadora los clips también se arrastran para reordenar. En celular se reordenan con ← → (arrastrar con el dedo choca con el desplazamiento de la página).
 
-Al final de la fila, **«＋ Agregar»**: subir foto, tomar foto (cámara), de mi galería, crear con IA, subir video.
+Al final de la fila, **«＋ Agregar»**: subir foto, tomar foto (cámara), de mi galería, crear con IA, subir video, **grabar video (cámara)**.
 
 Lo que no cambia: tema e ideas con IA, formato, voz, subtítulos, música, marca, cierre.
 
@@ -75,6 +76,7 @@ type Clip = {
   // video propio
   archivoId?: string;        // el archivo guardado en el dispositivo (media-store)
   duracionOriginal?: number; // segundos del archivo o de la toma (5)
+  sinSonido?: boolean;       // solo video propio: true = no se oye en el video final
   // toma y video
   inicio?: number;           // recorte, en segundos del original
   fin?: number;
@@ -101,7 +103,7 @@ type EscenaRender = {
   imagen: string;        // foto, o respaldo si el video no carga
   texto: string;
   segundos: number;      // lo que dura en pantalla
-  video?: { src: string; inicio: number; fin: number; velocidad: number; idaVuelta: boolean; repeticiones: number };
+  video?: { src: string; inicio: number; fin: number; velocidad: number; idaVuelta: boolean; repeticiones: number; sonido: boolean };
 };
 ReelOptions.escenas?: EscenaRender[];   // si viene, define el video completo
 ReelOptions.soloVista?: boolean;        // reproduce en el lienzo de vista previa sin grabar
@@ -109,6 +111,7 @@ ReelOptions.soloVista?: boolean;        // reproduce en el lienzo de vista previ
 
 - La lista de tiempos (`durs`, `starts`) sale de `escenas[i].segundos`. El cierre de 3 s se agrega si el total no pasa de 120 s.
 - Escena con `video`: se reproduce desde `inicio`; cámara lenta con `playbackRate = 0.5`; repetir = volver a `inicio` al llegar a `fin`; ida y vuelta = al llegar a `fin`, retroceder moviendo `currentTime` cuadro por cuadro.
+- **Sonido de un clip:** si `sonido` es true, el audio del video entra a la mezcla que ya graba el motor (la misma donde van la voz y la música) solo mientras dura su escena, con un fundido corto al entrar y al salir para que no truene. Mientras suena un clip, la música baja de volumen igual que cuando hay voz en off. Las tomas con IA no llevan sonido.
 - Si un video no carga, la escena usa su imagen con zoom (como hoy cuando falla un clip).
 - `soloVista`: el mismo ciclo de dibujo, sin `MediaRecorder` ni codificación; se puede detener.
 - El selector «Duración del video» desaparece en la entrega 1: la duración es la suma de los clips. La pantalla siempre llama al motor con `escenas`; el camino viejo (`images` + `duracion` + `clips`) se retira en esa misma entrega junto con su reparto automático (`lib/reel-escenas.ts` queda solo con lo que la línea de tiempo siga usando).
@@ -131,7 +134,8 @@ Se reutiliza todo lo de `lib/video-ia.ts`, `lib/video-ia-cliente.ts` y `/api/vid
 - Se guardan en el dispositivo con `media-store` (`putFile` / `getFile`), igual que los videos de la galería. No se suben a ningún servidor.
 - Al agregarlos se leen su duración y un cuadro de portada. Máximo 100 MB; si pesa más o el navegador no puede abrirlo, mensaje claro.
 - Si el archivo ya no está (otro dispositivo, almacenamiento borrado), el clip aparece como «Falta el archivo» con el botón «Sustituir».
-- El sonido de los videos propios **no** entra al video final (la pista de audio sigue siendo voz + música). Queda anotado como posible mejora.
+- **Grabar con la cámara:** el cuadro de cámara que ya existe en Imágenes (`app/camara.tsx`) gana un modo video: vista en vivo, cambiar de cámara, botón de grabar con contador de tiempo y de detener. Graba imagen y sonido (pide permiso de cámara y micrófono), con un máximo de 60 s por grabación. Al detener, se puede repetir o usar; el video queda guardado en la galería de Studio y entra como clip.
+- **Sonido:** se oye en el video final salvo que el cliente lo apague en ese clip (ver «El motor»). Si el cliente niega el micrófono, se graba sin sonido y se avisa.
 
 ## Guardado
 
@@ -146,6 +150,7 @@ El proyecto (lista de clips) se guarda con `usePersistentState("reel:clips")`; l
 | La toma falla | El clip vuelve a ser foto con zoom; «No se pudo generar la toma, te devolvimos tu crédito» |
 | Video muy pesado o ilegible | «Ese video pesa más de 100 MB» / «Este video no se puede abrir en tu navegador» |
 | Falta el archivo de un video | Clip marcado «Falta el archivo» + «Sustituir» |
+| Sin permiso de cámara o micrófono | El mensaje claro que ya da la cámara de fotos; sin micrófono se ofrece grabar sin sonido |
 | IA de video en pausa | Los botones de IA se apagan con el aviso actual; el resto del editor funciona |
 
 ## Entregas
@@ -153,11 +158,11 @@ El proyecto (lista de clips) se guarda con `usePersistentState("reel:clips")`; l
 Cada una se publica en la versión de prueba y Hector la prueba antes de la siguiente.
 
 1. **Línea de tiempo.** Modelo de clips, fila de clips, mover / duplicar / borrar, duración por foto, total hasta 2 min, motor con `escenas`, vista previa sin grabar, migración del borrador viejo. Las tomas con IA siguen funcionando como hoy: se marcan por clip y se generan todas juntas al tocar «Generar con IA», con el tope actual de 4 por video (el de 8 llega en la entrega 3, cuando se piden de una en una).
-2. **Videos propios y recorte.** Subir video, usar los de la galería, recorte de inicio y fin, «Sustituir por…».
+2. **Videos propios, cámara y recorte.** Subir video, usar los de la galería, **grabar con la cámara de Studio**, recorte de inicio y fin, **sonido del clip con interruptor**, «Sustituir por…». En «Videos» el botón de grabar aparece desde esta entrega, porque antes un video grabado no tendría dónde usarse.
 3. **IA por clip y estirar.** Animar y rehacer un solo clip, `variacion`, «Volver a la anterior», tope de 8, cámara lenta, repetir e ida y vuelta (con la prueba de fluidez).
 
 ## Pruebas
 
 - **Automáticas (node:test):** todo `lib/linea-tiempo.ts` (duraciones, validación, mover, duplicar, recortar, conversión a escenas, migración) y el cambio de `variacion` en `lib/video-ia.ts` (llave del caché distinta; sin variación, igual que hoy).
-- **En navegador (Chrome con Playwright):** exportar un video con foto + video propio recortado y comprobar la duración; cámara lenta y repetir con un clip de prueba midiendo lo que se ve en el lienzo; vista previa sin grabar.
+- **En navegador (Chrome con Playwright):** exportar un video con foto + video propio recortado y comprobar la duración; grabar con cámara y micrófono simulados y comprobar que el archivo final trae pista de audio (y que no la trae del clip al apagar su sonido); cámara lenta y repetir con un clip de prueba midiendo lo que se ve en el lienzo; vista previa sin grabar.
 - **Con Hector, en la versión de prueba:** cada entrega en celular y computadora; la entrega 3 con una toma real.
