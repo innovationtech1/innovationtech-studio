@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, Camera, Copy, Dices, Plus, Scissors, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Camera, Copy, Dices, Plus, RefreshCw, Scissors, Sparkles, Trash2, Undo2 } from "lucide-react";
 import { MOVIMIENTOS, movimientoAlAzar } from "@/lib/movimientos";
-import { MAX_FOTO, MAX_TOMAS, MIN_FOTO, MIN_TRAMO, VELOCIDADES, duracionClip, presente, tramo, type Clip, type TextoPos, type TextoTam } from "@/lib/linea-tiempo";
+import { MAX_FOTO, MAX_TOMAS, MIN_FOTO, MIN_TRAMO, VELOCIDADES, duracionClip, presente, tramo, type Clip, type Reproduccion, type TextoPos, type TextoTam } from "@/lib/linea-tiempo";
 import { cuadroDe } from "@/lib/video-propio";
 
 // Segundos con un decimal como mucho: 3 → «3 s», 5.125 → «5.1 s»
@@ -29,6 +29,10 @@ export default function LineaTiempo({
   onDividir,
   onCongelar,
   panelVideo,
+  estadoToma,
+  onAnimar,
+  onRehacer,
+  onVolver,
 }: {
   clips: Clip[];
   elegido: number; // índice del clip abierto (−1 = ninguno)
@@ -47,6 +51,10 @@ export default function LineaTiempo({
   onDividir: (i: number, segundo: number) => void;
   onCongelar: (i: number, cuadro: string) => void; // cuadro: JPG del momento elegido
   panelVideo: (i: number) => ReactNode; // de dónde sale el video: grabar, subir, galería, quitar
+  estadoToma: (clipId: string) => { texto: string; ocupada: boolean }; // qué pasa con la toma con IA de ese clip
+  onAnimar: (i: number) => void; // genera la toma de ese clip (1 toma)
+  onRehacer: (i: number) => void; // pide otra versión con el mismo movimiento (1 toma)
+  onVolver: (i: number) => void; // vuelve a la toma anterior (no cuesta)
 }) {
   const [arrastrando, setArrastrando] = useState<number | null>(null);
   const [encima, setEncima] = useState<number | null>(null);
@@ -181,10 +189,16 @@ export default function LineaTiempo({
               {!esVideo && (
                 <>
                 {esToma ? (
-                  <p className="hint" style={{ margin: "4px 0 0" }}>
-                    Las fotos animadas con IA duran 5 segundos.
-                  </p>
-                ) : (
+                    <div>
+                      <label htmlFor="lt-estirar">Duración de la foto animada</label>
+                      <select id="lt-estirar" value={clip.reproduccion ?? "normal"} disabled={ocupado} onChange={(e) => onCambiar(elegido, { reproduccion: e.target.value as Reproduccion })}>
+                        <option value="normal">Normal · 5 s</option>
+                        <option value="lenta">Cámara lenta · 10 s</option>
+                        <option value="repetir2">Repetir 2 veces · 10 s</option>
+                        <option value="repetir3">Repetir 3 veces · 15 s</option>
+                      </select>
+                    </div>
+                  ) : (
                   <div className="slider">
                     <div className="slider-head">
                       <span>Duración de esta foto</span>
@@ -223,7 +237,7 @@ export default function LineaTiempo({
                       />
                       Animar con IA (movimiento real, 5 s)
                     </label>
-                    {!esToma && tomasMarcadas >= MAX_TOMAS && <p className="hint" style={{ margin: 0 }}>Ya marcaste el máximo de 4 fotos con IA en este video.</p>}
+                    {!esToma && tomasMarcadas >= MAX_TOMAS && <p className="hint" style={{ margin: 0 }}>Ya llegaste al máximo de 8 fotos con IA en este video.</p>}
                     {esToma && (
                       <div className="lt-mov">
                         <label htmlFor="lt-mov">¿Cómo se mueve? Toca una opción o escribe la tuya</label>
@@ -257,8 +271,31 @@ export default function LineaTiempo({
                           onChange={(e) => onCambiar(elegido, { movimiento: e.target.value })}
                           placeholder="Movimiento (opcional). Ej.: la cámara se acerca despacio"
                         />
+                        <div className="actions lt-video-botones">
+                          {!clip.trabajoId ? (
+                            <button type="button" className="btn small" disabled={ocupado || estadoToma(clip.id).ocupada} onClick={() => onAnimar(elegido)}>
+                              <Sparkles size={15} aria-hidden /> Animar esta foto ahora (1 toma)
+                            </button>
+                          ) : (
+                            <>
+                              <button type="button" className="btn ghost small" disabled={ocupado || estadoToma(clip.id).ocupada} onClick={() => onRehacer(elegido)}>
+                                <RefreshCw size={15} aria-hidden /> Rehacer (1 toma)
+                              </button>
+                              {clip.anteriorTrabajoId && (
+                                <button type="button" className="btn ghost small" disabled={ocupado || estadoToma(clip.id).ocupada} onClick={() => onVolver(elegido)}>
+                                  <Undo2 size={15} aria-hidden /> Volver a la anterior
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                        {estadoToma(clip.id).texto ? (
+                          <p className="notice" style={{ margin: 0 }}>{estadoToma(clip.id).texto}</p>
+                        ) : (
+                          clip.trabajoId && <p className="hint" style={{ margin: 0 }}>Esta foto ya está animada. Mira el resultado en la vista previa.</p>
+                        )}
                         <p className="hint" style={{ margin: 0 }}>
-                          Cambiar el movimiento de una foto ya animada pide una toma nueva.
+                          Cambiar la foto o el movimiento descarta la animación y hay que hacerla de nuevo.
                         </p>
                       </div>
                     )}

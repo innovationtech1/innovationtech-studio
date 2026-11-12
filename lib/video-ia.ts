@@ -124,8 +124,12 @@ const motivo = (e: unknown) => (e instanceof Error ? e.message : "error").replac
 const sha256 = (s: string) => createHash("sha256").update(s, "utf8").digest("hex");
 
 // Llave del caché: el negocio + la foto (su SHA-256) + el movimiento + el modelo.
-export function llaveCache(negocioId: string, fotoSha: string, movimiento: string, modelo: string): string {
-  return sha256([negocioId, fotoSha, normalizarMovimiento(movimiento), modelo].join("\n"));
+// variacion: sube con cada «Rehacer» para que la misma foto y movimiento den un clip nuevo.
+// Sin variación (o con 0) la llave es la de siempre: los clips ya generados siguen sirviendo.
+export function llaveCache(negocioId: string, fotoSha: string, movimiento: string, modelo: string, variacion = 0): string {
+  const partes = [negocioId, fotoSha, normalizarMovimiento(movimiento), modelo];
+  if (variacion > 0) partes.push(`variacion:${variacion}`);
+  return sha256(partes.join("\n"));
 }
 
 // La foto debe ser del propio negocio (subida con /api/video-ia/subida). Devuelve su SHA-256 o null.
@@ -134,15 +138,16 @@ function fotoDelNegocio(imagenKey: string, negocioId: string): string | null {
   return m && m[1] === negocioId ? m[2] : null;
 }
 
-type TomaPedida = { imagenKey: string; movimiento: string };
-function tomasValidas(v: unknown): TomaPedida[] | null {
+type TomaPedida = { imagenKey: string; movimiento: string; variacion: number };
+export function tomasValidas(v: unknown): TomaPedida[] | null {
   if (!Array.isArray(v) || v.length < 1 || v.length > MAX_TOMAS) return null;
   const r: TomaPedida[] = [];
   for (const t of v) {
     if (!t || typeof t !== "object") return null;
-    const { imagenKey, movimiento } = t as Record<string, unknown>;
+    const { imagenKey, movimiento, variacion = 0 } = t as Record<string, unknown>;
     if (typeof imagenKey !== "string" || typeof movimiento !== "string" || imagenKey.length > 300) return null;
-    r.push({ imagenKey, movimiento: normalizarMovimiento(movimiento) });
+    if (typeof variacion !== "number" || !Number.isInteger(variacion) || variacion < 0 || variacion > 99) return null;
+    r.push({ imagenKey, movimiento: normalizarMovimiento(movimiento), variacion });
   }
   return r;
 }
@@ -184,7 +189,7 @@ export async function crearVideo(
   for (const toma of tomas) {
     const fotoSha = fotoDelNegocio(toma.imagenKey, negocio.id);
     if (!fotoSha) return falla(403, "Esa foto no es de tu cuenta. Súbela de nuevo.");
-    const cacheLlave = llaveCache(negocio.id, fotoSha, toma.movimiento, modeloCache);
+    const cacheLlave = llaveCache(negocio.id, fotoSha, toma.movimiento, modeloCache, toma.variacion);
     preparadas.push({ toma, cacheLlave, clipKey: await m.videos.getCache(cacheLlave) });
   }
 

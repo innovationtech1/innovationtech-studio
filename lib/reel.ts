@@ -513,6 +513,7 @@ function reproducir(m: Montaje, o: ReelOptions, signal?: AbortSignal): Promise<v
   // Usamos un temporizador (no requestAnimationFrame) para que siga grabando
   // aunque la ventana pierda el foco por un momento.
   let sonando = -1; // escena cuyo video se está reproduciendo
+  let vueltas = 0; // cuántas veces ya se repitió el video de esa escena
   const parar = (k: number) => {
     if (k < 0) return;
     clips[k]?.pause();
@@ -537,6 +538,7 @@ function reproducir(m: Montaje, o: ReelOptions, signal?: AbortSignal): Promise<v
         if (actual !== sonando) {
           parar(sonando);
           sonando = actual;
+          vueltas = 0;
           const clip = clips[actual];
           if (clip && tramo) {
             clip.currentTime = tramo.inicio;
@@ -546,8 +548,14 @@ function reproducir(m: Montaje, o: ReelOptions, signal?: AbortSignal): Promise<v
         }
         const clip = clips[actual];
         if (clip && tramo) {
-          // Al llegar al final de su recorte se queda en ese cuadro
-          if (clip.currentTime >= tramo.fin && !clip.paused) clip.pause();
+          // Al llegar al final de su recorte: si le quedan repeticiones vuelve a empezar; si no, se queda en ese cuadro
+          if (clip.currentTime >= tramo.fin - 0.03 || clip.ended) {
+            if (vueltas < (tramo.repetir ?? 1) - 1) {
+              vueltas++;
+              clip.currentTime = tramo.inicio;
+              clip.play().catch(() => {});
+            } else if (!clip.paused) clip.pause();
+          }
           const g = m.ganancias[actual];
           if (g) g.gain.value = gananciaClip(time - starts[actual], m.durs[actual]) * volClips;
         }

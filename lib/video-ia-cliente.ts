@@ -56,7 +56,7 @@ export async function subirFoto(f: FotoLista, onPct: (pct: number) => void): Pro
   return String(d.imagenKey);
 }
 
-export async function pedirTomas(tomas: { imagenKey: string; movimiento: string }[]): Promise<string[]> {
+export async function pedirTomas(tomas: { imagenKey: string; movimiento: string; variacion?: number }[]): Promise<string[]> {
   const d = await leer(
     await fetch("/api/video-ia", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tomas }) }),
   );

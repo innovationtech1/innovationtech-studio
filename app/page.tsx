@@ -19,7 +19,7 @@ import { CheckList, CloudflareCuenta, CloudflareWizard, testCloudflare, Welcome 
 import { EVENTO_AJUSTES } from "@/lib/limpiar-dispositivo";
 import { formatBytes, storageUsage, toDataUrl } from "@/lib/media-store";
 import type { Item, Settings } from "@/lib/types";
-import ReelStudio from "./reel-studio";
+import ReelProyectos from "./reel-proyectos";
 import ContentCalendar from "./content-calendar";
 import AssistantChat from "./assistant-chat";
 import { extract, phrases } from "@/lib/phrases";
@@ -394,7 +394,7 @@ export default function Home() {
           </div>
           <div hidden={videoMode !== "reel"}>
             <MejorarPro h="reels" />
-            <ReelStudio
+            <ReelProyectos
               settings={settings}
               brand={brand}
               gallery={gallery}

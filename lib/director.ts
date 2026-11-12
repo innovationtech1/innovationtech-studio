@@ -16,6 +16,7 @@ import {
   mover,
   nuevoClip,
   presente,
+  tomasDistintas,
   type Clip,
   type TextoPos,
   type TextoTam,
@@ -32,6 +33,7 @@ const MIN_CLIPS = 2;
 const MAX_CLIPS = 12;
 const MAX_TEXTO = 120;
 const MAX_GUION = 1500;
+const MAX_TOMAS_AL_ARMAR = 4; // al armar un video «con IA» se animan hasta 4 fotos (decisión de Hector)
 
 export type Formato = "9:16" | "1:1" | "16:9";
 export type RefClip = number | "todos"; // número desde 1, como en pantalla
@@ -421,7 +423,7 @@ export function aplicarAcciones(estado: Estado, acciones: Accion[], cat: Catalog
           break;
         }
         const yaEs = clips[i].tipo === "toma";
-        if (!yaEs && clips.filter((c) => c.tipo === "toma" && tendraFoto(c)).length >= MAX_TOMAS) {
+        if (!yaEs && tomasDistintas(clips) >= MAX_TOMAS) {
           aviso(`Máximo ${MAX_TOMAS} fotos con IA por video`);
           break;
         }
@@ -514,7 +516,7 @@ export function aplicarAcciones(estado: Estado, acciones: Accion[], cat: Catalog
             // Anima las fotos del video, en orden, hasta el máximo por video
             let marcadas = clips.filter((c) => c.tipo === "toma" && tendraFoto(c)).length;
             clips = clips.map((c, i) => {
-              if (i >= a.clips || c.tipo !== "foto" || marcadas >= MAX_TOMAS) return c;
+              if (i >= a.clips || c.tipo !== "foto" || marcadas >= MAX_TOMAS_AL_ARMAR) return c;
               marcadas++;
               return { ...c, tipo: "toma" as const };
             });

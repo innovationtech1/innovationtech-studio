@@ -39,10 +39,15 @@ import {
   mover,
   normalizarClips,
   nuevoClip,
+  ponerToma,
   presente,
+  quitarToma,
   recortar,
+  rehacerToma,
   sustituir,
+  tomasDistintas,
   validar,
+  volverAnterior,
   type Clip,
 } from "@/lib/linea-tiempo";
 import { abrirVideo, guardarVideo, idDeArchivo, leerVideo, limpiarHuerfanos, revisarArchivo } from "@/lib/video-propio";
@@ -62,7 +67,7 @@ import {
   type Pendiente,
   type Resultado,
 } from "@/lib/director";
-import { firmaTomas, terminado, textoEstado, type TrabajoVisto } from "@/lib/estados-video";
+import { terminado, textoEstado, type TrabajoVisto } from "@/lib/estados-video";
 import { consultarTomas, pedirTomas, prepararFoto, subirFoto } from "@/lib/video-ia-cliente";
 
 import { Clapperboard, Dices, Download, Eye, Mic, Play, Redo2, Sparkles, Square, Undo2, Video } from "lucide-react";
@@ -91,7 +96,11 @@ export default function ReelStudio({
   incomingTopic,
   onEditScene,
   onOpenBrand,
+  videosDeOtros = [],
+  onOcupado,
 }: {
+  videosDeOtros?: string[]; // videos subidos que usan otros proyectos guardados: no se borran al limpiar
+  onOcupado?: (ocupado: boolean) => void; // avisa cuando está grabando o generando (para no cambiar de proyecto a medias)
   sceneUpdate: { scene: number; url: string; n: number } | null;
   incomingTopic?: { text: string; n: number } | null;
   onEditScene: (i: number, src: string) => void;
@@ -229,7 +238,7 @@ export default function ReelStudio({
         interno((all) => all.map((x) => (x.imageId === sc.imageId && !x.image ? { ...x, image: url } : x)));
       }
       // Los videos subidos que ya no usa ningún clip se borran del dispositivo (al abrir no hay nada que deshacer)
-      void limpiarHuerfanos(clipsRef.current.flatMap((c) => (c.archivoId ? [c.archivoId] : [])));
+      void limpiarHuerfanos([...clipsRef.current.flatMap((c) => (c.archivoId ? [c.archivoId] : [])), ...videosDeOtros]);
     }, 400); // espera a que se cargue el borrador guardado
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -315,6 +324,22 @@ export default function ReelStudio({
   const [result, setResult] = useState<{ url: string; ext: string; seconds: number } | null>(null);
   const [error, setError] = useState("");
   const preview = useRef<HTMLCanvasElement>(null);
+  useEffect(() => onOcupado?.(!!busy), [busy, onOcupado]);
+  // Portada: un cuadro del video terminado, para descargarlo como imagen
+  const videoFinal = useRef<HTMLVideoElement>(null);
+  const [momentoPortada, setMomentoPortada] = useState(0);
+  function descargarPortada() {
+    const v = videoFinal.current;
+    if (!v || !v.videoWidth) return;
+    const c = document.createElement("canvas");
+    c.width = v.videoWidth;
+    c.height = v.videoHeight;
+    c.getContext("2d")!.drawImage(v, 0, 0);
+    const a = document.createElement("a");
+    a.href = c.toDataURL("image/jpeg", 0.92);
+    a.download = "portada-innovationtech.jpg";
+    a.click();
+  }
 
   useEffect(() => {
     // Si la app se cerró mientras se creaba una imagen, quitamos el «Creando…».
@@ -509,7 +534,9 @@ export default function ReelStudio({
     setViendo(true);
     setEstadoPrevia("Preparando la vista previa…");
     try {
-      await vistaPrevia({ ...opcionesReel(lista), onStatus: setEstadoPrevia, previewCanvas: lienzoPrevia.current || undefined }, control.signal);
+      const tomas = await fuentesTomas(lista);
+      if (control.signal.aborted) return;
+      await vistaPrevia({ ...opcionesReel(lista, tomas), onStatus: setEstadoPrevia, previewCanvas: lienzoPrevia.current || undefined }, control.signal);
     } catch (e) {
       setError(friendlyError((e as Error).message));
     } finally {
@@ -547,16 +574,125 @@ export default function ReelStudio({
   const repartidos = vozLarga ? ajustarAVoz(clips, vozSegundos) : clips;
   const sePuedeRepartir = repartidos.some((c, i) => c.segundos !== clips[i]?.segundos);
 
-  // Graba el video. clipsIa: id del clip → su toma con IA ya generada (sin ella, la foto se anima con zoom).
-  async function grabar(lista: Clip[], clipsIa?: Record<string, string | null>) {
+  // ---------- Tomas con IA por clip ----------
+  // Cada clip animado guarda el id de su toma (trabajoId): así se puede retomar, duplicar y volver a
+  // grabar sin pedirla ni cobrarla de nuevo. Los enlaces de los clips caducan en 1 hora: se piden frescos.
+  const enlacesToma = useRef(new Map<string, { url: string; cuando: number }>());
+  const [estadoToma, setEstadoToma] = useState<Record<string, string>>({}); // id del clip → qué está pasando
+  const [animando, setAnimando] = useState<string[]>([]); // clips con una toma en camino
+
+  // Consulta tomas y guarda el enlace de las que ya están listas
+  async function verTomas(ids: string[]): Promise<{ vistos: TrabajoVisto[]; topeHoy: boolean }> {
+    const vistos: TrabajoVisto[] = [];
+    let topeHoy = false;
+    for (let k = 0; k < ids.length; k += 20) {
+      const r = await consultarTomas(ids.slice(k, k + 20));
+      vistos.push(...r.trabajos);
+      topeHoy = topeHoy || r.topeHoy;
+    }
+    for (const t of vistos) if (t.estado === "listo" && t.clipUrl) enlacesToma.current.set(t.id, { url: t.clipUrl, cuando: Date.now() });
+    return { vistos, topeHoy };
+  }
+
+  // Las tomas ya generadas de una lista de clips, con enlace fresco: id del clip → enlace
+  async function fuentesTomas(lista: Clip[]): Promise<Record<string, string | null>> {
+    const conToma = lista.filter((c) => c.tipo === "toma" && c.image && c.trabajoId);
+    if (conToma.length === 0 || !conCuenta) return {};
+    const viejos = [...new Set(conToma.map((c) => c.trabajoId!))].filter((id) => {
+      const e = enlacesToma.current.get(id);
+      return !e || Date.now() - e.cuando > 45 * 60 * 1000;
+    });
+    if (viejos.length) await verTomas(viejos).catch(() => {}); // sin conexión: esas fotos se verán con zoom
+    return Object.fromEntries(conToma.map((c) => [c.id, enlacesToma.current.get(c.trabajoId!)?.url ?? null]));
+  }
+
+  // Sube la foto (si hace falta) y pide una toma para ese clip. Devuelve el id de la toma.
+  async function pedirTomaDe(c: Clip): Promise<string> {
+    const f = await prepararFoto(c.image);
+    let llave = subidas.current.get(f.sha256);
+    if (!llave) {
+      llave = await subirFoto(f, () => {});
+      subidas.current.set(f.sha256, llave);
+    }
+    const [id] = await pedirTomas([{ imagenKey: llave, movimiento: c.movimiento ?? "", variacion: c.variacion ?? 0 }]);
+    return id;
+  }
+
+  // Espera a que terminen las tomas. enProceso = se acabó la espera (o el cupo del día) y siguen en camino.
+  async function esperarTomas(ids: string[], pinta: (t: string) => void): Promise<{ vistos: TrabajoVisto[]; enProceso: boolean; texto: string }> {
+    const inicio = Date.now();
+    for (;;) {
+      const r = await verTomas(ids);
+      if (r.vistos.length === 0) return { vistos: [], enProceso: false, texto: "" };
+      const texto = textoEstado({ tipo: "trabajos", trabajos: r.vistos, topeHoy: r.topeHoy });
+      pinta(texto);
+      if (terminado(r.vistos)) return { vistos: r.vistos, enProceso: false, texto };
+      const hayCupo = !(r.topeHoy && !r.vistos.some((t) => t.estado === "enviado"));
+      if (!hayCupo || Date.now() - inicio > MAX_ESPERA) return { vistos: r.vistos, enProceso: true, texto: hayCupo ? "" : texto };
+      await new Promise((res) => setTimeout(res, ESPERA_TOMAS));
+    }
+  }
+
+  // Anima (o rehace) la foto de un solo clip. El resto del editor sigue usable mientras tanto.
+  async function animarClip(clipId: string, rehacer = false) {
+    if (animando.includes(clipId)) return;
+    const lugar = () => clipsRef.current.findIndex((x) => x.id === clipId);
+    let c = clipsRef.current[lugar()];
+    if (!c || c.tipo !== "toma" || !c.image) return;
+    const pinta = (t: string) => setEstadoToma((e) => ({ ...e, [clipId]: t }));
+    setAnimando((a) => [...a, clipId]);
+    setError("");
+    let subioVariacion = false;
+    try {
+      if (esDemo) marcarDemoALaVista(true); // si la prueba vence mientras tanto, no se tapa el video
+      let id = rehacer ? undefined : c.trabajoId;
+      if (rehacer && c.trabajoId) {
+        interno((l) => rehacerToma(l, lugar()));
+        subioVariacion = true;
+        c = clipsRef.current[lugar()];
+      }
+      if (!id) {
+        pinta("Subiendo la foto…");
+        id = await pedirTomaDe(c);
+        subioVariacion = false; // ya quedó pedida con esa variación
+        const pedida = id;
+        interno((l) => ponerToma(l, lugar(), pedida));
+        void refrescarCuenta(); // actualiza «te quedan X tomas»
+      }
+      const r = await esperarTomas([id], pinta);
+      if (r.enProceso) return pinta(r.texto || "Sigue en proceso. Vuelve en unos minutos y toca «Animar» otra vez: no se cobra de nuevo.");
+      const t = r.vistos[0];
+      if (!t || t.estado === "fallo") {
+        const fallida = id;
+        interno((l) => quitarToma(l, fallida));
+        pinta("");
+        setError(t ? "No se pudo generar la toma, te devolvimos tu crédito" : "No encontramos esa toma. Vuelve a animar la foto.");
+        void refrescarCuenta();
+        return;
+      }
+      pinta(t.desdeCache ? "Listo al instante" : "Listo");
+      void refrescarCuenta();
+    } catch (e) {
+      // No se llegó a pedir: la variación vuelve a como estaba
+      if (subioVariacion) interno((l) => l.map((x) => (x.id === clipId && x.variacion ? { ...x, variacion: x.variacion - 1 } : x)));
+      pinta("");
+      setError(friendlyError((e as Error).message));
+    } finally {
+      setAnimando((a) => a.filter((x) => x !== clipId));
+    }
+  }
+
+  // Graba el video. Las fotos con toma ya generada salen con su movimiento; las demás, con zoom.
+  async function grabar(lista: Clip[]) {
     const problema = validar(lista);
     if (problema) throw new Error(problema);
     detenerPrevia();
     setResult(null);
     setProgress(0);
     if (result) URL.revokeObjectURL(result.url);
+    const tomas = await fuentesTomas(lista);
     const r = await renderReel({
-      ...opcionesReel(lista, clipsIa),
+      ...opcionesReel(lista, tomas),
       onStatus: (m) => setBusy(m || "Grabando tu reel…"),
       onProgress: setProgress,
       previewCanvas: preview.current || undefined,
@@ -569,81 +705,56 @@ export default function ReelStudio({
   const buildReel = () =>
     run("Grabando tu reel…", async () => {
       await grabar(clipsRef.current);
-      if (tomasMarcadas > 0) setEstadoIa("Video listo sin IA: las fotos marcadas se ven con zoom.");
+      const sinGenerar = clipsRef.current.some((c) => c.tipo === "toma" && c.image && !c.trabajoId);
+      if (sinGenerar) setEstadoIa("Video listo: las fotos marcadas que aún no se animan se ven con zoom.");
     });
 
-  // Genera las tomas con IA (sube las fotos marcadas, espera los clips) y graba el video final.
+  // Genera las tomas con IA que falten (una por foto distinta), espera los clips y graba el video final.
   const generarConIa = () =>
     run("Preparando las tomas con IA…", async () => {
-      const lista = clipsRef.current; // el video se arma con los clips tal como están al empezar
-      const problema = validar(lista);
+      const problema = validar(clipsRef.current);
       if (problema) throw new Error(problema);
-      const marcadas = lista.filter((c) => c.image && c.tipo === "toma");
-      if (marcadas.length === 0) throw new Error("Marca de 1 a 4 fotos «con IA».");
+      const marcadas = clipsRef.current.filter((c) => c.tipo === "toma" && c.image);
+      if (marcadas.length === 0) throw new Error("Marca primero qué fotos animar con IA.");
       setInvitarPlan(false);
-      if (esDemo) marcarDemoALaVista(true); // si la prueba vence mientras tanto, no se tapa el video
-      const preparadas = await Promise.all(marcadas.map((m) => prepararFoto(m.image)));
-      // Siempre en el mismo orden (por foto y movimiento): así mover los clips no vuelve a pedir ni a cobrar las tomas
-      const llaveDe = (t: { foto: { sha256: string }; movimiento: string }) => `${t.foto.sha256}|${t.movimiento}`;
-      const tomas = marcadas
-        .map((m, k) => ({ clip: m, foto: preparadas[k], movimiento: m.movimiento ?? "" }))
-        .sort((a, b) => (llaveDe(a) < llaveDe(b) ? -1 : llaveDe(a) > llaveDe(b) ? 1 : 0));
-      const firma = firmaTomas(tomas.map((t) => ({ sha256: t.foto.sha256, movimiento: t.movimiento })));
-      const porClip = (urls: (string | null)[]) => Object.fromEntries(tomas.map((t, k) => [t.clip.id, urls[k] ?? null]));
-      // Mismas fotos y movimientos que el último video (por ejemplo, solo cambió la voz o el orden):
-      // se vuelve a grabar con los clips que ya se tienen, sin pedir nada ni gastar tomas.
-      const previos = ultimosClips.current;
-      if (previos && previos.firma === firma && Date.now() - previos.cuando < 50 * 60 * 1000) {
-        setBusy("Grabando tu reel…");
-        await grabar(lista, porClip(previos.clips));
-        setEstadoIa(textoEstado({ tipo: "trabajos", trabajos: tomas.map((_, k) => ({ id: String(k), estado: "listo", desdeCache: true })), topeHoy: false }));
+      if (esDemo) marcarDemoALaVista(true);
+      // Pide solo las que faltan. Dos clips con la misma foto y movimiento comparten una sola toma.
+      const pedidas = new Map<string, string>();
+      let n = 0;
+      for (const c of marcadas) {
+        if (c.trabajoId) continue;
+        const llave = `${c.image}\n${(c.movimiento ?? "").trim().toLowerCase()}\n${c.variacion ?? 0}`;
+        let id = pedidas.get(llave);
+        if (!id) {
+          setBusy(`Subiendo la foto ${++n}…`);
+          id = await pedirTomaDe(c);
+          pedidas.set(llave, id);
+        }
+        const pedida = id;
+        interno((l) => ponerToma(l, l.findIndex((x) => x.id === c.id), pedida));
+      }
+      if (pedidas.size) void refrescarCuenta();
+      const ids = [...new Set(clipsRef.current.flatMap((c) => (c.tipo === "toma" && c.image && c.trabajoId ? [c.trabajoId] : [])))];
+      const r = await esperarTomas(ids, setBusy);
+      if (r.enProceso) {
+        // Quedan guardadas en cada clip: al volver y tocar «Generar con IA» se retoman sin costo
+        setEstadoIa(r.texto || "Tus tomas siguen en proceso. Vuelve en unos minutos y toca «Generar con IA» para terminar tu video.");
         return;
       }
-      let ids = pendientes && pendientes.firma === firma ? pendientes.ids : null;
-      if (!ids) {
-        const llaves: string[] = [];
-        for (const [k, t] of tomas.entries()) {
-          let llave = subidas.current.get(t.foto.sha256);
-          if (!llave) {
-            llave = await subirFoto(t.foto, (pct) => setBusy(textoEstado({ tipo: "subiendo", pct: (k * 100 + pct) / tomas.length })));
-            subidas.current.set(t.foto.sha256, llave);
-          }
-          llaves.push(llave);
+      // Las que fallaron (o que el servidor ya no reconoce) se quitan del clip: esa foto se verá con zoom
+      const porId = new Map(r.vistos.map((t) => [t.id, t]));
+      let fallas = 0;
+      for (const id of ids) {
+        const t = porId.get(id);
+        if (!t || t.estado === "fallo") {
+          fallas++;
+          interno((l) => quitarToma(l, id));
         }
-        ids = await pedirTomas(tomas.map((t, k) => ({ imagenKey: llaves[k], movimiento: t.movimiento })));
-        setPendientes({ ids, firma });
-        void refrescarCuenta(); // actualiza «te quedan X tomas»
       }
-      // Espera a que terminen (el servidor avisa el lugar en la fila y cuándo está cada toma)
-      const inicio = Date.now();
-      let vistos: TrabajoVisto[] = [];
-      for (;;) {
-        const r = await consultarTomas(ids);
-        vistos = r.trabajos;
-        if (vistos.length === 0) {
-          setPendientes(null);
-          throw new Error("No encontramos esas tomas. Vuelve a generarlas.");
-        }
-        const texto = textoEstado({ tipo: "trabajos", trabajos: vistos, topeHoy: r.topeHoy });
-        setBusy(texto);
-        if (terminado(vistos)) break;
-        const hayCupo = !(r.topeHoy && !vistos.some((t) => t.estado === "enviado"));
-        if (!hayCupo || Date.now() - inicio > MAX_ESPERA) {
-          // Se quedan guardadas: al volver y tocar «Generar con IA» se retoman sin costo
-          setEstadoIa(hayCupo ? "Tus tomas siguen en proceso. Vuelve en unos minutos y toca «Generar con IA» para terminar tu video." : texto);
-          return;
-        }
-        await new Promise((res) => setTimeout(res, ESPERA_TOMAS));
-      }
-      setPendientes(null);
       void refrescarCuenta();
-      const trabajos = new Map(vistos.map((t) => [t.id, t]));
-      const urls = ids.map((id) => trabajos.get(id)?.clipUrl ?? null);
-      // Solo se guardan si salieron todas: así un intento posterior vuelve a pedir la que falló
-      if (urls.every(Boolean)) ultimosClips.current = { firma, clips: urls, cuando: Date.now() };
       setBusy("Grabando tu reel…");
-      await grabar(lista, porClip(urls));
-      setEstadoIa(textoEstado({ tipo: "trabajos", trabajos: vistos, topeHoy: false }));
+      await grabar(clipsRef.current);
+      setEstadoIa(fallas ? "No se pudo generar la toma, te devolvimos tu crédito" : textoEstado({ tipo: "trabajos", trabajos: r.vistos, topeHoy: false }));
       setInvitarPlan(esDemo);
     });
 
@@ -1055,11 +1166,13 @@ export default function ReelStudio({
             setEstadoIa("");
             setVozCambio(false);
             ultimosClips.current = null;
+            enlacesToma.current.clear();
+            setEstadoToma({});
             setInvitarPlan(false);
             setPendientes(null);
             Object.values(urlsVideo).forEach((u) => u && URL.revokeObjectURL(u));
             setUrlsVideo({});
-            void limpiarHuerfanos([]);
+            void limpiarHuerfanos(videosDeOtros);
             setPropuesta(null);
             setResultadoDir(null);
             setCola(null);
@@ -1158,7 +1271,11 @@ export default function ReelStudio({
         onCambiar={alCambiar}
         onAgregar={alAgregar}
         conIa={conCuenta}
-        tomasMarcadas={tomasMarcadas}
+        tomasMarcadas={tomasDistintas(clips)}
+        estadoToma={(id) => ({ texto: estadoToma[id] ?? "", ocupada: animando.includes(id) })}
+        onAnimar={(i) => void animarClip(clips[i].id)}
+        onRehacer={(i) => void animarClip(clips[i].id, true)}
+        onVolver={(i) => interno((l) => volverAnterior(l, i))}
         ocupado={!!busy}
         panelImagen={panelImagen}
         videoDe={(id) => urlsVideo[id]}
@@ -1344,12 +1461,12 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
       <h3 className="step">6. Crear el video</h3>
       {tomasMarcadas > 0 && (
         <p className="hint">
-Crear el reel sin IA es gratis: las fotos marcadas con IA se ven con zoom hasta que las generes. Solo «Generar con IA» usa tus tomas con IA.
+«Crear reel» es gratis: usa las fotos que ya animaste y deja con zoom las que falten. «Generar con IA» anima las que faltan (usa tus tomas) y graba el video.
         </p>
       )}
       <div className="actions">
         <button className="btn" disabled={!!busy || viendo || !canRecord || !clips.some(presente)} onClick={buildReel}>
-          <Clapperboard size={16} aria-hidden /> {tomasMarcadas > 0 ? "Crear reel sin IA (gratis)" : "Crear reel"}
+          <Clapperboard size={16} aria-hidden /> Crear reel
         </button>
         {conCuenta && tomasMarcadas > 0 && (
           <button className="btn" disabled={!!busy || viendo || !canRecord} onClick={generarConIa}>
@@ -1399,12 +1516,39 @@ Crear el reel sin IA es gratis: las fotos marcadas con IA se ven con zoom hasta 
         />
         {result && !busy && (
           <div className="media" style={{ maxWidth: format === "16:9" ? 640 : 360 }}>
-            <video src={result.url} controls playsInline />
+            <video ref={videoFinal} src={result.url} controls playsInline onTimeUpdate={(e) => setMomentoPortada(e.currentTarget.currentTime)} />
             <div className="meta actions">
               <a href={result.url} download={`reel-innovationtech.${result.ext}`}>
                 <Download size={16} aria-hidden /> Descargar video ({result.seconds} s, {result.ext.toUpperCase()})
               </a>
               <span className="muted">· Guardado en tu galería</span>
+            </div>
+            <div className="portada">
+              <div className="slider">
+                <div className="slider-head">
+                  <span>Portada: elige el momento del video</span>
+                  <span data-no-translate>{formatoTiempo(momentoPortada)}</span>
+                </div>
+                <input
+                  type="range"
+                  aria-label="Portada: elige el momento del video"
+                  min={0}
+                  max={result.seconds}
+                  step={0.1}
+                  value={Math.min(momentoPortada, result.seconds)}
+                  onChange={(e) => {
+                    const t = Number(e.target.value);
+                    setMomentoPortada(t);
+                    if (videoFinal.current) {
+                      videoFinal.current.pause();
+                      videoFinal.current.currentTime = t;
+                    }
+                  }}
+                />
+              </div>
+              <button className="btn ghost small" onClick={descargarPortada}>
+                <Download size={15} aria-hidden /> Descargar portada
+              </button>
             </div>
           </div>
         )}
