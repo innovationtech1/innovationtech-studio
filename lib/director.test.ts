@@ -159,6 +159,7 @@ test("clipsPara: duración pedida entre 8, de 2 a 12", () => {
 
 const ajustes = (extra: Partial<Ajustes> = {}): Ajustes => ({
   formato: "9:16",
+  tema: "",
   negocio: "Tortas Tortuga",
   cta: "",
   guion: "",
@@ -446,4 +447,10 @@ test("instrucciones: marca e inglés", () => {
   assert.ok(instr({ marca: "Tortas Tortuga, comida mexicana" }).system.includes("Tortas Tortuga, comida mexicana"));
   assert.match(instr({ ingles: true }).system, /in English/);
   assert.doesNotMatch(instr().system, /in English/);
+});
+
+test("armar: el tema queda escrito en el paso 1 del reel", () => {
+  const r = aplicar(estado([nuevoClip()], { tema: "" }), [armar({ tema: "promo 2x1 de los martes" })]);
+  assert.equal(r.estado.ajustes.tema, "promo 2x1 de los martes");
+  assert.equal(resumenProyecto(r.estado).tema, "promo 2x1 de los martes");
 });

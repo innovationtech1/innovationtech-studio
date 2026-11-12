@@ -245,6 +245,7 @@ export function validarAcciones(json: unknown, cat: Catalogo): { acciones: Accio
 // Los ajustes del reel que una orden puede cambiar (lo demás del Creador de Reels no se toca)
 export type Ajustes = {
   formato: Formato;
+  tema: string; // «¿De qué trata el reel?»
   negocio: string;
   cta: string;
   guion: string;
@@ -482,6 +483,7 @@ export function aplicarAcciones(estado: Estado, acciones: Accion[], cat: Catalog
           return n;
         });
         clips = lista;
+        aj.tema = a.tema; // queda escrito en «¿De qué trata el reel?»
         if (a.cta) aj.cta = a.cta;
         if (a.musica) {
           aj.estilo = a.musica;
@@ -533,6 +535,7 @@ export function resumenProyecto(estado: Estado): Record<string, unknown> {
   const a = estado.ajustes;
   return {
     formato: a.formato,
+    tema: a.tema,
     clips: estado.clips.map((c, i) => ({
       n: i + 1,
       tipo: c.tipo === "toma" ? "con_ia" : "foto",

@@ -253,6 +253,7 @@ h3.step { margin: 22px 0 6px; font-size: 16px; }
 .lt-panel-foto { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .lt-panel-datos { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .lt-panel-datos label { margin: 0; }
+.lt-panel-datos textarea { min-height: 60px; margin: 0; }
 .lt-barra { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 6px; }
 .lt-barra .btn { margin-top: 0; min-height: 44px; }
 .lt-tiempo { font-weight: 700; font-variant-numeric: tabular-nums; margin-right: auto; }
