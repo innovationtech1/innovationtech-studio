@@ -8,6 +8,7 @@ import { ReelFormat, ReelOptions, renderReel, supportedRecording, vistaPrevia } 
 import type { Item, Settings } from "@/lib/types";
 import { clearDrafts, usePersistentState } from "@/lib/persist";
 import { deleteFile, getFile, putFile, toBlob, toDataUrl } from "@/lib/media-store";
+import { AVISO_SIN_ESPACIO, guardarConfirmado } from "@/lib/guardado";
 
 const blobToDataUrl = (b: Blob) =>
   new Promise<string>((res, rej) => {
@@ -41,6 +42,8 @@ import {
   normalizarClips,
   nuevoClip,
   ponerToma,
+  ponerEnLibre,
+  sinFuente,
   presente,
   quitarToma,
   recortar,
@@ -151,7 +154,14 @@ export default function ReelStudio({
       for (const id of faltan) {
         const blob = await abrirVideo(id);
         if (!vivo) return;
-        setUrlsVideo((u) => (id in u ? u : { ...u, [id]: blob ? URL.createObjectURL(blob) : null }));
+        if (id in urlsRef.current) continue;
+        // El enlace se crea una sola vez, fuera del cambio de estado (React puede repetir esa función)
+        const enlace = blob ? URL.createObjectURL(blob) : null;
+        setUrlsVideo((u) => {
+          if (!(id in u)) return { ...u, [id]: enlace };
+          if (enlace) URL.revokeObjectURL(enlace);
+          return u;
+        });
       }
     })();
     return () => {
@@ -166,6 +176,11 @@ export default function ReelStudio({
   // id guardado → foto que tiene (para saber si cambió)
   const savedImages = useRef(new Map<string, string>());
   const restored = useRef(false);
+  const [recuperado, setRecuperado] = useState(false); // ya se recuperaron las fotos guardadas
+  const [avisosVideo, setAvisosVideo] = useState<string[]>([]); // lo que no salió como se pidió en el último video
+  const [sinEspacio, setSinEspacio] = useState(false); // un guardado en el dispositivo no entró
+  const guardando = useRef(new Map<string, string>()); // id del clip → foto que se está guardando
+  const noGuardadas = useRef(new Map<string, string>()); // id del clip → foto que no se pudo guardar (no se reintenta sola)
 
   // Deshacer y rehacer (solo en memoria, hasta 50 pasos)
   const hist = useRef<{ pasado: Clip[][]; futuro: Clip[][] }>({ pasado: [], futuro: [] });
@@ -235,13 +250,18 @@ export default function ReelStudio({
       restored.current = true;
       for (const sc of missing) {
         const blob = await getFile(sc.imageId!).catch(() => null);
-        if (!blob) continue;
+        if (!blob) {
+          // El archivo ya no está en el dispositivo: el clip queda vacío de verdad (y libre para otra foto)
+          interno((all) => all.map((x) => (x.imageId === sc.imageId && !x.image ? { ...x, imageId: undefined } : x)));
+          continue;
+        }
         const url = await blobToDataUrl(blob);
         savedImages.current.set(sc.imageId!, url);
         interno((all) => all.map((x) => (x.imageId === sc.imageId && !x.image ? { ...x, image: url } : x)));
       }
       // Los videos subidos que ya no usa ningún clip se borran del dispositivo (al abrir no hay nada que deshacer)
       void limpiarHuerfanos([...clipsRef.current.flatMap((c) => (c.archivoId ? [c.archivoId] : [])), ...videosDeOtros]);
+      setRecuperado(true); // lo que llegó mientras tanto (una imagen enviada desde otra sección) ya se puede guardar
     }, 400); // espera a que se cargue el borrador guardado
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -254,19 +274,36 @@ export default function ReelStudio({
       if (!sc.image) return;
       if (sc.imageId && savedImages.current.get(sc.imageId) === sc.image) return;
       if (sc.imageId && !savedImages.current.has(sc.imageId) && !sc.image.startsWith("data:")) return;
+      if (guardando.current.get(sc.id) === sc.image || noGuardadas.current.get(sc.id) === sc.image) return;
       const old = sc.imageId;
+      const imagen = sc.image;
       const id = `reel-${Math.random().toString(36).slice(2, 10)}`;
-      savedImages.current.set(id, sc.image);
-      interno((all) => all.map((x) => (x.id === sc.id && x.image === sc.image ? { ...x, imageId: id } : x)));
+      guardando.current.set(sc.id, imagen);
       (async () => {
-        const blob = await toBlob(sc.image);
-        if (blob) await putFile(id, blob).catch(() => {});
+        // Primero se escribe. Solo si quedó guardada, el clip apunta a la foto nueva y se borra la anterior.
+        const r = await guardarConfirmado({
+          id,
+          blob: await toBlob(imagen).catch(() => null),
+          poner: putFile,
+          quitar: deleteFile,
+          vigente: () => clipsRef.current.some((x) => x.id === sc.id && x.image === imagen),
+        });
+        if (guardando.current.get(sc.id) === imagen) guardando.current.delete(sc.id);
+        if (r === "fallo") {
+          noGuardadas.current.set(sc.id, imagen);
+          setSinEspacio(true);
+          return;
+        }
+        if (r !== "ok") return;
+        noGuardadas.current.delete(sc.id);
+        savedImages.current.set(id, imagen);
+        interno((all) => all.map((x) => (x.id === sc.id && x.image === imagen ? { ...x, imageId: id } : x)));
         // La foto anterior se borra solo si ningún otro clip la sigue usando
         if (old && !clipsRef.current.some((x) => x.imageId === old)) olvidarFoto(old);
       })();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clips]);
+  }, [clips, recuperado]);
   const [pendientes, setPendientes] = usePersistentState<TomasPendientes>("reel:tomas-pendientes", null);
   const [estadoIa, setEstadoIa] = useState("");
   const [invitarPlan, setInvitarPlan] = useState(false);
@@ -381,11 +418,22 @@ export default function ReelStudio({
       return;
     }
     const id = `reelvoz-${Math.random().toString(36).slice(2, 10)}`;
-    setVozArchivo({ id });
+    const audio = voice;
     (async () => {
-      const blob = await toBlob(voice);
-      if (blob) await putFile(id, blob).catch(() => {});
+      // Primero se escribe; solo si quedó guardada se apunta a ella
+      const r = await guardarConfirmado({
+        id,
+        blob: await toBlob(audio).catch(() => null),
+        poner: putFile,
+        quitar: deleteFile,
+        vigente: () => vozGuardada.current === audio,
+      });
+      if (r === "cambio") return; // ya hay otra voz: esa se guarda por su cuenta
+      // La voz anterior ya no es la del video: su archivo se quita en cualquier caso
       if (anterior) deleteFile(anterior).catch(() => {});
+      if (r === "ok") return setVozArchivo({ id });
+      setVozArchivo(null);
+      setSinEspacio(true);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voice]);
@@ -396,7 +444,7 @@ export default function ReelStudio({
   const [result, setResult] = useState<{ url: string; ext: string; seconds: number } | null>(null);
   const [error, setError] = useState("");
   const preview = useRef<HTMLCanvasElement>(null);
-  useEffect(() => onOcupado?.(!!busy), [busy, onOcupado]);
+
   // Portada: un cuadro del video terminado, para descargarlo como imagen
   const videoFinal = useRef<HTMLVideoElement>(null);
   const salida = useRef<HTMLDivElement>(null);
@@ -425,11 +473,7 @@ export default function ReelStudio({
   // Imagen enviada desde «Animar en video»: va al primer clip libre (o a uno nuevo al final).
   useEffect(() => {
     if (!handoff) return;
-    setClips((s) => {
-      const free = s.findIndex((sc) => !sc.image);
-      if (free < 0) return [...s, nuevoClip({ image: handoff.url })];
-      return s.map((sc, j) => (j === free ? { ...sc, image: handoff.url, loading: false } : sc));
-    });
+    setClips((s) => ponerEnLibre(s, handoff.url));
   }, [handoff, setClips]);
   useEffect(() => setBrandName((b) => b || brand.name), [brand.name]);
   // Al salir del Creador de Reels ya no hay demo a la vista
@@ -589,6 +633,8 @@ export default function ReelStudio({
       efectos: efectosDe(lista),
     };
   }
+  const opcionesAhora = useRef(opcionesReel);
+  opcionesAhora.current = opcionesReel;
 
   // Vista previa: se ve y se oye el video sin grabarlo (no gasta nada; las tomas con IA se ven con zoom).
   const [viendo, setViendo] = useState(false);
@@ -658,13 +704,18 @@ export default function ReelStudio({
   const enlacesToma = useRef(new Map<string, { url: string; cuando: number }>());
   const [estadoToma, setEstadoToma] = useState<Record<string, string>>({}); // id del clip → qué está pasando
   const [animando, setAnimando] = useState<string[]>([]); // clips con una toma en camino
+  // El mismo dato, pero al instante: dos toques seguidos no deben pedir (ni cobrar) dos tomas
+  const animandoYa = useRef(new Set<string>());
+  // Mientras se graba o se anima una toma no se cambia de proyecto ni se empieza otro
+  useEffect(() => onOcupado?.(!!busy || animando.length > 0), [busy, animando, onOcupado]);
 
   // Consulta tomas y guarda el enlace de las que ya están listas
   async function verTomas(ids: string[]): Promise<{ vistos: TrabajoVisto[]; topeHoy: boolean }> {
     const vistos: TrabajoVisto[] = [];
     let topeHoy = false;
-    for (let k = 0; k < ids.length; k += 20) {
-      const r = await consultarTomas(ids.slice(k, k + 20));
+    // De 10 en 10: es lo que el servidor acepta por consulta
+    for (let k = 0; k < ids.length; k += 10) {
+      const r = await consultarTomas(ids.slice(k, k + 10));
       vistos.push(...r.trabajos);
       topeHoy = topeHoy || r.topeHoy;
     }
@@ -713,10 +764,11 @@ export default function ReelStudio({
 
   // Anima (o rehace) la foto de un solo clip. El resto del editor sigue usable mientras tanto.
   async function animarClip(clipId: string, rehacer = false) {
-    if (animando.includes(clipId)) return;
+    if (busy || animandoYa.current.has(clipId)) return;
     const lugar = () => clipsRef.current.findIndex((x) => x.id === clipId);
     let c = clipsRef.current[lugar()];
     if (!c || c.tipo !== "toma" || !c.image) return;
+    animandoYa.current.add(clipId);
     const pinta = (t: string) => setEstadoToma((e) => ({ ...e, [clipId]: t }));
     setAnimando((a) => [...a, clipId]);
     setError("");
@@ -756,6 +808,7 @@ export default function ReelStudio({
       pinta("");
       setError(friendlyError((e as Error).message));
     } finally {
+      animandoYa.current.delete(clipId);
       setAnimando((a) => a.filter((x) => x !== clipId));
     }
   }
@@ -766,17 +819,33 @@ export default function ReelStudio({
     if (problema) throw new Error(problema);
     detenerPrevia();
     setResult(null);
+    setAvisosVideo([]);
     setProgress(0);
     if (result) URL.revokeObjectURL(result.url);
     const tomas = await fuentesTomas(lista);
+    // Nada se vuelve imagen fija en silencio: un video que ya no está en el dispositivo detiene la grabación;
+    // una toma con IA que no se pudo traer (sin conexión) se avisa al terminar.
+    // Si los videos del proyecto aún se están abriendo (recién cargada la app), se espera un momento
+    const idsVideo = lista.flatMap((c) => (c.tipo === "video" && c.archivoId ? [c.archivoId] : []));
+    for (let k = 0; k < 50 && idsVideo.some((id) => !(id in urlsRef.current)); k++) await new Promise((r) => setTimeout(r, 100));
+    const faltan = sinFuente(lista, { tomas, videos: urlsRef.current });
+    if (faltan.videos.length) {
+      throw new Error(`El video del clip ${faltan.videos.join(", ")} no está en este dispositivo. Vuelve a subirlo o quita ese clip.`);
+    }
+    const avisos = faltan.tomas.length
+      ? [`No se pudo traer la toma con IA del clip ${faltan.tomas.join(", ")} (revisa tu conexión): ahí la foto se ve con zoom. Vuelve a crear el video cuando tengas señal; no se cobra de nuevo.`]
+      : [];
     aLaVista(salida.current);
     const r = await renderReel({
-      ...opcionesReel(lista, tomas),
+      // Las opciones se leen AHORA (no las de cuando se tocó el botón): tras esperar las tomas con IA,
+      // el video sale con la voz, la música y la marca que hay en pantalla en este momento.
+      ...opcionesAhora.current(lista, tomas),
       onStatus: (m) => setBusy(m || "Grabando tu reel…"),
       onProgress: setProgress,
       previewCanvas: preview.current || undefined,
     });
     setResult({ url: r.url, ext: r.ext, seconds: r.seconds });
+    setAvisosVideo([...avisos, ...r.avisos]);
     setVozCambio(false);
     setTimeout(() => aLaVista(salida.current), 100);
     onVideo(r.blob, `Reel: ${topic || brandName || "sin título"}`); // se guarda solo en la galería
@@ -790,8 +859,19 @@ export default function ReelStudio({
     });
 
   // Genera las tomas con IA que falten (una por foto distinta), espera los clips y graba el video final.
-  const generarConIa = () =>
+  const generandoYa = useRef(false); // dos toques seguidos al botón = un solo pedido
+  const generarConIa = async () => {
+    if (generandoYa.current) return;
+    generandoYa.current = true;
+    try {
+      await generarTodo();
+    } finally {
+      generandoYa.current = false;
+    }
+  };
+  const generarTodo = () =>
     run("Preparando las tomas con IA…", async () => {
+      if (animandoYa.current.size > 0) throw new Error("Espera a que termine la toma que se está animando y vuelve a intentar.");
       const problema = validar(clipsRef.current);
       if (problema) throw new Error(problema);
       const marcadas = clipsRef.current.filter((c) => c.tipo === "toma" && c.image);
@@ -823,18 +903,25 @@ export default function ReelStudio({
       }
       // Las que fallaron (o que el servidor ya no reconoce) se quitan del clip: esa foto se verá con zoom
       const porId = new Map(r.vistos.map((t) => [t.id, t]));
-      let fallas = 0;
+      let fallas = 0; // se intentaron y fallaron: el servidor ya devolvió el crédito
+      let perdidas = 0; // el servidor ya no las tiene (muy viejas o de otra cuenta): no hay crédito que devolver
       for (const id of ids) {
         const t = porId.get(id);
-        if (!t || t.estado === "fallo") {
-          fallas++;
-          interno((l) => quitarToma(l, id));
-        }
+        if (t && t.estado !== "fallo") continue;
+        if (t) fallas++;
+        else perdidas++;
+        interno((l) => quitarToma(l, id));
       }
       void refrescarCuenta();
       setBusy("Grabando tu reel…");
       await grabar(clipsRef.current);
-      setEstadoIa(fallas ? "No se pudo generar la toma, te devolvimos tu crédito" : textoEstado({ tipo: "trabajos", trabajos: r.vistos, topeHoy: false }));
+      setEstadoIa(
+        fallas
+          ? "No se pudo generar la toma, te devolvimos tu crédito"
+          : perdidas
+            ? "Una toma anterior ya no está disponible: esa foto se ve con zoom. Tócala y elige «Animar» para generarla de nuevo."
+            : textoEstado({ tipo: "trabajos", trabajos: r.vistos, topeHoy: false }),
+      );
       setInvitarPlan(esDemo);
     });
 
@@ -886,7 +973,12 @@ export default function ReelStudio({
     }
   }
 
-  const enviarOrden = (orden: string) =>
+  const enviarOrden = async (orden: string): Promise<boolean> => {
+    let entendida = false;
+    await enviarLaOrden(orden, () => (entendida = true));
+    return entendida;
+  };
+  const enviarLaOrden = (orden: string, entendida: () => void) =>
     run("Pensando tu orden…", async () => {
       detenerPrevia();
       setResultadoDir(null);
@@ -919,10 +1011,12 @@ export default function ReelStudio({
       if (acciones.length === 0) {
         // La IA explicó por qué no puede: se muestra su mensaje y el video no cambia
         if (!mensaje) throw new Error("No entendí la orden. Dila de otra forma.");
+        entendida();
         setHayDeshacerOrden(false);
         setResultadoDir({ mensaje, hecho: [], avisos: [] });
         return;
       }
+      entendida();
       const r = aplicarAcciones(estado, acciones, catalogo, { voz: puedeVoz, ia: conCuenta });
       const gasto = costoDe(r.pendientes);
       let costo = textoCosto(gasto);
@@ -1227,7 +1321,7 @@ export default function ReelStudio({
         <h2>Creador de Reels</h2>
         <button
           className="btn ghost small"
-          disabled={!!busy}
+          disabled={!!busy || animando.length > 0}
           onClick={() => {
             if (!confirm("¿Empezar un reel nuevo? Se borrarán el tema, las escenas y el guion actuales.")) return;
             clearDrafts("reel:");
@@ -1241,6 +1335,11 @@ export default function ReelStudio({
             setCta("");
             setScript("");
             setVoice("");
+            // La canción propia también se quita del dispositivo (si no, se queda ocupando espacio)
+            if (cancionPropia?.id) deleteFile(cancionPropia.id).catch(() => {});
+            setCancionPropia(null);
+            setSinEspacio(false);
+            setAvisosVideo([]);
             setResult(null);
             setError("");
             setEstadoIa("");
@@ -1629,6 +1728,19 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
             )}
           </div>
         )}
+        {!busy && result && avisosVideo.map((a) => (
+          <div className="notice" key={a}>
+            {a}
+          </div>
+        ))}
+        {sinEspacio && (
+          <div className="notice">
+            {AVISO_SIN_ESPACIO}{" "}
+            <button className="btn ghost small" onClick={() => setSinEspacio(false)}>
+              Entendido
+            </button>
+          </div>
+        )}
         {error && <div className="error">{error}</div>}
         <div className="reel-barra-fila">
           <span className={`lt-tiempo${total > MAX_VIDEO ? " pasado" : ""}`} data-no-translate>
@@ -1647,7 +1759,7 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
             <Clapperboard size={16} aria-hidden /> Crear reel
           </button>
           {conCuenta && tomasMarcadas > 0 && (
-            <button className="btn" disabled={!!busy || viendo || !canRecord} onClick={generarConIa} title="Anima las fotos marcadas que faltan (usa tus tomas) y graba el video">
+            <button className="btn" disabled={!!busy || viendo || !canRecord || animando.length > 0} onClick={generarConIa} title="Anima las fotos marcadas que faltan (usa tus tomas) y graba el video">
               <Sparkles size={16} aria-hidden /> Generar con IA
               {esDemo && <span className="acct-pro">Demo gratis</span>}
             </button>

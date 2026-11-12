@@ -33,6 +33,7 @@ export const MAX_FOTO_DIRECTOR = 10;
 export const CLIPS_DEFECTO = 4;
 const MIN_CLIPS = 2;
 const MAX_CLIPS = 12;
+export const TOPE_CLIPS = 40; // lo más que una orden puede dejar en el video (más que eso vuelve lento al teléfono)
 const MAX_TEXTO = 120;
 const MAX_GUION = 1500;
 const MAX_TOMAS_AL_ARMAR = 4; // al armar un video «con IA» se animan hasta 4 fotos (decisión de Hector)
@@ -311,11 +312,19 @@ export function aplicarAcciones(estado: Estado, acciones: Accion[], cat: Catalog
   let generarIa = false;
 
   const aviso = (t: string) => void (avisos.includes(t) || avisos.push(t));
-  // Devuelve el índice del clip número n, o avisa que no existe
+  // Los números de clip son los que la persona veía al dar la orden: «borra el 2 y el 3» son esos dos,
+  // aunque al borrar el 2 los demás se recorran. numeros[n-1] = id del clip que tenía el número n.
+  let numeros = clips.map((c) => c.id);
+  // Devuelve el índice actual del clip número n, o avisa que no existe (o que esta misma orden ya lo borró)
   const lugar = (n: number): number => {
-    if (n >= 1 && n <= clips.length) return n - 1;
-    aviso(`No existe el clip ${n}`);
-    return -1;
+    const id = numeros[n - 1];
+    if (id === undefined) {
+      aviso(`No existe el clip ${n}`);
+      return -1;
+    }
+    const i = clips.findIndex((c) => c.id === id);
+    if (i < 0) aviso(`El clip ${n} ya se borró en esta misma orden`);
+    return i;
   };
   // Un clip «tendrá foto» si ya la tiene o si esta misma orden la va a crear
   const tendraFoto = (c: Clip) => presente(c) || imagenes.has(c.id);
@@ -331,8 +340,13 @@ export function aplicarAcciones(estado: Estado, acciones: Accion[], cat: Catalog
   for (const a of acciones) {
     switch (a.tipo) {
       case "agregar_clip":
-        clips = [...clips, ...Array.from({ length: a.cantidad }, () => nuevoClip())];
-        hecho.push(a.cantidad === 1 ? "Agregué 1 clip" : `Agregué ${a.cantidad} clips`);
+        const caben = Math.min(a.cantidad, Math.max(0, TOPE_CLIPS - clips.length));
+        if (caben < a.cantidad) aviso(`Un video admite hasta ${TOPE_CLIPS} clips`);
+        if (caben === 0) break;
+        const nuevos = Array.from({ length: caben }, () => nuevoClip());
+        clips = [...clips, ...nuevos];
+        numeros = [...numeros, ...nuevos.map((c) => c.id)]; // toman los números que siguen
+        hecho.push(caben === 1 ? "Agregué 1 clip" : `Agregué ${caben} clips`);
         break;
       case "borrar_clip": {
         const i = lugar(a.clip);
@@ -353,6 +367,10 @@ export function aplicarAcciones(estado: Estado, acciones: Accion[], cat: Catalog
       case "duplicar_clip": {
         const i = lugar(a.clip);
         if (i < 0) break;
+        if (clips.length >= TOPE_CLIPS) {
+          aviso(`Un video admite hasta ${TOPE_CLIPS} clips`);
+          break;
+        }
         clips = duplicar(clips, i);
         hecho.push(`Dupliqué el clip ${a.clip}`);
         break;
@@ -542,6 +560,7 @@ export function aplicarAcciones(estado: Estado, acciones: Accion[], cat: Catalog
           return n;
         });
         clips = lista;
+        numeros = lista.map((c) => c.id); // video nuevo: los números son los de esta lista
         aj.tema = a.tema; // queda escrito en «¿De qué trata el reel?»
         if (a.cta) aj.cta = a.cta;
         if (a.musica) {
@@ -684,6 +703,7 @@ export function instruccionesDirector(o: {
     "",
     "REGLAS PARA GASTAR POCO Y QUE QUEDE BIEN:",
     "- Pocas imágenes, bien aprovechadas: al armar, cada foto dura entre 7 y 10 segundos (8 si no dicen otra cosa).",
+    '- Los números de clip son SIEMPRE los de la lista que ves arriba, aunque en la misma respuesta borres, muevas o dupliques clips. Los clips que agregues toman los números siguientes.',
     '- El número de clips de "armar" es la duración pedida dividida entre 8 (30 s → 4 clips, 60 s → 8 clips), entre 2 y 12. Si no dicen duración, usa 4 clips.',
     '- "textos": una frase corta por clip (máximo 8 palabras) que cuente una historia: gancho, beneficios y oferta. Sin hashtags ni emojis.',
     '- "imagenes": una descripción EN INGLÉS por clip, detallada: sujeto, lugar, luz, encuadre, estilo de fotografía publicitaria profesional, sin texto dentro de la imagen. Que la imagen salga bien a la primera.',

@@ -20,13 +20,15 @@ export default function CamaraVideo({ onVideo, onCerrar }: { onVideo: (video: Bl
   const { video: vista, flujo, listo: lista, error, aviso, setError } = cam;
   const frente = cam.espejo;
   // Al salir se detiene la grabación en curso
-  useEffect(
-    () => () => {
+  const cerrada = useRef(false);
+  useEffect(() => {
+    cerrada.current = false;
+    return () => {
+      cerrada.current = true; // lo que termine de grabarse después de cerrar ya no se usa
       if (reloj.current) clearInterval(reloj.current);
       if (grabadora.current?.state === "recording") grabadora.current.stop();
-    },
-    []
-  );
+    };
+  }, []);
 
   // Al cerrar se suelta el video que quedó en revisión
   useEffect(() => () => void (hecho && URL.revokeObjectURL(hecho.url)), [hecho]);
@@ -41,6 +43,7 @@ export default function CamaraVideo({ onVideo, onCerrar }: { onVideo: (video: Bl
     g.ondataavailable = (e) => e.data.size && partes.push(e.data);
     g.onstop = () => {
       if (reloj.current) clearInterval(reloj.current);
+      if (cerrada.current) return;
       setGrabando(false);
       const blob = new Blob(partes, { type: mime.split(";")[0] });
       if (blob.size > 0) setHecho({ blob, url: URL.createObjectURL(blob) });

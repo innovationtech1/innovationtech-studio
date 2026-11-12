@@ -18,6 +18,11 @@ async function generate(req: Request, acceso: Extract<Acceso, { ok: true }>, pro
     const { accountId, token } = c;
     // En modo demo siempre se usa el modelo predeterminado
     const m = (!c.demo && model) || "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+    // Si la llamada ni siquiera llega (corte de red), tampoco se cobra el texto
+    const sinCobro = async () => {
+      if (c.demo) refund(req, "text");
+      await acceso.devolver();
+    };
     const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${m}`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -29,6 +34,9 @@ async function generate(req: Request, acceso: Extract<Acceso, { ok: true }>, pro
         max_tokens: g.maxTokens,
         temperature: g.temperatura ?? 0.8,
       }),
+    }).catch(async () => {
+      await sinCobro();
+      throw new Error("No se pudo conectar con la IA de texto. Intenta de nuevo.");
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data?.success === false) {

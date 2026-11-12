@@ -185,77 +185,104 @@ export async function crearVideo(
   const modelo = cfg.videoIa.modelos[nivel].id;
   // En el caché cuenta también la resolución: el clip de la prueba (480P) no sirve para un plan de pago
   const modeloCache = `${modelo}@${cfg.videoIa.modelos[nivel].resolucion ?? ""}`;
-  const preparadas: { toma: TomaPedida; cacheLlave: string; clipKey: string | null }[] = [];
+  const llaves: string[] = [];
+  const porLlave = new Map<string, TomaPedida>(); // la misma foto con el mismo movimiento es UNA toma
   for (const toma of tomas) {
     const fotoSha = fotoDelNegocio(toma.imagenKey, negocio.id);
     if (!fotoSha) return falla(403, "Esa foto no es de tu cuenta. Súbela de nuevo.");
     const cacheLlave = llaveCache(negocio.id, fotoSha, toma.movimiento, modeloCache, toma.variacion);
-    preparadas.push({ toma, cacheLlave, clipKey: await m.videos.getCache(cacheLlave) });
+    llaves.push(cacheLlave);
+    if (!porLlave.has(cacheLlave)) porLlave.set(cacheLlave, toma);
   }
 
-  // Cuota: solo las tomas nuevas. El guardián revisa sesión, plan y descuenta del mes o del saldo.
-  const nuevas = preparadas.filter((p) => !p.clipKey).length;
-  let delMes = 0;
-  let mes = "";
-  let devolver = async () => {};
-  if (nuevas > 0) {
-    const acceso = await requireAccess(
-      req,
-      { herramienta: "video_ia", contador: "tomas_ia", unidades: nuevas, clavePropia: false },
-      { store: m.store, verify: deps.verify, now: m.ahora, stripeLive: deps.stripeLive },
-    );
-    if (!acceso.ok) return falla(acceso.status, acceso.mensaje, acceso.codigo);
-    delMes = acceso.reserva?.delMes ?? 0;
-    mes = acceso.mes ?? "";
-    devolver = acceso.devolver;
+  // Sin cobros dobles: mientras se revisa y se cobra un pedido de este negocio, no entra otro
+  // (dos toques seguidos, dos pestañas o un reintento por mala señal).
+  const candado = `crear-video:${negocio.id}`;
+  if (!(await m.videos.tomarCandado(candado, 30_000, m.ahora))) {
+    return falla(409, "Ya estamos preparando tus tomas. Espera unos segundos y vuelve a intentar.", "OCUPADO");
   }
-
-  const costo = costoTomaCentavos(cfg, nivel);
-  const trabajos: TrabajoVideo[] = preparadas.map((p, i) => {
-    const base = {
-      id: randomUUID(),
-      negocioId: negocio.id,
-      uid,
-      plan,
-      nivel,
-      modelo,
-      imagenKey: p.toma.imagenKey,
-      movimiento: p.toma.movimiento,
-      intentos: 0,
-      creado: m.ahora + i, // respeta el orden en que se pidieron
-      actualizado: m.ahora,
-      secreto: randomBytes(24).toString("hex"),
-      cacheLlave: p.cacheLlave,
-    };
-    if (p.clipKey) {
-      return { ...base, prioridad: prioridadToma(plan, false), estado: "listo", clipKey: p.clipKey, desdeCache: true, costoCentavos: 0, reserva: { mes: "", delMes: 0, delSaldo: 0 } };
-    }
-    // Cada toma recuerda de dónde salió (primero lo del mes, luego el saldo) para devolverla si falla
-    const usaSaldo = delMes <= 0;
-    if (!usaSaldo) delMes -= 1;
-    return {
-      ...base,
-      prioridad: prioridadToma(plan, usaSaldo),
-      estado: "en_fila",
-      costoCentavos: costo,
-      reserva: { mes, delMes: usaSaldo ? 0 : 1, delSaldo: usaSaldo ? 1 : 0 },
-    };
-  });
+  const idDe = new Map<string, string>(); // llave → trabajo que la atiende
+  let trabajos: TrabajoVideo[] = [];
+  let nuevas = 0;
   try {
-    await m.videos.crearTrabajos(trabajos);
-  } catch (e) {
-    await devolver(); // no quedó ningún trabajo: lo descontado regresa
-    throw e;
+    const preparadas: { toma: TomaPedida; cacheLlave: string; clipKey: string | null }[] = [];
+    for (const [cacheLlave, toma] of porLlave) {
+      const clipKey = await m.videos.getCache(cacheLlave);
+      // Si esa misma toma ya va en camino, se usa esa: no se crea ni se cobra otra
+      const enCurso = clipKey ? null : await m.videos.trabajoEnCurso(cacheLlave);
+      if (enCurso) idDe.set(cacheLlave, enCurso.id);
+      else preparadas.push({ toma, cacheLlave, clipKey });
+    }
+
+    // Cuota: solo las tomas nuevas. El guardián revisa sesión, plan y descuenta del mes o del saldo.
+    nuevas = preparadas.filter((p) => !p.clipKey).length;
+    let delMes = 0;
+    let mes = "";
+    let devolver = async () => {};
+    if (nuevas > 0) {
+      const acceso = await requireAccess(
+        req,
+        { herramienta: "video_ia", contador: "tomas_ia", unidades: nuevas, clavePropia: false },
+        { store: m.store, verify: deps.verify, now: m.ahora, stripeLive: deps.stripeLive },
+      );
+      if (!acceso.ok) return falla(acceso.status, acceso.mensaje, acceso.codigo);
+      delMes = acceso.reserva?.delMes ?? 0;
+      mes = acceso.mes ?? "";
+      devolver = acceso.devolver;
+    }
+
+    const costo = costoTomaCentavos(cfg, nivel);
+    trabajos = preparadas.map((p, i) => {
+      const base = {
+        id: randomUUID(),
+        negocioId: negocio.id,
+        uid,
+        plan,
+        nivel,
+        modelo,
+        imagenKey: p.toma.imagenKey,
+        movimiento: p.toma.movimiento,
+        intentos: 0,
+        creado: m.ahora + i, // respeta el orden en que se pidieron
+        actualizado: m.ahora,
+        secreto: randomBytes(24).toString("hex"),
+        cacheLlave: p.cacheLlave,
+      };
+      idDe.set(p.cacheLlave, base.id);
+      if (p.clipKey) {
+        return { ...base, prioridad: prioridadToma(plan, false), estado: "listo", clipKey: p.clipKey, desdeCache: true, costoCentavos: 0, reserva: { mes: "", delMes: 0, delSaldo: 0 } };
+      }
+      // Cada toma recuerda de dónde salió (primero lo del mes, luego el saldo) para devolverla si falla
+      const usaSaldo = delMes <= 0;
+      if (!usaSaldo) delMes -= 1;
+      return {
+        ...base,
+        prioridad: prioridadToma(plan, usaSaldo),
+        estado: "en_fila",
+        costoCentavos: costo,
+        reserva: { mes, delMes: usaSaldo ? 0 : 1, delSaldo: usaSaldo ? 1 : 0 },
+      };
+    });
+    try {
+      await m.videos.crearTrabajos(trabajos);
+    } catch (e) {
+      await devolver(); // no quedó ningún trabajo: lo descontado regresa
+      throw e;
+    }
+  } finally {
+    await m.videos.soltarCandado(candado).catch(() => {});
   }
   // Los trabajos ya existen: pase lo que pase con el despacho, el navegador recibe sus ids
-  let ahora = trabajos;
+  const estados = new Map<string, string>(trabajos.map((t) => [t.id, t.estado]));
   try {
     if (nuevas > 0) await despacharCon(m);
-    ahora = await m.videos.listarTrabajos(trabajos.map((t) => t.id));
+    for (const t of await m.videos.listarTrabajos([...new Set(idDe.values())])) estados.set(t.id, t.estado);
   } catch (e) {
     console.error(`Video con IA: el despacho al crear falló (${motivo(e)}).`);
   }
-  return { ok: true, trabajos: ahora.map((t) => ({ id: t.id, estado: t.estado })) };
+  // Una respuesta por cada toma pedida, en su orden (las repetidas comparten trabajo)
+  const salida = llaves.map((l) => idDe.get(l)!).map((id) => ({ id, estado: (estados.get(id) ?? "en_fila") as TrabajoVideo["estado"] }));
+  return { ok: true, trabajos: salida };
 }
 
 // Manda a fal los trabajos que esperan turno, respetando prioridad, simultáneos y tope de gasto del día.

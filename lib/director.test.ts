@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { TOPE_CLIPS } from "./director";
 import {
   aplicarAcciones,
   clipsPara,
@@ -577,4 +578,54 @@ test("transiciones avanzadas por orden: duración, las nuevas y «sorpresa»", (
   assert.deepEqual([r.estado.clips[0].transicion, r.estado.clips[0].transicionDur], ["rafaga", "rapida"]);
   assert.match(instr().system, /rafaga/);
   assert.match(instr().system, /sorpresa/);
+});
+
+// ---------- Los números de clip son los que se veían al dar la orden ----------
+
+test("«borra el 2 y el 3»: se borran los que ERAN el 2 y el 3, no el que se recorrió", () => {
+  const e = estado([foto({ id: "a" }), foto({ id: "b" }), foto({ id: "c" }), foto({ id: "d" })]);
+  const r = aplicar(e, [{ tipo: "borrar_clip", clip: 2 }, { tipo: "borrar_clip", clip: 3 }]);
+  assert.deepEqual(r.estado.clips.map((c) => c.id), ["a", "d"]);
+  assert.deepEqual(r.avisos, []);
+});
+
+test("tras borrar el 1, «pon texto al 3» sigue siendo el que era el 3", () => {
+  const e = estado([foto({ id: "a" }), foto({ id: "b" }), foto({ id: "c" })]);
+  const r = aplicar(e, [{ tipo: "borrar_clip", clip: 1 }, { tipo: "texto", clip: 3, texto: "Hola" }]);
+  assert.equal(r.estado.clips.find((c) => c.id === "c")!.caption, "Hola");
+  assert.equal(r.estado.clips.find((c) => c.id === "b")!.caption, "");
+});
+
+test("tras mover el 1 al final, «borra el 2» borra el que era el 2", () => {
+  const e = estado([foto({ id: "a" }), foto({ id: "b" }), foto({ id: "c" })]);
+  const r = aplicar(e, [{ tipo: "mover_clip", clip: 1, a: 3 }, { tipo: "borrar_clip", clip: 2 }]);
+  assert.deepEqual(r.estado.clips.map((c) => c.id), ["c", "a"]);
+});
+
+test("usar un clip que la misma orden ya borró se avisa y no toca otro", () => {
+  const e = estado([foto({ id: "a" }), foto({ id: "b" })]);
+  const r = aplicar(e, [{ tipo: "borrar_clip", clip: 1 }, { tipo: "texto", clip: 1, texto: "Hola" }]);
+  assert.equal(r.estado.clips[0].caption, "");
+  assert.ok(r.avisos.some((a) => a.includes("clip 1")));
+});
+
+test("un clip agregado en la misma orden toma el número siguiente", () => {
+  const e = estado([foto({ id: "a" }), foto({ id: "b" })]);
+  const r = aplicar(e, [{ tipo: "borrar_clip", clip: 1 }, { tipo: "agregar_clip", cantidad: 1 }, { tipo: "texto", clip: 3, texto: "Nuevo" }]);
+  assert.equal(r.estado.clips.length, 2);
+  assert.equal(r.estado.clips[1].caption, "Nuevo");
+});
+
+test("una orden no puede llenar el video de clips: se respeta el tope y se avisa", () => {
+  const e = estado([foto()]);
+  const r = aplicar(e, Array.from({ length: 20 }, () => ({ tipo: "agregar_clip", cantidad: 10 }) as Accion));
+  assert.equal(r.estado.clips.length, TOPE_CLIPS);
+  assert.ok(r.avisos.some((a) => a.includes(String(TOPE_CLIPS))));
+});
+
+test("duplicar tampoco pasa del tope de clips", () => {
+  const e = estado(Array.from({ length: TOPE_CLIPS }, () => foto()));
+  const r = aplicar(e, [{ tipo: "duplicar_clip", clip: 1 }]);
+  assert.equal(r.estado.clips.length, TOPE_CLIPS);
+  assert.equal(r.avisos.length, 1);
 });

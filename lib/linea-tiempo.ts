@@ -385,3 +385,26 @@ export function ajustarAVoz(clips: Clip[], segundosVoz: number): Clip[] {
   const cada = acotar((segundosVoz + 0.5 - fijo) / n);
   return clips.map((c) => (esFoto(c) ? { ...c, segundos: cada } : c));
 }
+
+// Pone una imagen que llega de otra sección en el primer clip libre (o en uno nuevo al final).
+// Un clip con foto guardada (imageId) no está libre aunque su imagen todavía no se haya recuperado.
+export function ponerEnLibre(clips: Clip[], image: string): Clip[] {
+  const libre = clips.findIndex((c) => !c.image && !c.imageId && !c.archivoId && c.tipo !== "video");
+  if (libre < 0) return [...clips, nuevoClip({ image })];
+  return clips.map((c, j) => (j === libre ? { ...c, image, loading: false } : c));
+}
+
+// Antes de grabar: ¿qué clips saldrían como imagen fija sin que nadie lo pidiera?
+// videos = clips de video cuyo archivo no está; tomas = tomas ya generadas que no se pudieron traer.
+// Devuelve el número de clip (desde 1) contando solo los que entran al video.
+export function sinFuente(
+  clips: Clip[],
+  fuentes: { tomas?: Record<string, string | null | undefined>; videos?: Record<string, string | null | undefined> },
+): { videos: number[]; tomas: number[] } {
+  const r = { videos: [] as number[], tomas: [] as number[] };
+  clips.filter(presente).forEach((c, i) => {
+    if (c.tipo === "video" && !(c.archivoId && fuentes.videos?.[c.archivoId])) r.videos.push(i + 1);
+    if (c.tipo === "toma" && c.trabajoId && !fuentes.tomas?.[c.id]) r.tomas.push(i + 1);
+  });
+  return r;
+}

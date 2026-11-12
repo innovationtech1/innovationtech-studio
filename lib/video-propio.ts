@@ -1,3 +1,4 @@
+import { conLimite } from "./limite";
 // Videos propios del Creador de Reels: se quedan en el dispositivo, nunca se suben a un servidor.
 // Un video subido se guarda en «archivos» con un id «reelvid-…»; uno de la galería (o grabado con la
 // cámara de Studio, que también va a la galería) se usa desde ahí con el id «gal:…», sin copiarlo.
@@ -43,10 +44,16 @@ export async function leerVideo(archivo: Blob): Promise<{ duracion: number; port
     v.playsInline = true;
     v.preload = "auto";
     v.src = url;
-    await new Promise<void>((res, rej) => {
-      v.onloadedmetadata = () => res();
-      v.onerror = () => rej(new Error("Este video no se puede abrir en tu navegador."));
-    });
+    v.load();
+    // Con límite: si el teléfono no termina de abrirlo, se avisa en vez de quedarse esperando
+    await conLimite(
+      new Promise<void>((res, rej) => {
+        v.onloadedmetadata = () => res();
+        v.onerror = () => rej(new Error("Este video no se puede abrir en tu navegador."));
+      }),
+      15_000,
+      "Este video tardó demasiado en abrir. Prueba con uno más corto o en formato MP4.",
+    );
     let duracion = v.duration;
     if (!Number.isFinite(duracion)) {
       // Los videos grabados en el navegador a veces no traen duración: se mide buscando el final
