@@ -385,3 +385,11 @@ export function ajustarAVoz(clips: Clip[], segundosVoz: number): Clip[] {
   const cada = acotar((segundosVoz + 0.5 - fijo) / n);
   return clips.map((c) => (esFoto(c) ? { ...c, segundos: cada } : c));
 }
+
+// Pone una imagen que llega de otra sección en el primer clip libre (o en uno nuevo al final).
+// Un clip con foto guardada (imageId) no está libre aunque su imagen todavía no se haya recuperado.
+export function ponerEnLibre(clips: Clip[], image: string): Clip[] {
+  const libre = clips.findIndex((c) => !c.image && !c.imageId && !c.archivoId && c.tipo !== "video");
+  if (libre < 0) return [...clips, nuevoClip({ image })];
+  return clips.map((c, j) => (j === libre ? { ...c, image, loading: false } : c));
+}
