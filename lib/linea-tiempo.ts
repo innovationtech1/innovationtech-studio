@@ -9,6 +9,8 @@ export const FOTO_DEFECTO = 8; // un clip nuevo: pocas imágenes, bien aprovecha
 const FOTO_ANTES = 3; // lo que duraba cada escena antes del editor (para borradores viejos)
 export const SEGUNDOS_TOMA = 5;
 export const MAX_TOMAS = 4;
+export const MIN_TRAMO = 1; // segundos mínimos del recorte de un video
+export const VELOCIDADES = [0.5, 1, 1.5, 2] as const;
 
 export type TextoPos = "arriba" | "centro" | "abajo";
 export type TextoTam = "chico" | "normal" | "grande";
@@ -17,8 +19,8 @@ const TAMANOS: TextoTam[] = ["chico", "normal", "grande"];
 
 export type Clip = {
   id: string;
-  tipo: "foto" | "toma"; // toma = foto animada con IA (5 s)
-  image: string; // data URL o enlace de la foto
+  tipo: "foto" | "toma" | "video"; // toma = foto animada con IA (5 s); video = video propio
+  image: string; // data URL o enlace de la foto (en un video, su cuadro de portada)
   imageId?: string; // la foto guardada en el dispositivo
   loading?: boolean;
   caption: string; // texto en pantalla
@@ -27,7 +29,17 @@ export type Clip = {
   movimiento?: string; // lo que se le pide a la IA en una toma
   textoPos?: TextoPos;
   textoTam?: TextoTam;
+  // Solo video propio
+  archivoId?: string; // dónde está el archivo en el dispositivo (lib/video-propio.ts)
+  duracionOriginal?: number; // segundos del archivo
+  inicio?: number; // recorte, en segundos del original
+  fin?: number;
+  velocidad?: number; // 0.5, 1, 1.5 o 2 (por defecto 1)
+  sinSonido?: boolean; // true = no se oye en el video final
 };
+
+// El tramo de video que reproduce una escena
+export type VideoRender = { src: string; inicio: number; fin: number; velocidad: number; sonido: boolean };
 
 // Lo que recibe el motor (lib/reel.ts): una escena por clip con foto, con su duración ya resuelta.
 export type EscenaRender = {
@@ -36,7 +48,7 @@ export type EscenaRender = {
   textoPos: TextoPos;
   textoTam: TextoTam;
   segundos: number;
-  video?: string | null; // clip de IA; si falta, la foto se anima con zoom
+  video?: VideoRender; // toma con IA o video propio; si falta, la imagen se anima con zoom
 };
 
 function nuevoId(): string {
@@ -62,9 +74,12 @@ export function normalizarClips(guardado: unknown, segundosViejos: number = FOTO
   if (lista.length === 0) return Array.from({ length: 4 }, () => nuevoClip());
   return lista.map((x) => {
     const v = x as Record<string, unknown>;
+    const dur = typeof v.duracionOriginal === "number" && Number.isFinite(v.duracionOriginal) ? v.duracionOriginal : 0;
+    // Un «video» sin archivo o sin duración no sirve: vuelve a ser un clip de foto
+    const esVideo = v.tipo === "video" && typeof v.archivoId === "string" && !!v.archivoId && dur > 0;
     const clip: Clip = {
       id: texto(v.id) || nuevoId(),
-      tipo: v.tipo === "toma" || (v.tipo === undefined && v.ia === true) ? "toma" : "foto",
+      tipo: esVideo ? "video" : v.tipo === "toma" || (v.tipo === undefined && v.ia === true) ? "toma" : "foto",
       image: texto(v.image),
       caption: texto(v.caption),
       prompt: texto(v.prompt),
@@ -74,13 +89,48 @@ export function normalizarClips(guardado: unknown, segundosViejos: number = FOTO
     if (typeof v.movimiento === "string" && v.movimiento) clip.movimiento = v.movimiento;
     if (POSICIONES.includes(v.textoPos as TextoPos)) clip.textoPos = v.textoPos as TextoPos;
     if (TAMANOS.includes(v.textoTam as TextoTam)) clip.textoTam = v.textoTam as TextoTam;
+    if (esVideo) {
+      clip.archivoId = v.archivoId as string;
+      clip.duracionOriginal = dur;
+      const ini = typeof v.inicio === "number" ? v.inicio : 0;
+      const fin = typeof v.fin === "number" ? v.fin : dur;
+      const t = tramo({ ...clip, inicio: ini, fin });
+      clip.inicio = t.inicio;
+      clip.fin = t.fin;
+      clip.velocidad = velocidadValida(v.velocidad);
+      if (v.sinSonido === true) clip.sinSonido = true;
+    }
     return clip;
   });
 }
 
-// Lo que dura un clip en el video. Un clip sin foto no cuenta.
+const velocidadValida = (v: unknown): number => ((VELOCIDADES as readonly number[]).includes(v as number) ? (v as number) : 1);
+
+// Un clip de video recién agregado: recorte completo, velocidad normal y con sonido
+export function clipDeVideo(datos: { archivoId: string; duracion: number; portada: string }): Clip {
+  return nuevoClip({ tipo: "video", image: datos.portada, archivoId: datos.archivoId, duracionOriginal: datos.duracion, inicio: 0, fin: datos.duracion, velocidad: 1 });
+}
+
+// El recorte de un video, siempre dentro del original. Un recorte al revés se toma como el video completo.
+export function tramo(c: Clip): { inicio: number; fin: number } {
+  const dur = Math.max(0, c.duracionOriginal ?? 0);
+  const ini = Math.min(dur, Math.max(0, c.inicio ?? 0));
+  const fin = Math.min(dur, Math.max(0, c.fin ?? dur));
+  return fin > ini ? { inicio: ini, fin } : { inicio: 0, fin: dur };
+}
+
+// ¿El clip aparece en el video? Una foto o toma necesita su imagen; un video, su archivo con duración.
+export function presente(c: Clip): boolean {
+  return c.tipo === "video" ? (c.duracionOriginal ?? 0) > 0 : !!c.image;
+}
+
+// Lo que dura un clip en el video. Un clip vacío no cuenta.
 export function duracionClip(c: Clip): number {
-  if (!c.image) return 0;
+  if (!presente(c)) return 0;
+  if (c.tipo === "video") {
+    const t = tramo(c);
+    return (t.fin - t.inicio) / velocidadValida(c.velocidad);
+  }
   return c.tipo === "toma" ? SEGUNDOS_TOMA : acotar(c.segundos);
 }
 
@@ -103,9 +153,10 @@ export function formatoTiempo(segundos: number): string {
 
 // null = el video se puede crear. Si no, el mensaje para el cliente.
 export function validar(clips: Clip[]): string | null {
-  const conFoto = clips.filter((c) => c.image);
+  const conFoto = clips.filter(presente);
   if (conFoto.length === 0) return "Agrega al menos una imagen a las escenas.";
   if (conFoto.filter((c) => c.tipo === "toma").length > MAX_TOMAS) return `Puedes marcar máximo ${MAX_TOMAS} fotos con IA por video.`;
+  if (conFoto.some((c) => c.tipo === "video" && tramo(c).fin - tramo(c).inicio < MIN_TRAMO)) return "Un video quedó de menos de 1 segundo: alarga su recorte.";
   const total = duracionTotal(clips);
   if (total > MAX_VIDEO) return `Tu video dura ${formatoTiempo(total)}. El máximo es ${formatoTiempo(MAX_VIDEO)}: quita o acorta algún clip.`;
   return null;
@@ -139,26 +190,67 @@ export function cambiar(clips: Clip[], i: number, cambios: Partial<Clip>): Clip[
   if (!dentro(clips, i)) return clips;
   const c = { ...cambios };
   if ("segundos" in c) c.segundos = acotar(c.segundos, clips[i].segundos);
+  if ("velocidad" in c) c.velocidad = velocidadValida(c.velocidad);
   delete c.id;
   return clips.map((x, j) => (j === i ? { ...x, ...c } : x));
 }
 
-// Las escenas que se graban. clipsIa: id del clip → enlace de su toma con IA ya generada.
-export function aEscenas(clips: Clip[], clipsIa: Record<string, string | null | undefined> = {}): EscenaRender[] {
-  return clips
-    .filter((c) => c.image)
-    .map((c) => {
-      const e: EscenaRender = {
-        imagen: c.image,
-        texto: c.caption,
-        textoPos: c.textoPos ?? "abajo",
-        textoTam: c.textoTam ?? "normal",
-        segundos: duracionClip(c),
-      };
-      const video = c.tipo === "toma" ? clipsIa[c.id] : null;
-      if (video) e.video = video;
-      return e;
-    });
+// Cambia el recorte de un video (en segundos del original). Nunca deja menos de 1 s.
+export function recortar(clips: Clip[], i: number, inicio: number, fin: number): Clip[] {
+  if (!dentro(clips, i) || clips[i].tipo !== "video") return clips;
+  const dur = Math.max(0, clips[i].duracionOriginal ?? 0);
+  let ini = Math.min(dur, Math.max(0, inicio));
+  let f = Math.min(dur, Math.max(ini, fin));
+  if (f - ini < MIN_TRAMO) f = Math.min(dur, ini + MIN_TRAMO);
+  if (f - ini < MIN_TRAMO) ini = Math.max(0, f - MIN_TRAMO);
+  return clips.map((x, j) => (j === i ? { ...x, inicio: ini, fin: f } : x));
+}
+
+// Parte un video en dos clips seguidos en `segundo` (tiempo del original). El archivo es el mismo.
+export function dividir(clips: Clip[], i: number, segundo: number): Clip[] {
+  if (!dentro(clips, i) || clips[i].tipo !== "video") return clips;
+  const c = clips[i];
+  const t = tramo(c);
+  if (segundo - t.inicio < MIN_TRAMO || t.fin - segundo < MIN_TRAMO) return clips;
+  const primera: Clip = { ...c, inicio: t.inicio, fin: segundo };
+  const segunda: Clip = { ...c, id: nuevoId(), inicio: segundo, fin: t.fin, caption: "", loading: false };
+  delete segunda.imageId; // su portada se guarda aparte
+  return [...clips.slice(0, i), primera, segunda, ...clips.slice(i + 1)];
+}
+
+// Pone otro clip en ese lugar. Conserva el id, el texto y su estilo.
+export function sustituir(clips: Clip[], i: number, nuevo: Clip): Clip[] {
+  if (!dentro(clips, i)) return clips;
+  const v = clips[i];
+  const r: Clip = { ...nuevo, id: v.id, caption: v.caption };
+  if (v.textoPos) r.textoPos = v.textoPos;
+  if (v.textoTam) r.textoTam = v.textoTam;
+  return clips.map((x, j) => (j === i ? r : x));
+}
+
+// Las escenas que se graban. fuentes.tomas: id del clip → enlace de su toma con IA;
+// fuentes.videos: archivoId → enlace local del video propio.
+export function aEscenas(
+  clips: Clip[],
+  fuentes: { tomas?: Record<string, string | null | undefined>; videos?: Record<string, string | null | undefined> } = {},
+): EscenaRender[] {
+  return clips.filter(presente).map((c) => {
+    const e: EscenaRender = {
+      imagen: c.image,
+      texto: c.caption,
+      textoPos: c.textoPos ?? "abajo",
+      textoTam: c.textoTam ?? "normal",
+      segundos: duracionClip(c),
+    };
+    if (c.tipo === "toma") {
+      const src = fuentes.tomas?.[c.id];
+      if (src) e.video = { src, inicio: 0, fin: SEGUNDOS_TOMA, velocidad: 1, sonido: false };
+    } else if (c.tipo === "video") {
+      const src = c.archivoId ? fuentes.videos?.[c.archivoId] : null;
+      if (src) e.video = { src, ...tramo(c), velocidad: velocidadValida(c.velocidad), sonido: !c.sinSonido };
+    }
+    return e;
+  });
 }
 
 // Si la voz dura más que el video, reparte el tiempo que falta entre las fotos (todas iguales).
@@ -168,7 +260,8 @@ export function ajustarAVoz(clips: Clip[], segundosVoz: number): Clip[] {
   const esFoto = (c: Clip) => !!c.image && c.tipo === "foto";
   const n = clips.filter(esFoto).length;
   if (n === 0) return clips;
-  const fijo = clips.filter((c) => c.image && c.tipo === "toma").length * SEGUNDOS_TOMA;
+  // Lo que no se reparte: tomas con IA y videos propios
+  const fijo = clips.filter((c) => c.tipo !== "foto").reduce((a, c) => a + duracionClip(c), 0);
   const cada = acotar((segundosVoz + 0.5 - fijo) / n);
   return clips.map((c) => (esFoto(c) ? { ...c, segundos: cada } : c));
 }

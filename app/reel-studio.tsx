@@ -31,15 +31,22 @@ import {
   borrar,
   cambiar,
   cierreDe,
+  clipDeVideo,
+  dividir,
   duplicar,
   duracionTotal,
   formatoTiempo,
   mover,
   normalizarClips,
   nuevoClip,
+  presente,
+  recortar,
+  sustituir,
   validar,
   type Clip,
 } from "@/lib/linea-tiempo";
+import { abrirVideo, guardarVideo, idDeArchivo, leerVideo, limpiarHuerfanos, revisarArchivo } from "@/lib/video-propio";
+import CamaraVideo from "./camara-video";
 import { anotar, deshacer, rehacer } from "@/lib/historial";
 import LineaTiempo from "./linea-tiempo";
 import Director from "./director";
@@ -58,7 +65,7 @@ import {
 import { firmaTomas, terminado, textoEstado, type TrabajoVisto } from "@/lib/estados-video";
 import { consultarTomas, pedirTomas, prepararFoto, subirFoto } from "@/lib/video-ia-cliente";
 
-import { Clapperboard, Dices, Download, Eye, Mic, Play, Redo2, Sparkles, Square, Undo2 } from "lucide-react";
+import { Clapperboard, Dices, Download, Eye, Mic, Play, Redo2, Sparkles, Square, Undo2, Video } from "lucide-react";
 // Cada clip guarda su foto en el dispositivo (IndexedDB) con imageId, para que no se pierda
 // al cambiar de sección, editar, cerrar o recargar la app. El modelo está en lib/linea-tiempo.ts.
 
@@ -120,6 +127,29 @@ export default function ReelStudio({
   const clipsRef = useRef(clips);
   clipsRef.current = clips;
   const [elegido, setElegido] = useState(-1);
+  // Videos propios: archivoId → enlace local para verlo y grabarlo (null = el archivo ya no está en este dispositivo)
+  const [urlsVideo, setUrlsVideo] = useState<Record<string, string | null>>({});
+  const urlsRef = useRef(urlsVideo);
+  urlsRef.current = urlsVideo;
+  useEffect(() => {
+    const faltan = [...new Set(clips.flatMap((c) => (c.tipo === "video" && c.archivoId && !(c.archivoId in urlsRef.current) ? [c.archivoId] : [])))];
+    if (faltan.length === 0) return;
+    let vivo = true;
+    (async () => {
+      for (const id of faltan) {
+        const blob = await abrirVideo(id);
+        if (!vivo) return;
+        setUrlsVideo((u) => (id in u ? u : { ...u, [id]: blob ? URL.createObjectURL(blob) : null }));
+      }
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [clips]);
+  // Al salir se sueltan los enlaces locales
+  useEffect(() => () => Object.values(urlsRef.current).forEach((u) => u && URL.revokeObjectURL(u)), []);
+  const [volVoz, setVolVoz] = usePersistentState("reel:vol-voz", 1);
+  const [volClips, setVolClips] = usePersistentState("reel:vol-clips", 1);
 
   // id guardado → foto que tiene (para saber si cambió)
   const savedImages = useRef(new Map<string, string>());
@@ -198,6 +228,8 @@ export default function ReelStudio({
         savedImages.current.set(sc.imageId!, url);
         interno((all) => all.map((x) => (x.imageId === sc.imageId && !x.image ? { ...x, image: url } : x)));
       }
+      // Los videos subidos que ya no usa ningún clip se borran del dispositivo (al abrir no hay nada que deshacer)
+      void limpiarHuerfanos(clipsRef.current.flatMap((c) => (c.archivoId ? [c.archivoId] : [])));
     }, 400); // espera a que se cargue el borrador guardado
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -393,7 +425,7 @@ export default function ReelStudio({
       if (!data) return;
       // Solo crea imágenes para los clips que aún no tienen una.
       // De 3 en 3 para no saturar el límite gratuito de Cloudflare.
-      const pending = clipsRef.current.map((sc, i) => ({ id: sc.id, i, vacio: !sc.image })).filter((x) => x.vacio);
+      const pending = clipsRef.current.map((sc, i) => ({ id: sc.id, i, vacio: !presente(sc) })).filter((x) => x.vacio);
       let failed: unknown = null;
       for (let k = 0; k < pending.length; k += 3) {
         const batch = pending.slice(k, k + 3);
@@ -441,7 +473,8 @@ export default function ReelStudio({
   // Lo que comparten grabar y la vista previa: las escenas con su duración, la marca, la voz y la música.
   function opcionesReel(lista: Clip[], clipsIa?: Record<string, string | null>): ReelOptions {
     return {
-      escenas: aEscenas(lista, clipsIa),
+      escenas: aEscenas(lista, { tomas: clipsIa, videos: urlsVideo }),
+      volumenes: { voz: volVoz, clips: volClips },
       cierre: cierreDe(lista),
       format,
       accent,
@@ -794,6 +827,107 @@ export default function ReelStudio({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alFinal, busy, viendo, cola, voice, vozSegundos]);
 
+  // ---------- Videos propios en los clips ----------
+  const galleryVideos = gallery.filter((g) => g.kind === "video" && g.id);
+  const [camaraVideo, setCamaraVideo] = useState<string | null>(null); // id del clip que recibirá lo grabado
+  const [eligiendoVideo, setEligiendoVideo] = useState<string | null>(null); // id del clip que elige de la galería
+
+  // Pone un video en un clip (conserva su lugar, su texto y el estilo del texto)
+  function ponerVideo(clipId: string, datos: { archivoId: string; duracion: number; portada: string }, archivo: Blob) {
+    const fotoAnterior = clipsRef.current.find((x) => x.id === clipId)?.imageId;
+    if (!urlsRef.current[datos.archivoId]) {
+      const enlace = URL.createObjectURL(archivo);
+      setUrlsVideo((u) => ({ ...u, [datos.archivoId]: enlace }));
+    }
+    editar((c) => sustituir(c, c.findIndex((x) => x.id === clipId), clipDeVideo(datos)));
+    if (fotoAnterior && !clipsRef.current.some((x) => x.imageId === fotoAnterior)) olvidarFoto(fotoAnterior);
+    setEligiendoVideo(null);
+  }
+  const subirVideo = (clipId: string, f: File) =>
+    run("Guardando tu video…", async () => {
+      const problema = revisarArchivo(f);
+      if (problema) throw new Error(problema);
+      ponerVideo(clipId, await guardarVideo(f), f);
+    });
+  // Lo grabado con la cámara de Studio entra al clip y además queda en la galería
+  const videoGrabado = (clipId: string) => async (blob: Blob) => {
+    ponerVideo(clipId, await guardarVideo(blob), blob);
+    onVideo(blob, "Video grabado con la cámara");
+  };
+  const videoDeGaleria = (clipId: string, id: string) =>
+    run("Abriendo el video…", async () => {
+      const archivoId = idDeArchivo("galeria", id);
+      const blob = await abrirVideo(archivoId);
+      if (!blob) throw new Error("Ese video ya no está en tu galería.");
+      const problema = revisarArchivo(blob);
+      if (problema) throw new Error(problema);
+      ponerVideo(clipId, { archivoId, ...(await leerVideo(blob)) }, blob);
+    });
+
+  // De dónde sale el video de un clip: grabarlo, subirlo o tomarlo de la galería
+  const botonesVideo = (sc: Clip) => (
+    <>
+      <div className="lt-origen">
+        <button className="btn ghost small" disabled={!!busy} onClick={() => setCamaraVideo(sc.id)}>
+          <Video size={15} aria-hidden /> Grabar video
+        </button>
+        <label className="btn ghost small" style={{ margin: 0 }}>
+          Subir video
+          <input
+            type="file"
+            accept="video/*"
+            hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f) void subirVideo(sc.id, f);
+            }}
+          />
+        </label>
+        <button className="btn ghost small" disabled={!!busy} onClick={() => setEligiendoVideo(eligiendoVideo === sc.id ? null : sc.id)}>
+          Video de mi galería
+        </button>
+      </div>
+      {eligiendoVideo === sc.id && (
+        <div className="picker">
+          {galleryVideos.length === 0 && <span className="muted">No tienes videos en tu galería.</span>}
+          {galleryVideos.slice(0, 12).map((g) => (
+            <video key={g.id} src={g.url} muted playsInline preload="metadata" title={g.prompt} onClick={() => void videoDeGaleria(sc.id, g.id!)} />
+          ))}
+        </div>
+      )}
+    </>
+  );
+
+  // El lado izquierdo del panel de un clip de video: su portada y cómo cambiarlo
+  const panelVideo = (i: number) => {
+    const sc = clips[i];
+    if (!sc) return null;
+    return (
+      <>
+        <div className="scene-img" style={{ aspectRatio: ratioStyle }}>
+          {sc.image ? <img src={sc.image} alt={`Escena ${i + 1}`} /> : <span className="muted">Video</span>}
+        </div>
+        <p className="hint" style={{ margin: 0 }}>Cambiar este video por otro:</p>
+        {botonesVideo(sc)}
+        <div className="actions">
+          <button className="btn ghost small" disabled={!!busy} onClick={() => editar((c) => sustituir(c, c.findIndex((x) => x.id === sc.id), nuevoClip()))}>
+            Quitar video
+          </button>
+        </div>
+      </>
+    );
+  };
+
+  const alRecortar = (i: number, inicio: number, fin: number) => editar((c) => recortar(c, i, inicio, fin), `${clipsRef.current[i]?.id}:recorte`);
+  const alDividir = (i: number, segundo: number) => editar((c) => dividir(c, i, segundo));
+  // Congelar un cuadro: queda como foto después del video (y en la galería), lista para usarse o animarse con IA
+  const alCongelar = (i: number, cuadro: string) => {
+    editar((c) => [...c.slice(0, i + 1), nuevoClip({ image: cuadro }), ...c.slice(i + 1)]);
+    onImages([{ kind: "imagen", url: cuadro, prompt: "Cuadro de un video", date: new Date().toISOString() }]);
+    setElegido(i + 1);
+  };
+
   // Lo que se hace con los clips desde la línea de tiempo
   const alMover = (de: number, a: number) => {
     editar((c) => mover(c, de, a));
@@ -871,6 +1005,8 @@ export default function ReelStudio({
             </button>
           )}
         </div>
+        <p className="hint" style={{ margin: 0 }}>O usa un video en este clip:</p>
+        {botonesVideo(sc)}
         {picking === i && (
           <div className="picker">
             {galleryImages.length === 0 && <span className="muted">Tu galería está vacía.</span>}
@@ -921,6 +1057,9 @@ export default function ReelStudio({
             ultimosClips.current = null;
             setInvitarPlan(false);
             setPendientes(null);
+            Object.values(urlsVideo).forEach((u) => u && URL.revokeObjectURL(u));
+            setUrlsVideo({});
+            void limpiarHuerfanos([]);
             setPropuesta(null);
             setResultadoDir(null);
             setCola(null);
@@ -1003,7 +1142,7 @@ export default function ReelStudio({
             <Square size={14} aria-hidden /> Detener
           </button>
         ) : (
-          <button className="btn small" disabled={!!busy || !clips.some((s) => s.image)} onClick={verPrevia}>
+          <button className="btn small" disabled={!!busy || !clips.some(presente)} onClick={verPrevia}>
             <Eye size={15} aria-hidden /> Vista previa
           </button>
         )}
@@ -1022,7 +1161,22 @@ export default function ReelStudio({
         tomasMarcadas={tomasMarcadas}
         ocupado={!!busy}
         panelImagen={panelImagen}
+        videoDe={(id) => urlsVideo[id]}
+        onRecortar={alRecortar}
+        onDividir={alDividir}
+        onCongelar={alCongelar}
+        panelVideo={panelVideo}
       />
+      {clips.some((c) => c.tipo === "video" && !c.sinSonido) && (
+        <div className="slider">
+          <div className="slider-head">
+            <span>Volumen del sonido de tus videos</span>
+            <span>{Math.round(volClips * 100)}%</span>
+          </div>
+          <input type="range" aria-label="Volumen del sonido de tus videos" min={0} max={1} step={0.05} value={volClips} onChange={(e) => setVolClips(Number(e.target.value))} />
+        </div>
+      )}
+      {camaraVideo && <CamaraVideo onVideo={videoGrabado(camaraVideo)} onCerrar={() => setCamaraVideo(null)} />}
       {vozLarga && (
         <div className="acct-upsell">
           <span>
@@ -1108,6 +1262,13 @@ export default function ReelStudio({
       </div>
       {voice && (
         <>
+          <div className="slider">
+            <div className="slider-head">
+              <span>Volumen de la voz</span>
+              <span>{Math.round(volVoz * 100)}%</span>
+            </div>
+            <input type="range" aria-label="Volumen de la voz" min={0} max={1} step={0.05} value={volVoz} onChange={(e) => setVolVoz(Number(e.target.value))} />
+          </div>
           <label className="check">
             <input type="checkbox" checked={subtitlesOn} onChange={(e) => setSubtitlesOn(e.target.checked)} />
             Subtítulos de la voz, palabra por palabra (estilo TikTok)<ProTag h="subtitulos" />
@@ -1187,7 +1348,7 @@ Crear el reel sin IA es gratis: las fotos marcadas con IA se ven con zoom hasta 
         </p>
       )}
       <div className="actions">
-        <button className="btn" disabled={!!busy || viendo || !canRecord || !clips.some((s) => s.image)} onClick={buildReel}>
+        <button className="btn" disabled={!!busy || viendo || !canRecord || !clips.some(presente)} onClick={buildReel}>
           <Clapperboard size={16} aria-hidden /> {tomasMarcadas > 0 ? "Crear reel sin IA (gratis)" : "Crear reel"}
         </button>
         {conCuenta && tomasMarcadas > 0 && (

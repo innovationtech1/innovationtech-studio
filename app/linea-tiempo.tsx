@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, Copy, Dices, Plus, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ArrowLeft, ArrowRight, Camera, Copy, Dices, Plus, Scissors, Trash2 } from "lucide-react";
 import { MOVIMIENTOS, movimientoAlAzar } from "@/lib/movimientos";
-import { MAX_FOTO, MAX_TOMAS, MIN_FOTO, duracionClip, type Clip, type TextoPos, type TextoTam } from "@/lib/linea-tiempo";
+import { MAX_FOTO, MAX_TOMAS, MIN_FOTO, MIN_TRAMO, VELOCIDADES, duracionClip, presente, tramo, type Clip, type TextoPos, type TextoTam } from "@/lib/linea-tiempo";
+import { cuadroDe } from "@/lib/video-propio";
 
 // Segundos con un decimal como mucho: 3 → «3 s», 5.125 → «5.1 s»
 const segundosTexto = (n: number) => `${Number(n.toFixed(1))} s`;
@@ -23,6 +24,11 @@ export default function LineaTiempo({
   tomasMarcadas,
   ocupado,
   panelImagen,
+  videoDe,
+  onRecortar,
+  onDividir,
+  onCongelar,
+  panelVideo,
 }: {
   clips: Clip[];
   elegido: number; // índice del clip abierto (−1 = ninguno)
@@ -36,24 +42,30 @@ export default function LineaTiempo({
   tomasMarcadas: number;
   ocupado: boolean;
   panelImagen: (i: number) => ReactNode; // foto del clip y sus botones (subir, galería, crear, editar, quitar)
+  videoDe: (archivoId: string) => string | null | undefined; // enlace local del video; null = falta el archivo; undefined = abriéndose
+  onRecortar: (i: number, inicio: number, fin: number) => void;
+  onDividir: (i: number, segundo: number) => void;
+  onCongelar: (i: number, cuadro: string) => void; // cuadro: JPG del momento elegido
+  panelVideo: (i: number) => ReactNode; // de dónde sale el video: grabar, subir, galería, quitar
 }) {
   const [arrastrando, setArrastrando] = useState<number | null>(null);
   const [encima, setEncima] = useState<number | null>(null);
   const clip = elegido >= 0 && elegido < clips.length ? clips[elegido] : null;
   const esToma = clip?.tipo === "toma";
+  const esVideo = clip?.tipo === "video";
 
   return (
     <div className="lt">
       <div className="lt-fila" role="list" aria-label="Clips del video">
         {clips.map((c, i) => {
-          const tipo = c.tipo === "toma" ? "IA" : "Foto";
-          const dura = c.image ? segundosTexto(duracionClip(c)) : "vacío";
+          const tipo = c.tipo === "toma" ? "IA" : c.tipo === "video" ? "Video" : "Foto";
+          const dura = presente(c) ? segundosTexto(duracionClip(c)) : "vacío";
           return (
             <div role="listitem" key={c.id}>
               <button
                 type="button"
                 className={`lt-clip${i === elegido ? " elegido" : ""}${encima === i && arrastrando !== null && arrastrando !== i ? " encima" : ""}`}
-                aria-label={`Clip ${i + 1} de ${clips.length} · ${c.tipo === "toma" ? "con IA" : "foto"} · ${dura}`}
+                aria-label={`Clip ${i + 1} de ${clips.length} · ${c.tipo === "toma" ? "con IA" : c.tipo === "video" ? "video" : "foto"} · ${dura}`}
                 aria-pressed={i === elegido}
                 draggable={!ocupado}
                 onDragStart={(e) => {
@@ -80,7 +92,7 @@ export default function LineaTiempo({
                 </span>
                 <span className="lt-pie">
                   <span className={c.tipo === "toma" ? "lt-tipo ia" : "lt-tipo"}>{tipo}</span>
-                  <span data-no-translate>{c.image ? segundosTexto(duracionClip(c)) : "—"}</span>
+                  <span data-no-translate>{presente(c) ? segundosTexto(duracionClip(c)) : "—"}</span>
                 </span>
               </button>
             </div>
@@ -125,7 +137,7 @@ export default function LineaTiempo({
           </div>
 
           <div className="lt-panel-cuerpo">
-            <div className="lt-panel-foto">{panelImagen(elegido)}</div>
+            <div className="lt-panel-foto">{esVideo ? panelVideo(elegido) : panelImagen(elegido)}</div>
             <div className="lt-panel-datos">
               <label htmlFor="lt-texto">Texto en pantalla</label>
               <input
@@ -153,93 +165,210 @@ export default function LineaTiempo({
                 </div>
               </div>
 
-              {esToma ? (
-                <p className="hint" style={{ margin: "4px 0 0" }}>
-                  Las fotos animadas con IA duran 5 segundos.
-                </p>
-              ) : (
-                <div className="slider">
-                  <div className="slider-head">
-                    <span>Duración de esta foto</span>
-                    <span data-no-translate>{segundosTexto(clip.segundos)}</span>
-                  </div>
-                  <input
-                    type="range"
-                    aria-label="Duración de esta foto"
-                    min={MIN_FOTO}
-                    max={MAX_FOTO}
-                    step={0.5}
-                    value={clip.segundos}
-                    onChange={(e) => onCambiar(elegido, { segundos: Number(e.target.value) })}
-                  />
-                </div>
+              {esVideo && clip && (
+                <PanelVideo
+                  key={clip.id}
+                  clip={clip}
+                  src={clip.archivoId ? videoDe(clip.archivoId) : null}
+                  ocupado={ocupado}
+                  onRecortar={(ini, f) => onRecortar(elegido, ini, f)}
+                  onDividir={(seg) => onDividir(elegido, seg)}
+                  onCongelar={(cuadro) => onCongelar(elegido, cuadro)}
+                  onCambiar={(cambios) => onCambiar(elegido, cambios)}
+                />
               )}
 
-              <label htmlFor="lt-prompt">Descripción para crear la imagen con IA</label>
-              <textarea
-                id="lt-prompt"
-                value={clip.prompt}
-                maxLength={400}
-                rows={2}
-                onChange={(e) => onCambiar(elegido, { prompt: e.target.value })}
-                placeholder="Qué debe verse en la foto. Se usa al tocar «Crear con IA»."
-              />
-
-              {conIa && clip.image && (
+              {!esVideo && (
                 <>
-                  <label className="check" style={{ margin: "4px 0 0" }}>
+                {esToma ? (
+                  <p className="hint" style={{ margin: "4px 0 0" }}>
+                    Las fotos animadas con IA duran 5 segundos.
+                  </p>
+                ) : (
+                  <div className="slider">
+                    <div className="slider-head">
+                      <span>Duración de esta foto</span>
+                      <span data-no-translate>{segundosTexto(clip.segundos)}</span>
+                    </div>
                     <input
-                      type="checkbox"
-                      checked={esToma}
-                      disabled={ocupado || (!esToma && tomasMarcadas >= MAX_TOMAS)}
-                      onChange={(e) => onCambiar(elegido, { tipo: e.target.checked ? "toma" : "foto" })}
+                      type="range"
+                      aria-label="Duración de esta foto"
+                      min={MIN_FOTO}
+                      max={MAX_FOTO}
+                      step={0.5}
+                      value={clip.segundos}
+                      onChange={(e) => onCambiar(elegido, { segundos: Number(e.target.value) })}
                     />
-                    Animar con IA (movimiento real, 5 s)
-                  </label>
-                  {!esToma && tomasMarcadas >= MAX_TOMAS && <p className="hint" style={{ margin: 0 }}>Ya marcaste el máximo de 4 fotos con IA en este video.</p>}
-                  {esToma && (
-                    <div className="lt-mov">
-                      <label htmlFor="lt-mov">¿Cómo se mueve? Toca una opción o escribe la tuya</label>
-                      <div className="lt-mov-opciones">
-                        <button
-                          type="button"
-                          className="btn small"
-                          disabled={ocupado}
-                          onClick={() => onCambiar(elegido, { movimiento: movimientoAlAzar(clip.movimiento ?? "") })}
-                        >
-                          <Dices size={15} aria-hidden /> Sorpréndeme
-                        </button>
-                        {MOVIMIENTOS.map((m) => (
+                  </div>
+                )}
+
+                <label htmlFor="lt-prompt">Descripción para crear la imagen con IA</label>
+                <textarea
+                  id="lt-prompt"
+                  value={clip.prompt}
+                  maxLength={400}
+                  rows={2}
+                  onChange={(e) => onCambiar(elegido, { prompt: e.target.value })}
+                  placeholder="Qué debe verse en la foto. Se usa al tocar «Crear con IA»."
+                />
+
+                {conIa && clip.image && (
+                  <>
+                    <label className="check" style={{ margin: "4px 0 0" }}>
+                      <input
+                        type="checkbox"
+                        checked={esToma}
+                        disabled={ocupado || (!esToma && tomasMarcadas >= MAX_TOMAS)}
+                        onChange={(e) => onCambiar(elegido, { tipo: e.target.checked ? "toma" : "foto" })}
+                      />
+                      Animar con IA (movimiento real, 5 s)
+                    </label>
+                    {!esToma && tomasMarcadas >= MAX_TOMAS && <p className="hint" style={{ margin: 0 }}>Ya marcaste el máximo de 4 fotos con IA en este video.</p>}
+                    {esToma && (
+                      <div className="lt-mov">
+                        <label htmlFor="lt-mov">¿Cómo se mueve? Toca una opción o escribe la tuya</label>
+                        <div className="lt-mov-opciones">
                           <button
                             type="button"
-                            key={m.id}
-                            className={`btn ghost small${(clip.movimiento ?? "") === m.texto ? " activo" : ""}`}
-                            aria-pressed={(clip.movimiento ?? "") === m.texto}
+                            className="btn small"
                             disabled={ocupado}
-                            onClick={() => onCambiar(elegido, { movimiento: m.texto })}
+                            onClick={() => onCambiar(elegido, { movimiento: movimientoAlAzar(clip.movimiento ?? "") })}
                           >
-                            {m.nombre}
+                            <Dices size={15} aria-hidden /> Sorpréndeme
                           </button>
-                        ))}
+                          {MOVIMIENTOS.map((m) => (
+                            <button
+                              type="button"
+                              key={m.id}
+                              className={`btn ghost small${(clip.movimiento ?? "") === m.texto ? " activo" : ""}`}
+                              aria-pressed={(clip.movimiento ?? "") === m.texto}
+                              disabled={ocupado}
+                              onClick={() => onCambiar(elegido, { movimiento: m.texto })}
+                            >
+                              {m.nombre}
+                            </button>
+                          ))}
+                        </div>
+                        <textarea
+                          id="lt-mov"
+                          value={clip.movimiento ?? ""}
+                          maxLength={300}
+                          rows={2}
+                          onChange={(e) => onCambiar(elegido, { movimiento: e.target.value })}
+                          placeholder="Movimiento (opcional). Ej.: la cámara se acerca despacio"
+                        />
+                        <p className="hint" style={{ margin: 0 }}>
+                          Cambiar el movimiento de una foto ya animada pide una toma nueva.
+                        </p>
                       </div>
-                      <textarea
-                        id="lt-mov"
-                        value={clip.movimiento ?? ""}
-                        maxLength={300}
-                        rows={2}
-                        onChange={(e) => onCambiar(elegido, { movimiento: e.target.value })}
-                        placeholder="Movimiento (opcional). Ej.: la cámara se acerca despacio"
-                      />
-                      <p className="hint" style={{ margin: 0 }}>
-                        Cambiar el movimiento de una foto ya animada pide una toma nueva.
-                      </p>
-                    </div>
-                  )}
+                    )}
+                  </>
+                )}
                 </>
               )}
             </div>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// El panel de un clip de video propio: verlo, recortarlo, dividirlo, cambiarle la velocidad y el sonido.
+function PanelVideo({
+  clip,
+  src,
+  ocupado,
+  onRecortar,
+  onDividir,
+  onCongelar,
+  onCambiar,
+}: {
+  clip: Clip;
+  src: string | null | undefined;
+  ocupado: boolean;
+  onRecortar: (inicio: number, fin: number) => void;
+  onDividir: (segundo: number) => void;
+  onCongelar: (cuadro: string) => void;
+  onCambiar: (cambios: Partial<Clip>) => void;
+}) {
+  const video = useRef<HTMLVideoElement>(null);
+  const t = tramo(clip);
+  const dur = clip.duracionOriginal ?? 0;
+  const [pos, setPos] = useState(t.inicio);
+  // El reproductor se queda dentro del recorte: al cambiar el inicio o el fin, salta ahí
+  useEffect(() => {
+    const v = video.current;
+    if (!v) return;
+    if (v.currentTime < t.inicio || v.currentTime > t.fin) v.currentTime = t.inicio;
+  }, [t.inicio, t.fin]);
+  const alAvanzar = () => {
+    const v = video.current;
+    if (!v) return;
+    if (v.currentTime >= t.fin && !v.paused) {
+      v.pause();
+      v.currentTime = t.inicio;
+    }
+    setPos(v.currentTime);
+  };
+  const sePuedeDividir = pos - t.inicio >= MIN_TRAMO && t.fin - pos >= MIN_TRAMO;
+  const s1 = (n: number) => `${Number(n.toFixed(1))} s`;
+
+  if (src === null) return <div className="error" style={{ margin: 0 }}>Falta el archivo de este video en este dispositivo. Usa los botones de la izquierda para poner otro.</div>;
+
+  return (
+    <div className="lt-video">
+      {src ? (
+        <video ref={video} src={src} controls playsInline preload="metadata" onTimeUpdate={alAvanzar} onSeeked={alAvanzar} onLoadedMetadata={() => video.current && (video.current.currentTime = t.inicio)} />
+      ) : (
+        <p className="muted">Abriendo el video…</p>
+      )}
+      <div className="slider">
+        <div className="slider-head">
+          <span>Empieza en</span>
+          <span data-no-translate>{s1(t.inicio)}</span>
+        </div>
+        <input type="range" aria-label="Empieza en" min={0} max={dur} step={0.1} value={t.inicio} disabled={ocupado} onChange={(e) => onRecortar(Math.min(Number(e.target.value), t.fin - MIN_TRAMO), t.fin)} />
+      </div>
+      <div className="slider">
+        <div className="slider-head">
+          <span>Termina en</span>
+          <span data-no-translate>{s1(t.fin)}</span>
+        </div>
+        <input type="range" aria-label="Termina en" min={0} max={dur} step={0.1} value={t.fin} disabled={ocupado} onChange={(e) => onRecortar(t.inicio, Math.max(Number(e.target.value), t.inicio + MIN_TRAMO))} />
+      </div>
+      <p className="hint" style={{ margin: 0 }}>{`En tu video dura ${s1(duracionClip(clip))} (el original dura ${s1(dur)}).`}</p>
+      <div className="actions lt-video-botones">
+        <button type="button" className="btn ghost small" disabled={ocupado || !src || !sePuedeDividir} onClick={() => onDividir(pos)}>
+          <Scissors size={15} aria-hidden /> Dividir aquí
+        </button>
+        <button type="button" className="btn ghost small" disabled={ocupado || !src} onClick={() => video.current && video.current.videoWidth > 0 && onCongelar(cuadroDe(video.current, 1280))}>
+          <Camera size={15} aria-hidden /> Congelar este cuadro
+        </button>
+      </div>
+      <p className="hint" style={{ margin: 0 }}>
+        Mueve el video al momento que quieras y toca «Dividir aquí» para partirlo en dos, o «Congelar este cuadro» para sacar una foto.
+      </p>
+      <div className="row">
+        <div>
+          <label htmlFor="lt-vel">Velocidad</label>
+          <select id="lt-vel" value={clip.velocidad ?? 1} disabled={ocupado} onChange={(e) => onCambiar({ velocidad: Number(e.target.value) })}>
+            {VELOCIDADES.map((v) => (
+              <option key={v} value={v}>
+                {v === 1 ? "Normal" : v < 1 ? `Lenta ×${v}` : `Rápida ×${v}`}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <label className="check" style={{ margin: 0 }}>
+        <input type="checkbox" checked={!clip.sinSonido} disabled={ocupado} onChange={(e) => onCambiar({ sinSonido: !e.target.checked })} />
+        Sonido de este video
+      </label>
+      {(clip.velocidad ?? 1) !== 1 && !clip.sinSonido && (
+        <p className="hint" style={{ margin: 0 }}>
+          A otra velocidad el sonido se oye distinto.
+        </p>
       )}
     </div>
   );

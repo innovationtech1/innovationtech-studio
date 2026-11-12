@@ -12,8 +12,10 @@ import {
   borrar,
   cambiar,
   duplicar,
+  duracionClip,
   mover,
   nuevoClip,
+  presente,
   type Clip,
   type TextoPos,
   type TextoTam,
@@ -296,7 +298,7 @@ export function aplicarAcciones(estado: Estado, acciones: Accion[], cat: Catalog
     return -1;
   };
   // Un clip «tendrá foto» si ya la tiene o si esta misma orden la va a crear
-  const tendraFoto = (c: Clip) => !!c.image || imagenes.has(c.id);
+  const tendraFoto = (c: Clip) => presente(c) || imagenes.has(c.id);
   const pedirVoz = (ajustarFotos: boolean) => {
     if (!aj.guion.trim()) return aviso("Escribe primero el guion");
     if (!permisos.voz) return aviso("Tu plan no incluye voz");
@@ -347,6 +349,10 @@ export function aplicarAcciones(estado: Estado, acciones: Accion[], cat: Catalog
           aviso(`El clip ${a.clip} está animado con IA y siempre dura ${SEGUNDOS_TOMA} s`);
           break;
         }
+        if (clips[i].tipo === "video") {
+          aviso(`El clip ${a.clip} es un video: su duración se cambia recortándolo`);
+          break;
+        }
         clips = cambiar(clips, i, { segundos: a.segundos });
         hecho.push(`Puse el clip ${a.clip} en ${a.segundos} s`);
         break;
@@ -358,7 +364,8 @@ export function aplicarAcciones(estado: Estado, acciones: Accion[], cat: Catalog
           aviso("Agrega fotos antes de fijar la duración del video");
           break;
         }
-        const fijo = cuentan.filter((c) => c.tipo === "toma").length * SEGUNDOS_TOMA + CIERRE;
+        // Lo que no se reparte: tomas con IA, videos propios y el cierre
+        const fijo = cuentan.reduce((s, c) => s + (c.tipo === "toma" ? SEGUNDOS_TOMA : c.tipo === "video" ? duracionClip(c) : 0), 0) + CIERRE;
         const cada = entre(Math.round(((a.segundos - fijo) / fotos.length) * 10) / 10, MIN_FOTO, MAX_FOTO);
         const ids = new Set(fotos.map((c) => c.id));
         clips = clips.map((c) => (ids.has(c.id) ? { ...c, segundos: cada } : c));
@@ -399,6 +406,10 @@ export function aplicarAcciones(estado: Estado, acciones: Accion[], cat: Catalog
         if (!a.activar) {
           clips = cambiar(clips, i, { tipo: "foto" });
           hecho.push(`Quité la IA del clip ${a.clip}`);
+          break;
+        }
+        if (clips[i].tipo === "video") {
+          aviso(`El clip ${a.clip} es un video: solo se animan fotos`);
           break;
         }
         if (!permisos.ia) {
@@ -486,7 +497,7 @@ export function aplicarAcciones(estado: Estado, acciones: Accion[], cat: Catalog
           const n: Clip = { ...c, prompt: a.imagenes[i] || c.prompt };
           if (a.textos[i]) n.caption = a.textos[i];
           if (n.tipo === "foto") n.segundos = a.segundosPorFoto;
-          if (!c.image) imagenes.set(c.id, a.imagenes[i]);
+          if (!tendraFoto(c)) imagenes.set(c.id, a.imagenes[i]);
           return n;
         });
         clips = lista;
@@ -503,7 +514,7 @@ export function aplicarAcciones(estado: Estado, acciones: Accion[], cat: Catalog
             // Anima las fotos del video, en orden, hasta el máximo por video
             let marcadas = clips.filter((c) => c.tipo === "toma" && tendraFoto(c)).length;
             clips = clips.map((c, i) => {
-              if (i >= a.clips || c.tipo === "toma" || marcadas >= MAX_TOMAS) return c;
+              if (i >= a.clips || c.tipo !== "foto" || marcadas >= MAX_TOMAS) return c;
               marcadas++;
               return { ...c, tipo: "toma" as const };
             });
@@ -575,9 +586,9 @@ export function resumenProyecto(estado: Estado): Record<string, unknown> {
     tema: a.tema,
     clips: estado.clips.map((c, i) => ({
       n: i + 1,
-      tipo: c.tipo === "toma" ? "con_ia" : "foto",
-      segundos: c.tipo === "toma" ? SEGUNDOS_TOMA : c.segundos,
-      foto: !!c.image,
+      tipo: c.tipo === "toma" ? "con_ia" : c.tipo,
+      segundos: c.tipo === "toma" ? SEGUNDOS_TOMA : c.tipo === "video" ? Math.round(duracionClip(c) * 10) / 10 : c.segundos,
+      foto: presente(c),
       texto: c.caption,
     })),
     negocio: a.negocio,

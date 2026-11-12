@@ -72,6 +72,10 @@ export async function listItems(): Promise<StoredItem[]> {
   return (all || []).sort((a, b) => (a.date < b.date ? 1 : -1));
 }
 
+// Un elemento de la galería por su id (con su archivo)
+export async function getItem(id: string): Promise<StoredItem | null> {
+  return (await tx<StoredItem | undefined>("readonly", (st) => st.get(id))) ?? null;
+}
 export async function deleteItem(id: string) {
   await tx("readwrite", (s) => s.delete(id));
 }
@@ -93,6 +97,15 @@ export async function getFile(id: string): Promise<Blob | null> {
     const r = d.transaction(FILES, "readonly").objectStore(FILES).get(id);
     r.onsuccess = () => res((r.result as Blob) || null);
     r.onerror = () => res(null);
+  });
+}
+// Los ids de todos los archivos guardados (para limpiar los que ya no se usan)
+export async function listFileIds(): Promise<string[]> {
+  const d = await db();
+  return new Promise((res) => {
+    const r = d.transaction(FILES, "readonly").objectStore(FILES).getAllKeys();
+    r.onsuccess = () => res((r.result as IDBValidKey[]).map(String));
+    r.onerror = () => res([]);
   });
 }
 export async function deleteFile(id: string) {

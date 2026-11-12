@@ -183,6 +183,7 @@ button.pick { background: none; font: inherit; }
 .camara-vista > .muted { position: absolute; }
 .camara-ultima { position: absolute; right: 10px; bottom: 10px; width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 2px solid var(--paper); }
 .camara-botones { justify-content: center; }
+.camara-reloj { position: absolute; top: 10px; left: 10px; background: rgba(0, 0, 0, 0.6); color: #ff5a5a; font-weight: 700; padding: 4px 10px; border-radius: 99px; font-variant-numeric: tabular-nums; }
 
 .install-bar {
   position: fixed; left: 50%; transform: translateX(-50%);
@@ -254,6 +255,12 @@ h3.step { margin: 22px 0 6px; font-size: 16px; }
 .lt-panel-datos { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .lt-panel-datos label { margin: 0; }
 .lt-panel-datos textarea { min-height: 60px; margin: 0; }
+.lt-video { display: flex; flex-direction: column; gap: 8px; }
+.lt-video video { width: 100%; max-height: 280px; border-radius: 8px; background: #000; }
+.lt-video-botones { margin: 0; }
+.lt-video-botones .btn { margin-top: 0; min-height: 44px; }
+.lt-origen { display: flex; flex-wrap: wrap; gap: 6px; }
+.lt-origen .btn { margin: 0; min-height: 44px; }
 .lt-mov { display: flex; flex-direction: column; gap: 8px; }
 .lt-mov-opciones { display: flex; flex-wrap: wrap; gap: 6px; }
 .lt-mov-opciones .btn { margin-top: 0; min-height: 44px; }
@@ -269,6 +276,8 @@ h3.step { margin: 22px 0 6px; font-size: 16px; }
 .picker { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; max-height: 220px; overflow: auto; }
 .picker img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; cursor: pointer; border: 2px solid transparent; }
 .picker img:hover { border-color: var(--red); }
+.picker video { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; cursor: pointer; border: 2px solid transparent; background: #000; }
+.picker video:hover { border-color: var(--red); }
 .bar { height: 6px; background: var(--navy-900); border-radius: 99px; margin-top: 8px; overflow: hidden; }
 .bar div { height: 100%; background: var(--red); transition: width 0.2s; }
 .reel-output { margin-top: 14px; display: flex; gap: 16px; flex-wrap: wrap; }

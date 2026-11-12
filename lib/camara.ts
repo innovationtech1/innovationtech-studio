@@ -13,6 +13,8 @@ export function mensajeCamara(nombre: string): string {
     case "NotReadableError":
     case "AbortError":
       return "La cámara está ocupada por otra aplicación. Ciérrala y vuelve a intentar.";
+    case "SinMicrofono":
+      return "No hay permiso de micrófono: el video se grabará sin sonido.";
     case "SinSoporte":
       return "Este navegador no permite usar la cámara desde la página. Sube la foto desde tus archivos.";
     default:
@@ -24,4 +26,29 @@ export function mensajeCamara(nombre: string): string {
 export function tamanoCaptura(ancho: number, alto: number, max: number): { w: number; h: number } {
   const k = Math.min(1, max / Math.max(ancho, alto, 1));
   return { w: Math.max(1, Math.round(ancho * k)), h: Math.max(1, Math.round(alto * k)) };
+}
+
+// ---------- Grabar video ----------
+
+export const MAX_GRABACION = 60; // segundos por grabación
+
+// Lo grabado y el máximo: 7 → «0:07 / 1:00»
+export function relojGrabacion(segundos: number): string {
+  const mmss = (n: number) => `${Math.floor(n / 60)}:${String(n % 60).padStart(2, "0")}`;
+  const s = Math.min(MAX_GRABACION, Math.max(0, Math.floor(segundos)));
+  return `${mmss(s)} / ${mmss(MAX_GRABACION)}`;
+}
+
+// En qué formato graba este navegador. MP4 (H.264) primero porque lo abren todos los celulares; si no, WebM.
+// `soporta` es MediaRecorder.isTypeSupported. null = este navegador no puede grabar.
+export function formatoGrabacion(soporta: (mime: string) => boolean): string | null {
+  const opciones = [
+    "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+    "video/mp4;codecs=avc1,mp4a.40.2",
+    "video/webm;codecs=vp9,opus",
+    "video/webm;codecs=vp8,opus",
+    "video/webm",
+    "video/mp4",
+  ];
+  return opciones.find((m) => soporta(m)) ?? null;
 }
