@@ -1131,6 +1131,25 @@ export const EN: Record<string, string> = {
   "Solo el dueño del negocio puede conectar la cuenta de Cloudflare.": "Only the business owner can connect the Cloudflare account.",
   "Solo el dueño del negocio puede desconectar la cuenta de Cloudflare.": "Only the business owner can disconnect the Cloudflare account.",
   "Falta configurar el guardado seguro de claves. Avísale a InnovationTECH.": "Secure key storage isn't set up yet. Let InnovationTECH know.",
+  "Clips del video": "Video clips",
+  "Foto": "Photo",
+  "IA": "AI",
+  "Agregar": "Add",
+  "Toca un clip para ponerle foto, texto y duración.": "Tap a clip to set its photo, text and duration.",
+  "Antes": "Earlier",
+  "Después": "Later",
+  "Borrar": "Delete",
+  "Texto en pantalla": "On-screen text",
+  "Lo que se lee sobre la imagen (opcional)": "What is read over the image (optional)",
+  "Posición del texto": "Text position",
+  "Tamaño del texto": "Text size",
+  "Chico": "Small",
+  "Normal": "Normal",
+  "Grande": "Large",
+  "Las fotos animadas con IA duran 5 segundos.": "Photos animated with AI last 5 seconds.",
+  "Duración de esta foto": "Duration of this photo",
+  "Animar con IA (movimiento real, 5 s)": "Animate with AI (real motion, 5 s)",
+  "Ya marcaste el máximo de 4 fotos con IA en este video.": "You already marked the maximum of 4 AI photos in this video.",
 };
 
 // Textos con números u otras partes que cambian
@@ -1190,4 +1209,7 @@ export const EN_PATTERNS: [RegExp, string][] = [
   [/^Diapositiva (\d+) actualizada con tus ajustes del editor\.$/, "Slide $1 updated with your editor changes."],
   [/^Listo: (\d+) diapositivas en un \.zip\. En Instagram súbelas en orden \(01, 02, 03…\)\.$/, "Done: $1 slides in a .zip. Upload them to Instagram in order (01, 02, 03…)."],
   [/^Guardadas (\d+) diapositivas en tu galería\.$/, "Saved $1 slides to your gallery."],
+  [/^Clip (\d+) de (\d+)$/, "Clip $1 of $2"],
+  [/^Clip (\d+) de (\d+) · foto · (.+)$/, "Clip $1 of $2 · photo · $3"],
+  [/^Clip (\d+) de (\d+) · con IA · (.+)$/, "Clip $1 of $2 · with AI · $3"],
 ];
