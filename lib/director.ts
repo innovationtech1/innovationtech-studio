@@ -35,7 +35,7 @@ export type Formato = "9:16" | "1:1" | "16:9";
 export type RefClip = number | "todos"; // número desde 1, como en pantalla
 
 export type Accion =
-  | { tipo: "armar"; tema: string; clips: number; segundosPorFoto: number; textos: string[]; imagenes: string[]; cta: string; guion: string; musica?: string }
+  | { tipo: "armar"; tema: string; clips: number; segundosPorFoto: number; textos: string[]; imagenes: string[]; cta: string; guion: string; conIa: boolean; musica?: string }
   | { tipo: "agregar_clip"; cantidad: number }
   | { tipo: "borrar_clip"; clip: number }
   | { tipo: "mover_clip"; clip: number; a: number }
@@ -53,7 +53,8 @@ export type Accion =
   | { tipo: "subtitulos"; activar: boolean }
   | { tipo: "musica"; activar?: boolean; estilo?: string; volumen?: number | "subir" | "bajar" }
   | { tipo: "vista_previa" }
-  | { tipo: "crear_video" };
+  | { tipo: "crear_video" }
+  | { tipo: "generar_ia" }; // genera las tomas con IA de las fotos marcadas y graba el video
 
 export const TIPOS_DE_ACCION: Accion["tipo"][] = [
   "armar",
@@ -75,6 +76,7 @@ export const TIPOS_DE_ACCION: Accion["tipo"][] = [
   "musica",
   "vista_previa",
   "crear_video",
+  "generar_ia",
 ];
 
 // Lo que la app tiene para elegir: estilos de música y voces
@@ -126,6 +128,7 @@ function validarUna(a: Cruda, cat: Catalogo): Accion | null {
         imagenes: lista(a.imagenes, 400, `${tema}, advertising photography, high quality`),
         cta: txt(a.cta, MAX_TEXTO),
         guion: txt(a.guion, MAX_GUION),
+        conIa: bool(a.con_ia ?? a.conIa) === true,
       };
       if (typeof a.musica === "string" && cat.estilos.includes(a.musica)) r.musica = a.musica;
       return r;
@@ -217,6 +220,8 @@ function validarUna(a: Cruda, cat: Catalogo): Accion | null {
       return { tipo: "vista_previa" };
     case "crear_video":
       return { tipo: "crear_video" };
+    case "generar_ia":
+      return { tipo: "generar_ia" };
     default:
       return null;
   }
@@ -264,7 +269,8 @@ export type Pendiente =
   | { tipo: "voz"; ajustarFotos: boolean } // ajustarFotos: al generarla, repartir las fotos para cubrirla (al armar)
   | { tipo: "quitar_voz" }
   | { tipo: "vista_previa" }
-  | { tipo: "crear_video" };
+  | { tipo: "crear_video" }
+  | { tipo: "generar_ia"; tomas: number }; // tomas: cuántas fotos animadas se pedirán (las ya generadas no se cobran)
 
 export type Permisos = { voz: boolean; ia: boolean }; // el plan incluye voz / hay sesión para animar con IA
 export type Resultado = { estado: Estado; pendientes: Pendiente[]; hecho: string[]; avisos: string[] };
@@ -280,6 +286,7 @@ export function aplicarAcciones(estado: Estado, acciones: Accion[], cat: Catalog
   let voz: { ajustarFotos: boolean } | null = null;
   let quitarVoz = false;
   let final: "vista_previa" | "crear_video" | null = null;
+  let generarIa = false;
 
   const aviso = (t: string) => void (avisos.includes(t) || avisos.push(t));
   // Devuelve el índice del clip número n, o avisa que no existe
@@ -490,6 +497,19 @@ export function aplicarAcciones(estado: Estado, acciones: Accion[], cat: Catalog
           aj.musica = true;
         }
         hecho.push(`Armé ${a.clips} clips con sus textos`);
+        if (a.conIa) {
+          if (!permisos.ia) aviso("Inicia sesión para animar fotos con IA");
+          else {
+            // Anima las fotos del video, en orden, hasta el máximo por video
+            let marcadas = clips.filter((c) => c.tipo === "toma" && tendraFoto(c)).length;
+            clips = clips.map((c, i) => {
+              if (i >= a.clips || c.tipo === "toma" || marcadas >= MAX_TOMAS) return c;
+              marcadas++;
+              return { ...c, tipo: "toma" as const };
+            });
+            generarIa = true;
+          }
+        }
         if (a.guion) {
           aj.guion = a.guion;
           if (pedirVoz(true)) hecho.push("Escribí el guion y generaré la voz");
@@ -503,6 +523,10 @@ export function aplicarAcciones(estado: Estado, acciones: Accion[], cat: Catalog
       case "crear_video":
         final = "crear_video";
         break;
+      case "generar_ia":
+        if (!permisos.ia) aviso("Inicia sesión para animar fotos con IA");
+        else generarIa = true;
+        break;
     }
   }
 
@@ -511,23 +535,36 @@ export function aplicarAcciones(estado: Estado, acciones: Accion[], cat: Catalog
   for (const c of clips) if (imagenes.has(c.id)) pendientes.push({ tipo: "imagen", clipId: c.id, descripcion: imagenes.get(c.id)! });
   if (voz) pendientes.push({ tipo: "voz", ajustarFotos: (voz as { ajustarFotos: boolean }).ajustarFotos });
   else if (quitarVoz) pendientes.push({ tipo: "quitar_voz" });
-  if (final) pendientes.push({ tipo: final });
+  // Generar las tomas ya graba el video al terminar: manda sobre la vista previa y «crear video»
+  const tomas = clips.filter((c) => c.tipo === "toma" && tendraFoto(c)).length;
+  if (generarIa && tomas === 0) aviso("Marca primero qué fotos animar con IA");
+  if (generarIa && tomas > 0) {
+    pendientes.push({ tipo: "generar_ia", tomas });
+    hecho.push(tomas === 1 ? "Generaré 1 toma con IA y grabaré el video" : `Generaré ${tomas} tomas con IA y grabaré el video`);
+  } else if (final) pendientes.push({ tipo: final });
   return { estado: { clips, ajustes: aj }, pendientes, hecho, avisos };
 }
 
-export function costoDe(pendientes: Pendiente[]): { imagenes: number; voces: number } {
+export type Costo = { imagenes: number; voces: number; tomas: number };
+
+export function costoDe(pendientes: Pendiente[]): Costo {
   return {
     imagenes: pendientes.filter((p) => p.tipo === "imagen").length,
     voces: pendientes.filter((p) => p.tipo === "voz").length,
+    tomas: pendientes.reduce((n, p) => n + (p.tipo === "generar_ia" ? p.tomas : 0), 0),
   };
 }
 
 // El texto de la confirmación antes de gastar. null = la orden no gasta nada.
-export function textoCosto(c: { imagenes: number; voces: number }): string | null {
+// Las tomas van con «hasta» porque las que ya se generaron antes no se vuelven a cobrar.
+export function textoCosto(c: Costo): string | null {
   const partes: string[] = [];
   if (c.imagenes > 0) partes.push(c.imagenes === 1 ? "1 imagen" : `${c.imagenes} imágenes`);
   if (c.voces > 0) partes.push(c.voces === 1 ? "1 voz" : `${c.voces} voces`);
-  return partes.length ? `Esta orden usa ${partes.join(" y ")}.` : null;
+  if (c.tomas > 0) partes.push(c.tomas === 1 ? "hasta 1 toma con IA" : `hasta ${c.tomas} tomas con IA`);
+  if (partes.length === 0) return null;
+  const lista = partes.length === 1 ? partes[0] : `${partes.slice(0, -1).join(", ")} y ${partes[partes.length - 1]}`;
+  return `Esta orden usa ${lista}.`;
 }
 
 // Lo que se le cuenta a la IA del video: textos y números. Nunca las fotos.
@@ -568,7 +605,7 @@ export function instruccionesDirector(o: {
     'Responde SOLO con un objeto JSON válido, sin texto adicional ni explicaciones, con esta forma exacta: {"acciones": [ ... ], "mensaje": "una frase corta para la persona"}',
     "",
     "ACCIONES PERMITIDAS (usa solo estas; nunca inventes acciones ni campos). Los clips se numeran desde 1:",
-    '- {"tipo": "armar", "tema": "...", "clips": N, "segundos_por_foto": S, "textos": [N frases], "imagenes": [N descripciones], "cta": "...", "guion": "...", "musica": "estilo"}: arma el video completo. Úsala cuando pidan crear, hacer o armar un video.',
+    '- {"tipo": "armar", "tema": "...", "clips": N, "segundos_por_foto": S, "textos": [N frases], "imagenes": [N descripciones], "cta": "...", "guion": "...", "musica": "estilo", "con_ia": true | false}: arma el video completo. Úsala cuando pidan crear, hacer o armar un video. "con_ia": true SOLO si piden el video con IA, con movimiento real o con fotos animadas.',
     '- {"tipo": "agregar_clip", "cantidad": N}: agrega clips vacíos al final.',
     '- {"tipo": "borrar_clip", "clip": N}',
     '- {"tipo": "mover_clip", "clip": N, "a": N}: mueve el clip al lugar "a".',
@@ -578,7 +615,8 @@ export function instruccionesDirector(o: {
     '- {"tipo": "texto", "clip": N, "texto": "..."}: el texto en pantalla de ese clip (máximo 8 palabras).',
     '- {"tipo": "estilo_texto", "clip": N o "todos", "posicion": "arriba" | "centro" | "abajo", "tamano": "chico" | "normal" | "grande"}',
     '- {"tipo": "imagen", "clip": N, "descripcion": "..."}: crea con IA la imagen de ese clip. Úsala solo si la piden.',
-    '- {"tipo": "animar", "clip": N, "activar": true | false, "movimiento": "..."}: marca la foto para animarla con IA. Úsala solo si la piden.',
+    '- {"tipo": "animar", "clip": N, "activar": true | false, "movimiento": "..."}: marca la foto para animarla con IA (movimiento real, 5 s). Úsala solo si la piden.',
+    '- {"tipo": "generar_ia"}: genera las tomas con IA de las fotos marcadas y graba el video. Ponla al final cuando pidan animar fotos o generar el video con IA.',
     '- {"tipo": "formato", "valor": "9:16" | "1:1" | "16:9"}: vertical, cuadrado u horizontal.',
     '- {"tipo": "cierre", "negocio": "...", "cta": "..."}: nombre del negocio y llamada a la acción del final.',
     '- {"tipo": "guion", "texto": "..."}: lo que dice la voz en off.',
@@ -597,7 +635,8 @@ export function instruccionesDirector(o: {
     '- "textos": una frase corta por clip (máximo 8 palabras) que cuente una historia: gancho, beneficios y oferta. Sin hashtags ni emojis.',
     '- "imagenes": una descripción EN INGLÉS por clip, detallada: sujeto, lugar, luz, encuadre, estilo de fotografía publicitaria profesional, sin texto dentro de la imagen. Que la imagen salga bien a la primera.',
     '- "guion": natural y entusiasta, a unas 2.3 palabras por segundo de video, para que la voz quepa sin alargarlo.',
-    "- No crees imágenes, voz ni animaciones con IA que no te hayan pedido. No cambies lo que no te pidan.",
+    "- Las tomas con IA cuestan: usa \"con_ia\", \"animar\" y \"generar_ia\" solo si la persona lo pide (\"con IA\", \"con movimiento real\", \"anima las fotos\", \"anima el clip 2\"). Si no lo pide, el video va con zoom, que es gratis.",
+    "- No crees imágenes ni voz que no te hayan pedido. No cambies lo que no te pidan.",
     "- Si la orden no se puede hacer con estas acciones, o no se entiende, responde con la lista vacía y explica en el mensaje qué sí puedes hacer.",
     '- "mensaje": una sola frase amable, en el idioma de la orden.',
     "",
@@ -606,6 +645,8 @@ export function instruccionesDirector(o: {
     '{"acciones": [{"tipo": "armar", "tema": "promo 2x1 en tortas los martes", "clips": 4, "segundos_por_foto": 7, "textos": ["¿Antojo de torta?", "Martes de 2x1", "Recién hechas, bien servidas", "Solo este martes"], "imagenes": ["close-up of a Mexican torta ahogada on a rustic wooden table, warm natural light, shallow depth of field, professional food advertising photography", "two fresh Mexican tortas side by side on a colorful plate, bright daylight, top-down view, professional food advertising photography", "cook hands assembling a torta in a busy taqueria kitchen, steam rising, warm light, professional advertising photography", "happy friends sharing tortas at a street food stand at dusk, string lights, candid, professional advertising photography"], "cta": "Te esperamos este martes", "guion": "¿Se te antoja una torta? Este martes llévate dos al precio de una. Recién hechas, bien servidas y con todo el sabor de casa. No te lo pierdas, te esperamos este martes.", "musica": "pop"}], "mensaje": "Listo, armé tu video de la promo de los martes."}',
     'Orden: "quita el clip 2, pon todos los textos arriba y grandes y baja la música"',
     '{"acciones": [{"tipo": "borrar_clip", "clip": 2}, {"tipo": "estilo_texto", "clip": "todos", "posicion": "arriba", "tamano": "grande"}, {"tipo": "musica", "volumen": "bajar"}], "mensaje": "Hecho: quité el clip 2, subí los textos y bajé la música."}',
+    'Orden: "anima con IA el primer clip, que la cámara se acerque despacio"',
+    '{"acciones": [{"tipo": "animar", "clip": 1, "activar": true, "movimiento": "the camera slowly pushes in"}, {"tipo": "generar_ia"}], "mensaje": "Voy a animar el primer clip con IA y grabar tu video."}',
     'Orden: "publícalo en Instagram"',
     '{"acciones": [], "mensaje": "Todavía no puedo publicar por ti; puedo crear el video para que lo descargues."}',
     o.marca ? `\nContexto de la marca:\n${o.marca}` : "",

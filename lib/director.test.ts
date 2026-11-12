@@ -71,6 +71,7 @@ test("validar: armar normaliza clips, segundos por foto, textos e imágenes", ()
     imagenes: ["x", "promo 2x1, advertising photography, high quality", "promo 2x1, advertising photography, high quality"],
     cta: "Ven",
     guion: "g",
+    conIa: false,
     musica: "pop",
   });
   const b = una({ tipo: "armar", tema: "t" });
@@ -322,6 +323,7 @@ test("aplicar: voz por género, generar y quitar", () => {
 
 const armar = (extra: Partial<Extract<Accion, { tipo: "armar" }>> = {}): Accion => ({
   tipo: "armar",
+  conIa: false,
   tema: "promo",
   clips: 4,
   segundosPorFoto: 8,
@@ -349,7 +351,7 @@ test("armar: sobre clips vacíos pone textos, duración, cierre, guion y música
     r.pendientes,
     [...r.estado.clips.map((c, i) => ({ tipo: "imagen", clipId: c.id, descripcion: `i${i + 1}` })), { tipo: "voz", ajustarFotos: true }],
   );
-  assert.deepEqual(costoDe(r.pendientes), { imagenes: 4, voces: 1 });
+  assert.deepEqual(costoDe(r.pendientes), { imagenes: 4, voces: 1, tomas: 0 });
 });
 
 test("armar: conserva la foto que ya había y quita los clips vacíos que sobran", () => {
@@ -396,10 +398,10 @@ test("vista previa y crear video quedan para el final; si vienen los dos, solo c
 });
 
 test("costo: texto de la confirmación", () => {
-  assert.equal(textoCosto({ imagenes: 4, voces: 1 }), "Esta orden usa 4 imágenes y 1 voz.");
-  assert.equal(textoCosto({ imagenes: 1, voces: 0 }), "Esta orden usa 1 imagen.");
-  assert.equal(textoCosto({ imagenes: 0, voces: 1 }), "Esta orden usa 1 voz.");
-  assert.equal(textoCosto({ imagenes: 0, voces: 0 }), null);
+  assert.equal(textoCosto({ imagenes: 4, voces: 1, tomas: 0 }), "Esta orden usa 4 imágenes y 1 voz.");
+  assert.equal(textoCosto({ imagenes: 1, voces: 0, tomas: 0 }), "Esta orden usa 1 imagen.");
+  assert.equal(textoCosto({ imagenes: 0, voces: 1, tomas: 0 }), "Esta orden usa 1 voz.");
+  assert.equal(textoCosto({ imagenes: 0, voces: 0, tomas: 0 }), null);
 });
 
 test("resumenProyecto: textos y números, nunca las fotos", () => {
@@ -426,7 +428,7 @@ const instr = (extra: Partial<Parameters<typeof instruccionesDirector>[0]> = {})
 
 test("instrucciones: nombran todo el catálogo y las reglas de costo", () => {
   const { system } = instr();
-  assert.equal(TIPOS_DE_ACCION.length, 19);
+  assert.equal(TIPOS_DE_ACCION.length, 20);
   for (const t of TIPOS_DE_ACCION) assert.ok(system.includes(`"${t}"`), `falta ${t}`);
   assert.match(system, /Responde SOLO con un objeto JSON/);
   assert.ok(system.includes("pop") && system.includes("lofi") && system.includes("es-selena"));
@@ -453,4 +455,63 @@ test("armar: el tema queda escrito en el paso 1 del reel", () => {
   const r = aplicar(estado([nuevoClip()], { tema: "" }), [armar({ tema: "promo 2x1 de los martes" })]);
   assert.equal(r.estado.ajustes.tema, "promo 2x1 de los martes");
   assert.equal(resumenProyecto(r.estado).tema, "promo 2x1 de los martes");
+});
+
+// ---------- Tomas con IA desde una orden (solo si la persona lo pide) ----------
+
+test("validar: generar_ia y armar con_ia", () => {
+  assert.deepEqual(una({ tipo: "generar_ia" }), { tipo: "generar_ia" });
+  const a = una({ tipo: "armar", tema: "t", con_ia: true });
+  assert.ok(a && a.tipo === "armar" && a.conIa === true);
+  const b = una({ tipo: "armar", tema: "t" });
+  assert.ok(b && b.tipo === "armar" && b.conIa === false);
+});
+
+test("armar con IA: anima todas las fotos hasta 4 y deja pendiente generar las tomas", () => {
+  const r = aplicar(estado([nuevoClip()]), [armar({ clips: 6, textos: ["1", "2", "3", "4", "5", "6"], imagenes: ["a", "b", "c", "d", "e", "f"], conIa: true }), { tipo: "generar_ia" }]);
+  assert.deepEqual(r.estado.clips.map((c) => c.tipo), ["toma", "toma", "toma", "toma", "foto", "foto"]);
+  assert.deepEqual(r.pendientes[r.pendientes.length - 1], { tipo: "generar_ia", tomas: 4 });
+  assert.deepEqual(costoDe(r.pendientes), { imagenes: 6, voces: 1, tomas: 4 });
+  assert.equal(textoCosto(costoDe(r.pendientes)), "Esta orden usa 6 imágenes, 1 voz y hasta 4 tomas con IA.");
+});
+
+test("armar con IA arma solo: aunque la IA olvide generar_ia, las tomas se generan", () => {
+  const r = aplicar(estado([nuevoClip()]), [armar({ conIa: true })]);
+  assert.deepEqual(r.pendientes[r.pendientes.length - 1], { tipo: "generar_ia", tomas: 4 });
+});
+
+test("armar sin IA no anima ni gasta tomas", () => {
+  const r = aplicar(estado([nuevoClip()]), [armar()]);
+  assert.ok(r.estado.clips.every((c) => c.tipo === "foto"));
+  assert.equal(costoDe(r.pendientes).tomas, 0);
+});
+
+test("animar un clip y generar_ia: una toma pendiente", () => {
+  const r = aplicar(estado([foto(), foto()]), [{ tipo: "animar", clip: 1, activar: true }, { tipo: "generar_ia" }]);
+  assert.deepEqual(r.pendientes, [{ tipo: "generar_ia", tomas: 1 }]);
+  assert.equal(textoCosto(costoDe(r.pendientes)), "Esta orden usa hasta 1 toma con IA.");
+});
+
+test("generar_ia: sin fotos marcadas o sin sesión se avisa y no queda pendiente", () => {
+  let r = aplicar(estado([foto()]), [{ tipo: "generar_ia" }]);
+  assert.deepEqual(r.pendientes, []);
+  assert.deepEqual(r.avisos, ["Marca primero qué fotos animar con IA"]);
+  r = aplicar(estado([foto({ tipo: "toma" })]), [{ tipo: "generar_ia" }], { voz: true, ia: false });
+  assert.deepEqual(r.pendientes, []);
+  assert.deepEqual(r.avisos, ["Inicia sesión para animar fotos con IA"]);
+  r = aplicar(estado([nuevoClip()]), [armar({ conIa: true })], { voz: true, ia: false });
+  assert.ok(r.estado.clips.every((c) => c.tipo === "foto"));
+  assert.equal(costoDe(r.pendientes).tomas, 0);
+});
+
+test("generar_ia manda sobre crear_video y vista previa (el video se graba al terminar las tomas)", () => {
+  const r = aplicar(estado([foto({ tipo: "toma" })]), [{ tipo: "crear_video" }, { tipo: "generar_ia" }, { tipo: "vista_previa" }]);
+  assert.deepEqual(r.pendientes, [{ tipo: "generar_ia", tomas: 1 }]);
+});
+
+test("instrucciones: las tomas con IA solo si la persona lo pide", () => {
+  const { system } = instr();
+  assert.match(system, /"generar_ia"/);
+  assert.match(system, /"con_ia"/);
+  assert.match(system, /solo si la persona lo pide/i);
 });

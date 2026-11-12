@@ -64,7 +64,7 @@ Los clips se numeran desde 1, como en pantalla. `clip` acepta un número o `"tod
 
 Reglas:
 
-- **Tomas con IA:** el Director nunca presiona «Generar con IA». Respeta el máximo de 4 por video.
+- **Tomas con IA (cambio pedido por Hector, 2026-11-11):** el Director las genera **solo si la orden lo pide** («con IA», «con movimiento real», «anima las fotos», «anima el clip 2»). `armar` con `con_ia: true` anima todas las fotos hasta el máximo de 4; la acción `generar_ia` sube las fotos marcadas, espera las tomas y graba el video. Siempre con la confirmación antes («…y hasta N tomas con IA. Te quedan X tomas.»). Sin pedirlo, el video sale con zoom, gratis.
 - **Voz:** si el plan no incluye voz, la acción se omite y se avisa («Tu plan no incluye voz»); el resto de la orden sí se hace. Tras generar la voz en un `armar`, las fotos se reparten para cubrirla (`ajustarAVoz`).
 - **Tope de 2 minutos:** si tras aplicar la orden el video pasa de 2:00, se aplica y se muestra el aviso de siempre.
 - `armar` sobre un video que ya tiene fotos **no las borra**: conserva los clips con foto y completa el resto. Para empezar de cero, la persona usa «Empezar nuevo».

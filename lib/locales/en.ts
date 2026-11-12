@@ -1195,6 +1195,8 @@ export const EN: Record<string, string> = {
   "Agrega fotos antes de fijar la duración del video": "Add photos before setting the video length",
   "Descripción para crear la imagen con IA": "Description to create the image with AI",
   "Qué debe verse en la foto. Se usa al tocar «Crear con IA».": "What should be seen in the photo. Used when you tap “Create with AI”.",
+  "Generaré 1 toma con IA y grabaré el video": "I'll generate 1 AI take and record the video",
+  "Marca primero qué fotos animar con IA": "First mark which photos to animate with AI",
 };
 
 // Textos con números u otras partes que cambian
@@ -1259,7 +1261,6 @@ export const EN_PATTERNS: [RegExp, string][] = [
   [/^Clip (\d+) de (\d+) · con IA · (.+)$/, "Clip $1 of $2 · with AI · $3"],
   [/^La voz dura (\d+:\d+) y tus clips (\d+:\d+): la voz se cortaría\.$/, "The voice lasts $1 and your clips $2: the voice would be cut off."],
   [/^Tu video dura (\d+:\d+)\. El máximo es (\d+:\d+): quita o acorta algún clip\.$/, "Your video lasts $1. The maximum is $2: remove or shorten a clip."],
-  [/^Esta orden usa (.+)\.$/, "This order uses $1."],
   [/^Agregué (\d+) clips$/, "Added $1 clips"],
   [/^Borré el clip (\d+)$/, "Deleted clip $1"],
   [/^Moví el clip (\d+) al lugar (\d+)$/, "Moved clip $1 to position $2"],
@@ -1277,4 +1278,7 @@ export const EN_PATTERNS: [RegExp, string][] = [
   [/^No existe el clip (\d+)$/, "Clip $1 doesn't exist"],
   [/^El clip (\d+) no tiene foto todavía$/, "Clip $1 has no photo yet"],
   [/^El clip (\d+) está animado con IA y siempre dura (\d+) s$/, "Clip $1 is animated with AI and always lasts $2 s"],
+  [/^Generaré (\d+) tomas con IA y grabaré el video$/, "I'll generate $1 AI takes and record the video"],
+  [/^Esta orden usa (.+)\. Te quedan? (\d+) tomas?\.$/, "This order uses $1. You have $2 takes left."],
+  [/^Esta orden usa (.+)\.$/, "This order uses $1."],
 ];
