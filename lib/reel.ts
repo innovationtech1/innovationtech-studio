@@ -2,7 +2,8 @@ import { cuesFromWords, drawCue, wordsFromScript } from "./captions";
 import { renderMusic, MusicStyleId } from "./music";
 import { loadSong } from "./library";
 import fixWebmDuration from "fix-webm-duration";
-import { planDeEscenas } from "./reel-escenas";
+import type { EscenaRender, TextoPos, TextoTam } from "./linea-tiempo";
+import { medidasTexto } from "./reel-texto";
 // Motor de reels: arma un video animado dentro del navegador, gratis y sin límite.
 // Dibuja cada escena en un <canvas> (zoom/movimiento suave + transiciones + textos)
 // y lo graba con MediaRecorder, incluyendo la voz en off si existe.
@@ -10,14 +11,9 @@ import { planDeEscenas } from "./reel-escenas";
 export type ReelFormat = "9:16" | "1:1" | "16:9";
 
 export type ReelOptions = {
-  images: string[]; // data URLs o URLs con CORS
-  captions: string[]; // un texto por escena (puede ir vacío)
-  secondsPerSlide: number;
-  // Video de duración fija (10, 15, 20 o 30 s): las fotos se reparten el tiempo (lib/reel-escenas.ts).
-  // Si no se pasa, cada foto dura secondsPerSlide como siempre.
-  duracion?: number;
-  tomas?: number[]; // índices de las fotos con IA: su escena dura 5 s (con o sin clip todavía)
-  clips?: (string | null)[]; // URL del clip de IA de cada foto (null = animación normal)
+  // Una escena por clip, en orden, cada una con su duración (lib/linea-tiempo.ts → aEscenas)
+  escenas: EscenaRender[];
+  cierre: number; // segundos del cierre con la marca (3, o 0 si no cabe)
   format: ReelFormat;
   accent: string; // color de acento (hex)
   brandName: string;
@@ -42,7 +38,6 @@ const SIZES: Record<ReelFormat, [number, number]> = {
 const FPS = 30;
 let FONT_STACK = `system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
 const FADE = 0.6; // segundos de transición
-const OUTRO = 3; // segundos del cierre
 
 export function supportedRecording(): { mime: string; ext: "mp4" | "webm" } | null {
   if (typeof MediaRecorder === "undefined") return null;
@@ -154,10 +149,20 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
-function drawCaption(ctx: CanvasRenderingContext2D, text: string, W: number, H: number, appear: number, accent: string) {
+function drawCaption(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  W: number,
+  H: number,
+  appear: number,
+  accent: string,
+  pos: TextoPos = "abajo",
+  tam: TextoTam = "normal",
+) {
   if (!text.trim()) return;
   const unit = Math.min(W, H);
-  const size = Math.round(unit * 0.058);
+  const m = medidasTexto(pos, tam, H > W);
+  const size = Math.round(unit * m.tamano);
   ctx.font = `800 ${size}px ${FONT_STACK}`;
   const pad = unit * 0.045;
   const maxW = W * 0.84 - pad * 2;
@@ -167,7 +172,8 @@ function drawCaption(ctx: CanvasRenderingContext2D, text: string, W: number, H: 
   const boxH = lines.length * lineH + pad * 1.4;
   const a = ease(Math.min(1, appear));
   const x = (W - boxW) / 2;
-  const y = H * (H > W ? 0.7 : 0.66) - boxH / 2 + (1 - a) * unit * 0.04;
+  // Arriba nunca tapa el logo: el recuadro no sube de cierto margen
+  const y = Math.max(H * 0.13, H * m.centroY - boxH / 2) + (1 - a) * unit * 0.04;
 
   ctx.save();
   ctx.globalAlpha = a;
@@ -243,7 +249,23 @@ function drawOutro(
   ctx.restore();
 }
 
-export async function renderReel(o: ReelOptions): Promise<ReelResult> {
+// Todo lo que comparten grabar y la vista previa: lo cargado, los tiempos y cómo se dibuja cada instante.
+type Montaje = {
+  W: number;
+  H: number;
+  total: number; // segundos del video completo (escenas + cierre)
+  slidesTime: number;
+  starts: number[];
+  canvas: HTMLCanvasElement;
+  clips: (HTMLVideoElement | null)[];
+  audioCtx: AudioContext | null;
+  voiceBuffer: AudioBuffer | null;
+  musicBuffer: AudioBuffer | null;
+  draw: (time: number) => void;
+  soltar: () => void;
+};
+
+async function montar(o: ReelOptions): Promise<Montaje> {
   const SYSTEM = `system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
   FONT_STACK = SYSTEM;
   if (o.font && typeof document !== "undefined") {
@@ -254,15 +276,20 @@ export async function renderReel(o: ReelOptions): Promise<ReelResult> {
       /* se usa la letra del sistema */
     }
   }
-  if (o.images.length === 0) throw new Error("Elige al menos una imagen para el reel.");
-  const rec = supportedRecording();
-  if (!rec) throw new Error("Este navegador no puede grabar video. Usa Chrome, Edge o Safari actualizados.");
+  const escenas = o.escenas;
+  if (escenas.length === 0) throw new Error("Elige al menos una imagen para el reel.");
 
   const [W, H] = SIZES[o.format];
-  const imgs = await Promise.all(o.images.map(loadImage));
+  // La misma foto puede estar en varios clips (duplicados): se carga una sola vez
+  const cargadas = new Map<string, Promise<HTMLImageElement>>();
+  const imgs = await Promise.all(
+    escenas.map((e) => {
+      if (!cargadas.has(e.imagen)) cargadas.set(e.imagen, loadImage(e.imagen));
+      return cargadas.get(e.imagen)!;
+    }),
+  );
   const logo = o.logo ? await loadImage(o.logo) : null;
 
-  // Voz en off: decide la duración mínima del reel.
   let audioCtx: AudioContext | null = null;
   let voiceBuffer: AudioBuffer | null = null;
   if (o.voice) {
@@ -270,24 +297,16 @@ export async function renderReel(o: ReelOptions): Promise<ReelResult> {
     const bytes = await (await fetch(o.voice)).arrayBuffer();
     voiceBuffer = await audioCtx.decodeAudioData(bytes);
   }
-  let per = Math.max(1.5, o.secondsPerSlide);
-  if (voiceBuffer) per = Math.max(per, (voiceBuffer.duration + 0.5) / imgs.length);
-  // Cuánto dura cada escena y el cierre. Con duración fija manda el reparto; si no, todas duran `per`.
-  let durs = imgs.map(() => per);
-  let outro = OUTRO;
-  const clips: (HTMLVideoElement | null)[] = imgs.map(() => null);
-  if (o.duracion) {
-    const conClip = (o.clips ?? []).flatMap((c, i) => (c && i < imgs.length ? [i] : []));
-    const plan = planDeEscenas(o.duracion, imgs.length, o.tomas ?? conClip, OUTRO);
-    durs = plan.escenas.map((e) => e.segundos);
-    outro = plan.cierre;
-  }
-  if (o.clips?.some(Boolean)) {
+  // Cada escena dura lo que dice su clip; el cierre, lo que se haya decidido (3 s o nada)
+  const durs = escenas.map((e) => Math.max(0.5, e.segundos));
+  const outro = Math.max(0, o.cierre);
+  const clips: (HTMLVideoElement | null)[] = escenas.map(() => null);
+  if (escenas.some((e) => e.video)) {
     o.onStatus?.("🎬 Cargando tomas con IA…");
     await Promise.all(
-      o.clips.map(async (c, i) => {
+      escenas.map(async (e, i) => {
         // Si un clip no carga, esa escena se queda con la animación normal
-        if (c && i < imgs.length) clips[i] = await loadClip(c).catch(() => null);
+        if (e.video) clips[i] = await loadClip(e.video).catch(() => null);
       }),
     );
   }
@@ -336,18 +355,21 @@ export async function renderReel(o: ReelOptions): Promise<ReelResult> {
       while (i > 0 && time < starts[i]) i--;
       const per = durs[i];
       const local = Math.min(per, time - starts[i]);
+      // En escenas muy cortas la transición se acorta para que no se coma la escena
+      const fade = Math.min(FADE, per / 3);
       scene(i, local / per);
       // transición: la siguiente escena aparece encima
-      if (local > per - FADE && i < imgs.length - 1) {
+      if (local > per - fade && i < imgs.length - 1) {
         ctx.save();
-        ctx.globalAlpha = (local - (per - FADE)) / FADE;
+        ctx.globalAlpha = (local - (per - fade)) / fade;
         scene(i + 1, 0);
         ctx.restore();
       }
-      const fadeOut = local > per - FADE ? 1 - (local - (per - FADE)) / FADE : 1;
+      const fadeOut = local > per - fade ? 1 - (local - (per - fade)) / fade : 1;
       ctx.save();
       ctx.globalAlpha = fadeOut;
-      drawCaption(ctx, o.captions[i] || "", W, H, (local - 0.15) / 0.5, o.accent);
+      const e = escenas[i];
+      drawCaption(ctx, e.texto || "", W, H, (local - 0.15) / 0.5, o.accent, e.textoPos, e.textoTam);
       ctx.restore();
       drawLogo(ctx, logo, W, H);
       const cue = subCues.find((c) => time >= c.start && time <= c.end + 0.05);
@@ -375,26 +397,109 @@ export async function renderReel(o: ReelOptions): Promise<ReelResult> {
     pctx?.drawImage(canvas, 0, 0);
   };
 
-  draw(0);
-  const stream = canvas.captureStream(FPS);
+  const soltar = () => {
+    clips.forEach((c) => {
+      if (!c) return;
+      c.pause();
+      URL.revokeObjectURL(c.src);
+    });
+    audioCtx?.close().catch(() => {});
+  };
+  return { W, H, total, slidesTime, starts, canvas, clips, audioCtx, voiceBuffer, musicBuffer, draw, soltar };
+}
+
+// Conecta la voz y la música a `salida` (la grabación o las bocinas) y devuelve cómo arrancarlas.
+function prepararAudio(m: Montaje, o: ReelOptions, salida: AudioNode): () => void {
+  const { audioCtx, voiceBuffer, musicBuffer, total } = m;
+  if (!audioCtx) return () => {};
   let source: AudioBufferSourceNode | null = null;
   let musicSource: AudioBufferSourceNode | null = null;
   let musicGain: GainNode | null = null;
-  if (audioCtx && (voiceBuffer || musicBuffer)) {
+  if (voiceBuffer) {
+    source = audioCtx.createBufferSource();
+    source.buffer = voiceBuffer;
+    source.connect(salida);
+  }
+  if (musicBuffer && o.music) {
+    musicSource = audioCtx.createBufferSource();
+    musicSource.buffer = musicBuffer;
+    musicSource.loop = !!o.music.song && musicBuffer.duration < total;
+    musicGain = audioCtx.createGain();
+    musicGain.gain.value = o.music.volume;
+    musicSource.connect(musicGain).connect(salida);
+  }
+  return () => {
+    if (musicSource && musicGain && o.music) {
+      const now = audioCtx.currentTime;
+      musicSource.start(now);
+      if (voiceBuffer) {
+        // La música baja mientras habla la voz y vuelve a subir al terminar
+        const v = o.music.volume;
+        musicGain.gain.setValueAtTime(v, now);
+        musicGain.gain.linearRampToValueAtTime(v * 0.35, now + 0.3);
+        musicGain.gain.setValueAtTime(v * 0.35, now + 0.3 + voiceBuffer.duration);
+        musicGain.gain.linearRampToValueAtTime(v, now + 0.8 + voiceBuffer.duration);
+      }
+      if (o.music.song) {
+        // La canción de la biblioteca se desvanece al terminar el reel
+        const fadeAt = Math.max(now + 0.9 + (voiceBuffer?.duration || 0), now + total - 1.5);
+        musicGain.gain.setValueAtTime(o.music.volume, fadeAt);
+        musicGain.gain.linearRampToValueAtTime(0, now + total);
+      }
+    }
+    if (source) source.start(audioCtx.currentTime + 0.3);
+  };
+}
+
+// Recorre el video en tiempo real dibujando cada cuadro. Termina al llegar al final o si se cancela.
+function reproducir(m: Montaje, o: ReelOptions, signal?: AbortSignal): Promise<void> {
+  const { total, slidesTime, starts, clips } = m;
+  const start = performance.now();
+  // Usamos un temporizador (no requestAnimationFrame) para que siga grabando
+  // aunque la ventana pierda el foco por un momento.
+  let sonando = -1; // escena cuyo clip se está reproduciendo
+  return new Promise<void>((resolve) => {
+    const tick = () => {
+      if (signal?.aborted) return resolve();
+      const time = (performance.now() - start) / 1000;
+      // Al entrar a una escena con clip, el clip arranca desde el principio
+      let actual = starts.length - 1;
+      while (actual > 0 && time < starts[actual]) actual--;
+      if (time < slidesTime && actual !== sonando) {
+        if (sonando >= 0) clips[sonando]?.pause();
+        sonando = actual;
+        const clip = clips[actual];
+        if (clip) {
+          clip.currentTime = 0;
+          clip.play().catch(() => {});
+        }
+      }
+      if (time >= total) {
+        m.draw(total - 0.001);
+        resolve();
+        return;
+      }
+      m.draw(time);
+      o.onProgress?.(time / total);
+      setTimeout(tick, 1000 / FPS);
+    };
+    tick();
+  });
+}
+
+// Graba el video y lo devuelve como archivo.
+export async function renderReel(o: ReelOptions): Promise<ReelResult> {
+  const rec = supportedRecording();
+  if (!rec) throw new Error("Este navegador no puede grabar video. Usa Chrome, Edge o Safari actualizados.");
+  const m = await montar(o);
+  const { audioCtx, total } = m;
+
+  m.draw(0);
+  const stream = m.canvas.captureStream(FPS);
+  let arrancarAudio = () => {};
+  if (audioCtx && (m.voiceBuffer || m.musicBuffer)) {
     const dest = audioCtx.createMediaStreamDestination();
-    if (voiceBuffer) {
-      source = audioCtx.createBufferSource();
-      source.buffer = voiceBuffer;
-      source.connect(dest);
-    }
-    if (musicBuffer && o.music) {
-      musicSource = audioCtx.createBufferSource();
-      musicSource.buffer = musicBuffer;
-      musicSource.loop = !!o.music.song && musicBuffer.duration < total;
-      musicGain = audioCtx.createGain();
-      musicGain.gain.value = o.music.volume;
-      musicSource.connect(musicGain).connect(dest);
-    }
+    arrancarAudio = prepararAudio(m, o, dest);
     dest.stream.getAudioTracks().forEach((tr) => stream.addTrack(tr));
   }
 
@@ -408,56 +513,8 @@ export async function renderReel(o: ReelOptions): Promise<ReelResult> {
   recorder.start(250);
   o.onStatus?.("");
   if (audioCtx) await audioCtx.resume();
-  if (audioCtx && musicSource && musicGain && o.music) {
-    const now = audioCtx.currentTime;
-    musicSource.start(now);
-    if (voiceBuffer) {
-      // La música baja mientras habla la voz y vuelve a subir al terminar
-      const v = o.music.volume;
-      musicGain.gain.setValueAtTime(v, now);
-      musicGain.gain.linearRampToValueAtTime(v * 0.35, now + 0.3);
-      musicGain.gain.setValueAtTime(v * 0.35, now + 0.3 + voiceBuffer.duration);
-      musicGain.gain.linearRampToValueAtTime(v, now + 0.8 + voiceBuffer.duration);
-    }
-    if (o.music.song) {
-      // La canción de la biblioteca se desvanece al terminar el reel
-      const fadeAt = Math.max(now + 0.9 + (voiceBuffer?.duration || 0), now + total - 1.5);
-      musicGain.gain.setValueAtTime(o.music.volume, fadeAt);
-      musicGain.gain.linearRampToValueAtTime(0, now + total);
-    }
-  }
-  if (audioCtx && source) source.start(audioCtx.currentTime + 0.3);
-  const start = performance.now();
-
-  // Usamos un temporizador (no requestAnimationFrame) para que siga grabando
-  // aunque la ventana pierda el foco por un momento.
-  let sonando = -1; // escena cuyo clip se está reproduciendo
-  await new Promise<void>((resolve) => {
-    const tick = () => {
-      const time = (performance.now() - start) / 1000;
-      // Al entrar a una escena con clip, el clip arranca desde el principio
-      let actual = imgs.length - 1;
-      while (actual > 0 && time < starts[actual]) actual--;
-      if (time < slidesTime && actual !== sonando) {
-        if (sonando >= 0) clips[sonando]?.pause();
-        sonando = actual;
-        const clip = clips[actual];
-        if (clip) {
-          clip.currentTime = 0;
-          clip.play().catch(() => {});
-        }
-      }
-      if (time >= total) {
-        draw(total - 0.001);
-        resolve();
-        return;
-      }
-      draw(time);
-      o.onProgress?.(time / total);
-      setTimeout(tick, 1000 / FPS);
-    };
-    tick();
-  });
+  arrancarAudio();
+  await reproducir(m, o);
 
   await new Promise((r) => setTimeout(r, 300));
   recorder.stop();
@@ -465,12 +522,27 @@ export async function renderReel(o: ReelOptions): Promise<ReelResult> {
   let blob = await done;
   // WebM grabado en el navegador no trae la duración: se la escribimos
   if (rec.ext === "webm") blob = await fixWebmDuration(blob, total * 1000, { logger: false }).catch(() => blob);
-  clips.forEach((c) => {
-    if (!c) return;
-    c.pause();
-    URL.revokeObjectURL(c.src);
-  });
-  audioCtx?.close().catch(() => {});
+  m.soltar();
   o.onProgress?.(1);
   return { url: URL.createObjectURL(blob), blob, ext: rec.ext, seconds: Math.round(total) };
+}
+
+// Vista previa: reproduce el video en `previewCanvas` con su sonido, sin grabar nada.
+// Termina sola al acabar el video, o antes si se cancela con `signal`.
+export async function vistaPrevia(o: ReelOptions, signal: AbortSignal): Promise<void> {
+  if (!o.previewCanvas) throw new Error("Falta dónde mostrar la vista previa.");
+  const m = await montar(o);
+  try {
+    if (signal.aborted) return;
+    m.draw(0);
+    o.onStatus?.("");
+    if (m.audioCtx) {
+      const arrancar = prepararAudio(m, o, m.audioCtx.destination);
+      await m.audioCtx.resume();
+      arrancar();
+    }
+    await reproducir(m, o, signal);
+  } finally {
+    m.soltar(); // cerrar el audio corta la voz y la música
+  }
 }
