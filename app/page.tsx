@@ -19,11 +19,11 @@ import { CheckList, CloudflareCuenta, CloudflareWizard, testCloudflare, Welcome 
 import { EVENTO_AJUSTES } from "@/lib/limpiar-dispositivo";
 import { formatBytes, storageUsage, toDataUrl } from "@/lib/media-store";
 import type { Item, Settings } from "@/lib/types";
-import ReelStudio from "./reel-studio";
-import ContentCalendar from "./content-calendar";
 import AssistantChat from "./assistant-chat";
 import { extract, phrases } from "@/lib/phrases";
 import { BotonCuenta, CUENTAS_ON, MejorarPro, ProTag, useCuenta } from "./account-context";
+import Camara from "./camara";
+import { dataUrlReducida } from "@/lib/resize";
 
 type Tab = "texto" | "imagen" | "editor" | "video" | "galeria" | "marca" | "config";
 
@@ -33,6 +33,16 @@ const ShapeCrop = dynamic(() => import("./shape-crop"), { ssr: false });
 const VideoEditor = dynamic(() => import("./video-editor"), {
   ssr: false,
   loading: () => <section className="card">Cargando editor de video…</section>,
+});
+
+// Videos y calendario: se cargan hasta que se abren, para que la app arranque ligera.
+const ReelProyectos = dynamic(() => import("./reel-proyectos"), {
+  ssr: false,
+  loading: () => <section className="card">Cargando el creador de videos…</section>,
+});
+const ContentCalendar = dynamic(() => import("./content-calendar"), {
+  ssr: false,
+  loading: () => <section className="card">Cargando el calendario…</section>,
 });
 
 // Carrusel: dibuja en el lienzo del navegador, como el editor.
@@ -201,6 +211,11 @@ export default function Home() {
     });
     return `https://github.com/innovationtech1/innovationtech-studio/issues/new?${q}`;
   };
+  // Las secciones pesadas se montan la primera vez que se abren y después se quedan (no se pierde nada al cambiar de pestaña)
+  const [abiertas, setAbiertas] = useState<string[]>([]);
+  const marca = `${tab}|${tab === "video" ? "reel" : tab === "texto" ? textMode : ""}`;
+  useEffect(() => setAbiertas((a) => (a.includes(marca) ? a : [...a, marca])), [marca]);
+  const abierta = (m: string) => abiertas.includes(m) || marca === m;
   const go = (id: Tab) => {
     setTab(id);
     window.scrollTo({ top: 0 });
@@ -307,10 +322,11 @@ export default function Home() {
             brand={brand}
             onUseImage={(p) => (setImagePrompt(p), setTab("imagen"))}
             onToEditor={textToEditor}
-            onUseVideo={(p) => (setVideoPrompt(p), setVideoMode("ia"), setTab("video"))}
+            onUseVideo={(p) => (setReelTopic((r) => ({ text: p, n: (r?.n || 0) + 1 })), setVideoMode("reel"), setTab("video"))}
           />
         </div>
         <div hidden={textMode !== "calendario"}>
+          {abierta("texto|calendario") && (
           <ContentCalendar
             settings={settings}
             brand={brand}
@@ -318,6 +334,7 @@ export default function Home() {
             onEditor={textToEditor}
             onReel={(t) => (setReelTopic((r) => ({ text: t, n: (r?.n || 0) + 1 })), setVideoMode("reel"), go("video"))}
           />
+          )}
         </div>
       </div>
       <div hidden={tab !== "imagen"}>
@@ -342,6 +359,7 @@ export default function Home() {
         <ImageStudio
           settings={settings}
           brand={brand}
+          gallery={gallery}
           prompt={imagePrompt}
           setPrompt={setImagePrompt}
           onDone={addToGallery}
@@ -356,6 +374,7 @@ export default function Home() {
         </div>
       </div>
       <div hidden={tab !== "editor"}>
+        {abierta("editor|") && (
         <ImageEditor
           incoming={toEditor}
           brand={brand}
@@ -376,22 +395,13 @@ export default function Home() {
             addToGallery([{ kind: "imagen", url, prompt: "Diseño editado", date: new Date().toISOString() }])
           }
         />
+        )}
       </div>
       <div hidden={tab !== "video"}>
-          <div className="mode-switch" role="tablist">
-            <button className={videoMode === "reel" ? "active" : ""} onClick={() => setVideoMode("reel")}>
-              <Film size={16} aria-hidden /> Reel con mis imágenes · gratis<ProTag h="reels" />
-            </button>
-            <button className={videoMode === "editor" ? "active" : ""} onClick={() => setVideoMode("editor")}>
-              <Scissors size={16} aria-hidden /> Editor de video + música<ProTag h="editor_video" />
-            </button>
-            <button className={videoMode === "ia" ? "active" : ""} onClick={() => setVideoMode("ia")}>
-              <Bot size={16} aria-hidden /> Video con IA · Replicate (de pago)<ProTag h="video_ia" soloPro />
-            </button>
-          </div>
-          <div hidden={videoMode !== "reel"}>
+          <div>
             <MejorarPro h="reels" />
-            <ReelStudio
+            {abierta("video|reel") && (
+            <ReelProyectos
               settings={settings}
               brand={brand}
               gallery={gallery}
@@ -403,26 +413,7 @@ export default function Home() {
               onEditScene={(i, src) => openInEditor(src, { scene: i })}
               onOpenBrand={() => go("marca")}
             />
-          </div>
-          <div hidden={videoMode !== "editor"}>
-            <MejorarPro h="editor_video" />
-            <VideoEditor
-              gallery={gallery}
-              settings={settings}
-              accent={brandAccent(brand)}
-              onVideo={(blob, prompt) => galleryStore.add([{ kind: "video", blob, prompt }])}
-            />
-          </div>
-          <div hidden={videoMode !== "ia"}>
-            <MejorarPro h="video_ia" soloPro />
-            <VideoStudio
-              settings={settings}
-              brand={brand}
-              prompt={videoPrompt}
-              setPrompt={setVideoPrompt}
-              onDone={addToGallery}
-              handoff={handoff}
-            />
+            )}
           </div>
       </div>
       <div hidden={tab !== "galeria"}>
@@ -620,6 +611,7 @@ function TextStudio({
 function ImageStudio({
   settings,
   brand,
+  gallery,
   prompt,
   setPrompt,
   onDone,
@@ -628,6 +620,7 @@ function ImageStudio({
 }: {
   settings: Settings;
   brand: Brand;
+  gallery: Item[];
   prompt: string;
   setPrompt: (p: string) => void;
   onDone: (items: Item[]) => void;
@@ -644,6 +637,8 @@ function ImageStudio({
   const [shapeSrc, setShapeSrc] = useState<string | null>(null);
   const [cutResults, setCutResults] = useState<string[]>([]);
   const [refs, setRefs] = useState<string[]>([]);
+  const [camara, setCamara] = useState(false);
+  const [eligiendo, setEligiendo] = useState(false);
   const [urls, setUrls] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -666,6 +661,25 @@ function ImageStudio({
       setError((e as Error).message);
     }
   }
+
+  // Agrega como referencia una imagen que ya está en el dispositivo (foto de la cámara o de la galería)
+  async function addRef(src: string) {
+    setError("");
+    try {
+      const url = await dataUrlReducida(await toDataUrl(src), cfProvider ? 500 : 1280);
+      setRefs((r) => (r.length >= maxRefs ? r : [...r, url]));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  // Foto tomada con la cámara: se guarda en la galería (para usarla después) y entra como referencia
+  async function fotoDeCamara(foto: string) {
+    onDone([{ kind: "imagen", url: foto, prompt: "Foto de la cámara", date: new Date().toISOString() }]);
+    await addRef(foto);
+  }
+
+  const fotosGaleria = gallery.filter((g) => g.kind === "imagen");
 
   async function generate(withoutRefs = false) {
     setLoading(true);
@@ -840,7 +854,26 @@ function ImageStudio({
             <span>＋ Subir foto</span>
           </label>
         )}
+        {refs.length < maxRefs && (
+          <button type="button" className="pick" onClick={() => setCamara(true)}>
+            <span>📷 Tomar foto</span>
+          </button>
+        )}
+        {refs.length < maxRefs && (
+          <button type="button" className="pick" onClick={() => setEligiendo((v) => !v)}>
+            <span>🖼 De mi galería</span>
+          </button>
+        )}
       </div>
+      {eligiendo && refs.length < maxRefs && (
+        <div className="picker" style={{ marginTop: 8 }}>
+          {fotosGaleria.length === 0 && <span className="muted">Tu galería está vacía.</span>}
+          {fotosGaleria.slice(0, 36).map((g, k) => (
+            <img key={g.url + k} src={g.url} alt={g.prompt} onClick={() => (void addRef(g.url), setEligiendo(false))} />
+          ))}
+        </div>
+      )}
+      {camara && <Camara onFoto={fotoDeCamara} onCerrar={() => setCamara(false)} lleno={refs.length >= maxRefs} />}
       <p className="hint" style={{ marginTop: 8 }}>
         {refs.length > 0
           ? "La IA usará tus fotos como base. Describe qué quieres: por ejemplo, «put this product on a wooden table with warm light» o «same person, now in a professional studio portrait»."

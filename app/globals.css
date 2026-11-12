@@ -176,6 +176,19 @@ footer a { color: var(--paper); }
 .pick { width: 96px; height: 96px; margin: 0; display: flex; align-items: center; justify-content: center; text-align: center; border: 1.5px dashed var(--line); border-radius: var(--radius-ctl); cursor: pointer; color: var(--fog); font-size: 13px; padding: 6px; transition: border-color 0.15s, color 0.15s; }
 .pick:hover { border-color: var(--signal); color: var(--paper); }
 .pick input { display: none; }
+button.pick { background: none; font: inherit; }
+.camara-caja { width: min(560px, 100%); }
+.camara-vista { position: relative; background: #000; border-radius: var(--radius-ctl); overflow: hidden; min-height: 220px; display: grid; place-items: center; }
+.camara-vista video { width: 100%; max-height: 60vh; display: block; object-fit: contain; }
+.camara-vista > .muted { position: absolute; }
+.camara-ultima { position: absolute; right: 10px; bottom: 10px; width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 2px solid var(--paper); }
+.camara-botones { justify-content: center; }
+.camara-selector { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+.camara-selector label { margin: 0; }
+.camara-selector select { min-height: 44px; margin: 0; }
+.camara-fallo { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.camara-fallo .btn { margin-top: 0; min-height: 44px; }
+.camara-reloj { position: absolute; top: 10px; left: 10px; background: rgba(0, 0, 0, 0.6); color: #ff5a5a; font-weight: 700; padding: 4px 10px; border-radius: 99px; font-variant-numeric: tabular-nums; }
 
 .install-bar {
   position: fixed; left: 50%; transform: translateX(-50%);
@@ -203,9 +216,131 @@ h3.step { margin: 22px 0 6px; font-size: 16px; }
 .btn .acct-pro { margin-left: 6px; }
 .scene-img { width: 100%; max-height: 300px; border-radius: 8px; overflow: hidden; background: var(--navy-800); display: flex; align-items: center; justify-content: center; }
 .scene-img img { width: 100%; height: 100%; object-fit: cover; }
+/* Secciones que se abren cuando se necesitan (marca, sonido, formato) */
+.plegable { border: 1px solid var(--navy-700); border-radius: 10px; margin-top: 12px; background: var(--navy-900); }
+.plegable > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-height: 48px; padding: 8px 14px; cursor: pointer; list-style: none; }
+.plegable > summary::-webkit-details-marker { display: none; }
+.plegable > summary::after { content: "▸"; margin-left: auto; color: var(--muted); }
+.plegable[open] > summary::after { content: "▾"; }
+.plegable[open] > summary { border-bottom: 1px solid var(--navy-700); }
+.plegable > :not(summary) { margin-left: 14px; margin-right: 14px; }
+/* Los campos miden el 100 %: con el margen de la sección se salían por la derecha */
+.plegable > textarea, .plegable > input, .plegable > select { width: calc(100% - 28px); box-sizing: border-box; }
+.plegable > * { max-width: calc(100% - 28px); }
+.plegable > summary { max-width: none; }
+.plegable > :last-child { margin-bottom: 14px; }
+.plegable h4.sub { margin: 14px 14px 6px; font-size: 15px; }
+/* Barra de crear: fija abajo de la pantalla mientras se trabaja en el video */
+.reel-barra { position: sticky; bottom: 0; z-index: 30; margin: 16px -28px -28px; padding: 10px 28px 12px; background: var(--deck); border-top: 1px solid var(--line); border-radius: 0 0 var(--radius) var(--radius); display: flex; flex-direction: column; gap: 8px; }
+.reel-barra .notice, .reel-barra .error, .reel-barra .acct-upsell { margin: 0; }
+.reel-barra-fila { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.reel-barra-fila .btn { margin-top: 0; min-height: 44px; }
+.reel-barra-fila .lt-tiempo { margin-right: auto; }
+@media (max-width: 760px) {
+  .reel-barra { bottom: calc(62px + env(safe-area-inset-bottom)); margin: 14px -16px -20px; padding: 8px 12px 10px; border-radius: 0 0 16px 16px; }
+  .reel-barra-fila .btn { flex: 1 1 auto; padding-left: 10px; padding-right: 10px; }
+}
+/* Proyectos del Creador de Reels y portada del video */
+.proy { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
+.proy select, .proy input { flex: 1 1 110px; min-width: 0; min-height: 44px; margin: 0; }
+.proy { flex-wrap: nowrap; }
+.proy:has(.proy-aviso) { flex-wrap: wrap; }
+.proy .btn { margin-top: 0; min-height: 44px; }
+.proy-aviso { flex: 1 1 100%; margin: 0; }
+.proy .proy-icono { min-width: 44px; padding-left: 0; padding-right: 0; justify-content: center; }
+.portada { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.portada .slider { width: 100%; margin: 0; }
+.portada .btn { margin-top: 0; min-height: 44px; }
+/* Director con IA: órdenes escritas o dictadas en el Creador de Reels */
+.dir { background: var(--navy-900); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 12px 0 4px; display: flex; flex-direction: column; gap: 10px; }
+.dir-titulo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.dir-titulo svg { color: var(--red); }
+.dir-fila { display: flex; gap: 8px; align-items: center; }
+.dir-fila input { flex: 1; min-width: 0; min-height: 44px; margin: 0; }
+.dir-fila .btn { margin-top: 0; min-height: 44px; flex: 0 0 auto; }
+.dir button { min-height: 44px; min-width: 44px; }
+.dir-ejemplos { display: flex; flex-wrap: wrap; gap: 6px; }
+.dir-ejemplos .btn { margin-top: 0; min-height: 44px; text-align: left; white-space: normal; }
+.dir-confirmar { margin: 0; }
+.dir-confirmar .actions { margin: 0; }
+.dir-confirmar .actions .btn, .dir-resultado .btn { margin-top: 0; min-height: 44px; }
+.dir-resultado { font-size: 14px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.dir-resultado p, .dir-resultado ul { margin: 0; }
+.dir-resultado ul { padding-left: 18px; color: var(--muted); }
+.dir-aviso { color: #ffcf66; }
+@media (max-width: 640px) {
+  .dir-fila { flex-wrap: wrap; }
+  .dir-fila input { flex: 1 1 100%; }
+}
+/* Línea de tiempo del Creador de Reels: fila de clips y panel del clip elegido */
+.lt { margin-top: 8px; }
+.lt-fila { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 10px; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
+.lt-clip { flex: 0 0 auto; width: 76px; min-height: 44px; padding: 4px; display: flex; flex-direction: column; gap: 4px; background: var(--navy-900); color: var(--text); border: 2px solid var(--navy-700); border-radius: 10px; cursor: pointer; scroll-snap-align: start; font: inherit; }
+.lt-clip.elegido { border-color: var(--red); }
+.lt-clip.encima { border-style: dashed; border-color: var(--paper); }
+.lt-clip:disabled { opacity: 0.5; cursor: default; }
+.lt-mini { width: 100%; height: 84px; border-radius: 6px; overflow: hidden; background: var(--navy-800); display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.lt-mini img { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.lt-pie { display: flex; justify-content: space-between; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.lt-mas .lt-pie { justify-content: center; }
+.lt-mas { border-style: dashed; }
+.lt-tipo.ia { color: var(--paper); background: var(--red); border-radius: 4px; padding: 0 5px; font-weight: 700; }
+.lt-ayuda { margin: 0; }
+.lt-panel { background: var(--navy-900); border: 1px solid var(--navy-700); border-radius: 10px; padding: 12px; }
+.lt-panel-cab { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.lt-panel-cab .actions { margin: 0; }
+.lt-panel-cab .actions .btn, .lt-panel-foto .actions .btn { margin-top: 0; min-height: 44px; }
+.lt-panel-cuerpo { display: block; }
+.lt-pestanas { display: flex; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--navy-700); }
+.lt-pestanas button { flex: 0 1 auto; min-height: 44px; padding: 8px 12px; background: transparent; border: 0; border-bottom: 3px solid transparent; color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; }
+.lt-pestanas button.activa { color: var(--paper); border-bottom-color: var(--red); }
+.lt-grupo { display: flex; flex-direction: column; gap: 8px; }
+.lt-grupo label { margin: 0; }
+.lt-rotulo { font-size: 13px; color: var(--muted); font-weight: 600; }
+.lt-trans { display: flex; flex-direction: column; gap: 8px; }
+.lt-trans-grupo { display: flex; flex-direction: column; gap: 4px; }
+.lt-trans-opciones { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 6px; }
+.lt-trans-boton { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 6px 8px; background: var(--navy-800); color: var(--text); border: 1px solid var(--navy-600); border-radius: 8px; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.lt-trans-boton > span { flex: 0 0 22px; text-align: center; font-size: 16px; color: var(--muted); }
+.lt-trans-boton.activa { border-color: var(--red); background: var(--navy-900); box-shadow: inset 0 0 0 1px var(--red); }
+.lt-trans-boton.activa > span { color: var(--red); }
+.lt-trans-boton:disabled { opacity: 0.5; cursor: default; }
+.lt-trans-grupo.exclusiva .lt-trans-boton { border-style: dashed; border-color: var(--red); }
+.lt-trans-grupo.exclusiva .lt-trans-opciones { grid-template-columns: minmax(0, 220px); }
+.lt-efecto { display: flex; gap: 8px; align-items: center; }
+.lt-efecto select { flex: 1; min-width: 0; margin: 0; }
+.lt-efecto .btn { margin: 0; min-height: 44px; flex: 0 0 auto; }
+.lt-pestanas { overflow-x: auto; }
+.lt-pestanas button { white-space: nowrap; }
+.lt-grupo[hidden], .lt-panel-foto[hidden] { display: none; }
+.lt-panel-foto .scene-img { max-width: 260px; }
+.lt-panel-foto { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.lt-panel-datos { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.lt-panel-datos label { margin: 0; }
+.lt-panel-datos textarea { min-height: 60px; margin: 0; }
+.lt-video { display: flex; flex-direction: column; gap: 8px; }
+.lt-video video { width: 100%; max-height: 280px; border-radius: 8px; background: #000; }
+.lt-video-botones { margin: 0; }
+.lt-video-botones .btn { margin-top: 0; min-height: 44px; }
+.lt-origen { display: flex; flex-wrap: wrap; gap: 6px; }
+.lt-origen .btn { margin: 0; min-height: 44px; }
+.lt-mov { display: flex; flex-direction: column; gap: 8px; }
+.lt-mov-opciones { display: flex; flex-wrap: wrap; gap: 6px; }
+.lt-mov-opciones .btn { margin-top: 0; min-height: 44px; }
+.lt-mov-opciones .btn.activo { border-color: var(--red); color: var(--paper); background: var(--navy-800); }
+.lt-barra { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 6px; }
+.lt-barra .btn { margin-top: 0; min-height: 44px; }
+.lt-tiempo { font-weight: 700; font-variant-numeric: tabular-nums; margin-right: auto; }
+.lt-tiempo.pasado { color: var(--red); }
+@media (max-width: 640px) {
+  .lt-panel-cuerpo { grid-template-columns: minmax(0, 1fr); }
+  .lt-panel-foto .scene-img { max-height: 240px; }
+}
 .picker { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; max-height: 220px; overflow: auto; }
 .picker img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; cursor: pointer; border: 2px solid transparent; }
 .picker img:hover { border-color: var(--red); }
+.picker video { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; cursor: pointer; border: 2px solid transparent; background: #000; }
+.picker video:hover { border-color: var(--red); }
 .bar { height: 6px; background: var(--navy-900); border-radius: 99px; margin-top: 8px; overflow: hidden; }
 .bar div { height: 100%; background: var(--red); transition: width 0.2s; }
 .reel-output { margin-top: 14px; display: flex; gap: 16px; flex-wrap: wrap; }

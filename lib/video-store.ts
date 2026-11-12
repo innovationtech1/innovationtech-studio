@@ -50,6 +50,8 @@ export interface VideoStore {
   // Los que esperan turno: por prioridad y luego del más viejo al más nuevo.
   trabajosEnFila(limite: number): Promise<TrabajoVideo[]>;
   trabajosEnviados(): Promise<TrabajoVideo[]>;
+  // El trabajo con esa llave que sigue en camino (en fila o enviado), o null. La llave ya incluye al negocio.
+  trabajoEnCurso(cacheLlave: string): Promise<TrabajoVideo | null>;
   // Los actualizados desde `ms`, del más nuevo al más viejo (para el resumen del administrador).
   trabajosDesde(ms: number, limite: number): Promise<TrabajoVideo[]>;
   contarEnviados(): Promise<number>;
@@ -114,6 +116,11 @@ export function firestoreVideoStore(): VideoStore {
       return (await porEstado("en_fila")).sort(ordenFila).slice(0, limite);
     },
     trabajosEnviados: () => porEstado("enviado"),
+    async trabajoEnCurso(cacheLlave) {
+      // Un solo campo en la consulta (sin índice compuesto); el estado se filtra aquí
+      const docs = (await trabajos().where("cacheLlave", "==", cacheLlave).get()).docs.map(deDoc);
+      return docs.filter((t) => t.estado === "en_fila" || t.estado === "enviado").sort((x, y) => x.creado - y.creado)[0] ?? null;
+    },
     async trabajosDesde(ms, limite) {
       return (await trabajos().where("actualizado", ">=", ms).orderBy("actualizado", "desc").limit(limite).get()).docs.map(deDoc);
     },
