@@ -8,7 +8,11 @@ export const MAX_FOTO = 15;
 export const FOTO_DEFECTO = 8; // un clip nuevo: pocas imágenes, bien aprovechadas (7 a 10 s cada una)
 const FOTO_ANTES = 3; // lo que duraba cada escena antes del editor (para borradores viejos)
 export const SEGUNDOS_TOMA = 5;
-export const MAX_TOMAS = 4;
+export const MAX_TOMAS = 8; // tomas con IA distintas por video
+export type Reproduccion = "normal" | "lenta" | "repetir2" | "repetir3";
+const REPRODUCCIONES: Reproduccion[] = ["normal", "lenta", "repetir2", "repetir3"];
+// Cuántas veces dura una toma estirada: cámara lenta ×2, repetir ×2 o ×3
+const FACTOR: Record<Reproduccion, number> = { normal: 1, lenta: 2, repetir2: 2, repetir3: 3 };
 export const MIN_TRAMO = 1; // segundos mínimos del recorte de un video
 export const VELOCIDADES = [0.5, 1, 1.5, 2] as const;
 
@@ -27,6 +31,10 @@ export type Clip = {
   prompt: string; // con qué se pide la imagen a la IA
   segundos: number; // foto: 1.5 a 15; en una toma no se usa
   movimiento?: string; // lo que se le pide a la IA en una toma
+  trabajoId?: string; // la toma con IA ya pedida para este clip (lib/video-ia.ts)
+  anteriorTrabajoId?: string; // la toma previa, para «Volver a la anterior»
+  variacion?: number; // sube con cada «Rehacer»: misma foto y movimiento, clip nuevo
+  reproduccion?: Reproduccion; // estirar la toma: cámara lenta o repetir
   textoPos?: TextoPos;
   textoTam?: TextoTam;
   // Solo video propio
@@ -39,7 +47,7 @@ export type Clip = {
 };
 
 // El tramo de video que reproduce una escena
-export type VideoRender = { src: string; inicio: number; fin: number; velocidad: number; sonido: boolean };
+export type VideoRender = { src: string; inicio: number; fin: number; velocidad: number; sonido: boolean; repetir?: number };
 
 // Lo que recibe el motor (lib/reel.ts): una escena por clip con foto, con su duración ya resuelta.
 export type EscenaRender = {
@@ -87,6 +95,12 @@ export function normalizarClips(guardado: unknown, segundosViejos: number = FOTO
     };
     if (typeof v.imageId === "string" && v.imageId) clip.imageId = v.imageId;
     if (typeof v.movimiento === "string" && v.movimiento) clip.movimiento = v.movimiento;
+    if (clip.tipo === "toma") {
+      if (typeof v.trabajoId === "string" && v.trabajoId) clip.trabajoId = v.trabajoId;
+      if (typeof v.anteriorTrabajoId === "string" && v.anteriorTrabajoId) clip.anteriorTrabajoId = v.anteriorTrabajoId;
+      if (typeof v.variacion === "number" && Number.isInteger(v.variacion) && v.variacion > 0 && v.variacion < 100) clip.variacion = v.variacion;
+      if (REPRODUCCIONES.includes(v.reproduccion as Reproduccion) && v.reproduccion !== "normal") clip.reproduccion = v.reproduccion as Reproduccion;
+    }
     if (POSICIONES.includes(v.textoPos as TextoPos)) clip.textoPos = v.textoPos as TextoPos;
     if (TAMANOS.includes(v.textoTam as TextoTam)) clip.textoTam = v.textoTam as TextoTam;
     if (esVideo) {
@@ -131,7 +145,18 @@ export function duracionClip(c: Clip): number {
     const t = tramo(c);
     return (t.fin - t.inicio) / velocidadValida(c.velocidad);
   }
-  return c.tipo === "toma" ? SEGUNDOS_TOMA : acotar(c.segundos);
+  return c.tipo === "toma" ? SEGUNDOS_TOMA * FACTOR[c.reproduccion ?? "normal"] : acotar(c.segundos);
+}
+
+// Cuántas tomas con IA distintas lleva el video. Los clips que comparten toma (duplicados) o que
+// pedirían la misma (misma foto, movimiento y variación) cuentan como una.
+export function tomasDistintas(clips: Clip[]): number {
+  const llaves = new Set<string>();
+  for (const c of clips) {
+    if (c.tipo !== "toma" || !c.image) continue;
+    llaves.add(c.trabajoId ? `t:${c.trabajoId}` : `f:${c.image}\n${(c.movimiento ?? "").trim().toLowerCase()}\n${c.variacion ?? 0}`);
+  }
+  return llaves.size;
 }
 
 const suma = (clips: Clip[]) => clips.reduce((a, c) => a + duracionClip(c), 0);
@@ -155,7 +180,7 @@ export function formatoTiempo(segundos: number): string {
 export function validar(clips: Clip[]): string | null {
   const conFoto = clips.filter(presente);
   if (conFoto.length === 0) return "Agrega al menos una imagen a las escenas.";
-  if (conFoto.filter((c) => c.tipo === "toma").length > MAX_TOMAS) return `Puedes marcar máximo ${MAX_TOMAS} fotos con IA por video.`;
+  if (tomasDistintas(clips) > MAX_TOMAS) return `Puedes animar con IA máximo ${MAX_TOMAS} fotos distintas por video.`;
   if (conFoto.some((c) => c.tipo === "video" && tramo(c).fin - tramo(c).inicio < MIN_TRAMO)) return "Un video quedó de menos de 1 segundo: alarga su recorte.";
   const total = duracionTotal(clips);
   if (total > MAX_VIDEO) return `Tu video dura ${formatoTiempo(total)}. El máximo es ${formatoTiempo(MAX_VIDEO)}: quita o acorta algún clip.`;
@@ -192,7 +217,56 @@ export function cambiar(clips: Clip[], i: number, cambios: Partial<Clip>): Clip[
   if ("segundos" in c) c.segundos = acotar(c.segundos, clips[i].segundos);
   if ("velocidad" in c) c.velocidad = velocidadValida(c.velocidad);
   delete c.id;
-  return clips.map((x, j) => (j === i ? { ...x, ...c } : x));
+  const antes = clips[i];
+  const nuevo: Clip = { ...antes, ...c };
+  // La toma con IA es de esa foto y ese movimiento: si cambian (o deja de ser toma), ya no sirve
+  const mov = (m?: string) => (m ?? "").trim();
+  if (antes.tipo === "toma" && (nuevo.tipo !== "toma" || nuevo.image !== antes.image || mov(nuevo.movimiento) !== mov(antes.movimiento))) {
+    delete nuevo.trabajoId;
+    delete nuevo.anteriorTrabajoId;
+    delete nuevo.variacion;
+  }
+  return clips.map((x, j) => (j === i ? nuevo : x));
+}
+
+// Guarda en el clip la toma con IA que se acaba de pedir. La que tenía queda como «anterior».
+export function ponerToma(clips: Clip[], i: number, trabajoId: string): Clip[] {
+  if (!dentro(clips, i) || clips[i].tipo !== "toma") return clips;
+  return clips.map((x, j) => {
+    if (j !== i) return x;
+    const n: Clip = { ...x, trabajoId };
+    if (x.trabajoId && x.trabajoId !== trabajoId) n.anteriorTrabajoId = x.trabajoId;
+    return n;
+  });
+}
+
+// «Rehacer»: misma foto y movimiento, pero pide un clip nuevo (sube la variación). La toma actual
+// sigue puesta hasta que llegue la nueva.
+export function rehacerToma(clips: Clip[], i: number): Clip[] {
+  if (!dentro(clips, i) || clips[i].tipo !== "toma") return clips;
+  return clips.map((x, j) => (j === i ? { ...x, variacion: (x.variacion ?? 0) + 1 } : x));
+}
+
+// «Volver a la anterior»: intercambia la toma actual con la previa. No cuesta.
+export function volverAnterior(clips: Clip[], i: number): Clip[] {
+  if (!dentro(clips, i) || !clips[i].anteriorTrabajoId) return clips;
+  return clips.map((x, j) => (j === i ? { ...x, trabajoId: x.anteriorTrabajoId, anteriorTrabajoId: x.trabajoId } : x));
+}
+
+// Quita la toma de un clip (falló o el servidor ya no la reconoce): vuelve a la anterior si la había.
+export function quitarToma(clips: Clip[], trabajoId: string): Clip[] {
+  if (!clips.some((c) => c.trabajoId === trabajoId)) return clips;
+  return clips.map((x) => {
+    if (x.trabajoId !== trabajoId) return x;
+    const n: Clip = { ...x };
+    delete n.trabajoId;
+    if (x.anteriorTrabajoId) {
+      n.trabajoId = x.anteriorTrabajoId;
+      delete n.anteriorTrabajoId;
+      if (n.variacion) n.variacion -= 1;
+    }
+    return n;
+  });
 }
 
 // Cambia el recorte de un video (en segundos del original). Nunca deja menos de 1 s.
@@ -244,7 +318,11 @@ export function aEscenas(
     };
     if (c.tipo === "toma") {
       const src = fuentes.tomas?.[c.id];
-      if (src) e.video = { src, inicio: 0, fin: SEGUNDOS_TOMA, velocidad: 1, sonido: false };
+      const modo = c.reproduccion ?? "normal";
+      if (src) {
+        e.video = { src, inicio: 0, fin: SEGUNDOS_TOMA, velocidad: modo === "lenta" ? 0.5 : 1, sonido: false };
+        if (modo === "repetir2" || modo === "repetir3") e.video.repetir = FACTOR[modo];
+      }
     } else if (c.tipo === "video") {
       const src = c.archivoId ? fuentes.videos?.[c.archivoId] : null;
       if (src) e.video = { src, ...tramo(c), velocidad: velocidadValida(c.velocidad), sonido: !c.sinSonido };

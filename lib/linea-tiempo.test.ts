@@ -15,10 +15,14 @@ import {
   mover,
   normalizarClips,
   nuevoClip,
+  ponerToma,
   recortar,
+  rehacerToma,
   sustituir,
+  tomasDistintas,
   tramo,
   validar,
+  volverAnterior,
   type Clip,
 } from "./linea-tiempo";
 
@@ -107,11 +111,11 @@ test("validar: más de 2 minutos", () => {
   assert.equal(validar(fotos(45)), "Tu video dura 2:15. El máximo es 2:00: quita o acorta algún clip.");
 });
 
-test("validar: más de 4 tomas con IA", () => {
-  const cinco = Array.from({ length: 5 }, () => foto({ tipo: "toma" }));
-  assert.equal(validar(cinco), "Puedes marcar máximo 4 fotos con IA por video.");
+test("validar: más de 8 tomas con IA distintas", () => {
+  const nueve = Array.from({ length: 9 }, (_, i) => foto({ tipo: "toma", image: `data:${i}` }));
+  assert.equal(validar(nueve), "Puedes animar con IA máximo 8 fotos distintas por video.");
   // una toma sin foto no cuenta
-  assert.equal(validar([...cinco.slice(0, 4), nuevoClip({ tipo: "toma" })]), null);
+  assert.equal(validar([...nueve.slice(0, 8), nuevoClip({ tipo: "toma" })]), null);
 });
 
 test("validar: caso normal y justo 2:00", () => {
@@ -356,4 +360,86 @@ test("ajustarAVoz con videos: no los toca y los descuenta", () => {
 test("cambiar: la velocidad solo acepta las cuatro permitidas", () => {
   assert.equal(cambiar([video()], 0, { velocidad: 2 })[0].velocidad, 2);
   assert.equal(cambiar([video()], 0, { velocidad: 3 })[0].velocidad, 1);
+});
+
+// ---------- IA por clip y estirar ----------
+
+const toma = (extra: Partial<Clip> = {}): Clip => foto({ tipo: "toma", ...extra });
+
+test("estirar una toma: cámara lenta y repetir", () => {
+  assert.equal(duracionClip(toma()), 5);
+  assert.equal(duracionClip(toma({ reproduccion: "lenta" })), 10);
+  assert.equal(duracionClip(toma({ reproduccion: "repetir2" })), 10);
+  assert.equal(duracionClip(toma({ reproduccion: "repetir3" })), 15);
+  assert.equal(duracionClip(foto({ reproduccion: "lenta", segundos: 4 })), 4); // en una foto no aplica
+});
+
+test("aEscenas de una toma estirada", () => {
+  const a = toma({ reproduccion: "lenta" });
+  const b = toma({ reproduccion: "repetir3" });
+  const r = aEscenas([a, b], { tomas: { [a.id]: "u1", [b.id]: "u2" } });
+  assert.deepEqual(r[0].video, { src: "u1", inicio: 0, fin: 5, velocidad: 0.5, sonido: false });
+  assert.equal(r[0].segundos, 10);
+  assert.deepEqual(r[1].video, { src: "u2", inicio: 0, fin: 5, velocidad: 1, sonido: false, repetir: 3 });
+  assert.equal(r[1].segundos, 15);
+});
+
+test("tomasDistintas: los duplicados y las mitades comparten toma", () => {
+  const a = toma({ trabajoId: "t1" });
+  const copia = { ...a, id: "otro" };
+  const b = toma({ image: "data:b" });
+  const mismaFoto = toma({ image: "data:b" }); // misma foto y movimiento, sin generar: es la misma toma
+  const otroMov = toma({ image: "data:b", movimiento: "zoom" });
+  assert.equal(tomasDistintas([a, copia, b, mismaFoto, otroMov, foto(), nuevoClip({ tipo: "toma" })]), 3);
+});
+
+test("ponerToma, rehacerToma y volverAnterior", () => {
+  let lista = ponerToma([toma()], 0, "t1");
+  assert.equal(lista[0].trabajoId, "t1");
+  // rehacer: sube la variación; la toma actual sigue puesta hasta que llegue la nueva
+  lista = rehacerToma(lista, 0);
+  assert.equal(lista[0].variacion, 1);
+  assert.equal(lista[0].trabajoId, "t1");
+  lista = ponerToma(lista, 0, "t2");
+  assert.equal(lista[0].trabajoId, "t2");
+  assert.equal(lista[0].anteriorTrabajoId, "t1");
+  lista = volverAnterior(lista, 0);
+  assert.equal(lista[0].trabajoId, "t1");
+  assert.equal(lista[0].anteriorTrabajoId, "t2");
+  const sin = [toma()];
+  assert.equal(volverAnterior(sin, 0), sin);
+  assert.equal(ponerToma(sin, 3, "x"), sin);
+});
+
+test("cambiar la foto o el movimiento de un clip animado descarta su toma", () => {
+  const c = toma({ trabajoId: "t1", anteriorTrabajoId: "t0", variacion: 2, movimiento: "zoom" });
+  let r = cambiar([c], 0, { movimiento: "paneo" })[0];
+  assert.equal(r.trabajoId, undefined);
+  assert.equal(r.anteriorTrabajoId, undefined);
+  assert.equal(r.variacion, undefined);
+  r = cambiar([c], 0, { image: "data:otra" })[0];
+  assert.equal(r.trabajoId, undefined);
+  r = cambiar([c], 0, { tipo: "foto" })[0];
+  assert.equal(r.trabajoId, undefined);
+  // lo que no cambia el clip generado se conserva
+  r = cambiar([c], 0, { caption: "Hola", reproduccion: "lenta", movimiento: "zoom" })[0];
+  assert.equal(r.trabajoId, "t1");
+  assert.equal(r.variacion, 2);
+});
+
+test("duplicar una toma generada comparte su toma (no se paga otra vez)", () => {
+  const r = duplicar([toma({ trabajoId: "t1" })], 0);
+  assert.equal(r[1].trabajoId, "t1");
+  assert.equal(tomasDistintas(r), 1);
+});
+
+test("normalizarClips conserva los datos de la toma", () => {
+  const [a] = normalizarClips([toma({ trabajoId: "t1", anteriorTrabajoId: "t0", variacion: 3, reproduccion: "repetir2" })]);
+  assert.equal(a.trabajoId, "t1");
+  assert.equal(a.anteriorTrabajoId, "t0");
+  assert.equal(a.variacion, 3);
+  assert.equal(a.reproduccion, "repetir2");
+  const [b] = normalizarClips([{ ...toma(), reproduccion: "al-reves", variacion: -4 }]);
+  assert.equal(b.reproduccion, undefined);
+  assert.equal(b.variacion, undefined);
 });

@@ -257,10 +257,10 @@ test("aplicar: animar marca la foto, con sus límites", () => {
   r = aplicar(estado([nuevoClip()]), [{ tipo: "animar", clip: 1, activar: true }]);
   assert.equal(r.estado.clips[0].tipo, "foto");
   assert.equal(r.avisos.length, 1);
-  const cuatro = Array.from({ length: 4 }, () => foto({ tipo: "toma" }));
-  r = aplicar(estado([...cuatro, foto()]), [{ tipo: "animar", clip: 5, activar: true }]);
-  assert.equal(r.estado.clips[4].tipo, "foto");
-  assert.deepEqual(r.avisos, ["Máximo 4 fotos con IA por video"]);
+  const ocho = Array.from({ length: 8 }, (_, i) => foto({ tipo: "toma", image: `data:${i}` }));
+  r = aplicar(estado([...ocho, foto()]), [{ tipo: "animar", clip: 9, activar: true }]);
+  assert.equal(r.estado.clips[8].tipo, "foto");
+  assert.deepEqual(r.avisos, ["Máximo 8 fotos con IA por video"]);
 });
 
 test("aplicar: formato, cierre, subtítulos y música cambian los ajustes", () => {
