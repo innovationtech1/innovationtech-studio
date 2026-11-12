@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Send, Undo2, Wand2 } from "lucide-react";
 import MicButton from "./mic-button";
 import { MAX_ORDEN } from "@/lib/director";
@@ -20,7 +20,9 @@ export default function Director({
   confirmar,
   resultado,
   onDeshacer,
+  sugerida,
 }: {
+  sugerida?: { text: string; n: number } | null; // un tema que llega de otra sección (calendario, asistente): queda escrito, listo para enviar
   ocupado: boolean;
   cfHeaders: Record<string, string>;
   onEnviar: (orden: string) => void;
@@ -30,6 +32,9 @@ export default function Director({
 }) {
   const [orden, setOrden] = useState("");
   const [dictando, setDictando] = useState("");
+  useEffect(() => {
+    if (sugerida?.text) setOrden(`Hazme un video de: ${sugerida.text}`.slice(0, MAX_ORDEN));
+  }, [sugerida]);
   const lista = orden.trim();
   const enviar = () => {
     if (!lista || ocupado || confirmar) return;
@@ -42,8 +47,8 @@ export default function Director({
     <div className="dir">
       <div className="dir-titulo">
         <Wand2 size={18} aria-hidden />
-        <strong>Director con IA</strong>
-        <span className="muted">Escribe o dicta lo que quieres y la IA arma o corrige tu video.</span>
+        <strong>¿Qué video quieres?</strong>
+        <span className="muted">Escribe o dicta tu idea y la IA arma el video. Después pídele cambios aquí mismo.</span>
       </div>
       <div className="dir-fila">
         <input
@@ -52,7 +57,7 @@ export default function Director({
           disabled={ocupado}
           onChange={(e) => (setDictando(""), setOrden(e.target.value))}
           onKeyDown={(e) => e.key === "Enter" && enviar()}
-          placeholder="Dile a la IA qué video quieres o qué cambiar"
+          placeholder="Ej.: Hazme un video de 30 segundos de mi promoción de esta semana"
           aria-label="Orden para la IA"
         />
         <MicButton
