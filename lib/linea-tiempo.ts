@@ -1,7 +1,7 @@
 // Línea de tiempo del Creador de Reels: la lista de clips del video y lo que se puede hacer con ella.
 // Módulo puro (sin React ni DOM) para poder probarlo. Ninguna función modifica la lista que recibe.
 
-import { esTransicion, type Transicion } from "./reel-transicion";
+import { SEGUNDOS_TRANSICION, esDuracionTransicion, esTransicion, repartirAlAzar, type DuracionTransicion, type Transicion } from "./reel-transicion";
 
 export const MAX_VIDEO = 120; // segundos, contando el cierre
 export const CIERRE = 3; // segundos del cierre con la marca
@@ -40,6 +40,7 @@ export type Clip = {
   textoPos?: TextoPos;
   textoTam?: TextoTam;
   transicion?: Transicion; // cómo se pasa de este clip al siguiente (por defecto, fundido)
+  transicionDur?: DuracionTransicion; // rápida, normal (por defecto) o lenta
   efecto?: string; // efecto de sonido que suena al empezar este clip (id de lib/sfx.ts)
   // Solo video propio
   archivoId?: string; // dónde está el archivo en el dispositivo (lib/video-propio.ts)
@@ -61,6 +62,7 @@ export type EscenaRender = {
   textoTam: TextoTam;
   segundos: number;
   transicion: Transicion; // hacia la escena siguiente
+  transicionSeg: number; // cuánto dura esa transición
   video?: VideoRender; // toma con IA o video propio; si falta, la imagen se anima con zoom
 };
 
@@ -109,6 +111,7 @@ export function normalizarClips(guardado: unknown, segundosViejos: number = FOTO
     if (POSICIONES.includes(v.textoPos as TextoPos)) clip.textoPos = v.textoPos as TextoPos;
     if (TAMANOS.includes(v.textoTam as TextoTam)) clip.textoTam = v.textoTam as TextoTam;
     if (esTransicion(v.transicion)) clip.transicion = v.transicion;
+    if (esDuracionTransicion(v.transicionDur)) clip.transicionDur = v.transicionDur;
     if (typeof v.efecto === "string" && v.efecto && v.efecto.length <= 30) clip.efecto = v.efecto;
     if (esVideo) {
       clip.archivoId = v.archivoId as string;
@@ -323,6 +326,7 @@ export function aEscenas(
       textoTam: c.textoTam ?? "normal",
       segundos: duracionClip(c),
       transicion: c.transicion ?? "fundido",
+      transicionSeg: SEGUNDOS_TRANSICION[c.transicionDur ?? "normal"],
     };
     if (c.tipo === "toma") {
       const src = fuentes.tomas?.[c.id];
@@ -337,6 +341,24 @@ export function aEscenas(
     }
     return e;
   });
+}
+
+// «Aplicar a todos»: la transición y la duración del clip `i` pasan a todos los clips
+export function transicionATodos(clips: Clip[], i: number): Clip[] {
+  if (!dentro(clips, i)) return clips;
+  const { transicion = "fundido", transicionDur } = clips[i];
+  return clips.map((c) => {
+    const n: Clip = { ...c, transicion };
+    if (transicionDur) n.transicionDur = transicionDur;
+    else delete n.transicionDur;
+    return n;
+  });
+}
+
+// «Sorpréndeme»: una transición distinta en cada clip (cada uno conserva su duración)
+export function transicionesAlAzar(clips: Clip[], azar?: () => number): Clip[] {
+  const elegidas = repartirAlAzar(clips.length, azar);
+  return clips.map((c, i) => ({ ...c, transicion: elegidas[i] }));
 }
 
 // Los efectos de sonido del video: cada uno suena en el segundo en que empieza su clip

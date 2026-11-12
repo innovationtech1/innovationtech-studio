@@ -21,6 +21,8 @@ import {
   rehacerToma,
   sustituir,
   tomasDistintas,
+  transicionATodos,
+  transicionesAlAzar,
   tramo,
   validar,
   volverAnterior,
@@ -179,8 +181,8 @@ test("aEscenas: omite los vacíos y pone los valores por defecto del texto", () 
   const b = foto({ caption: "dos", textoPos: "arriba", textoTam: "grande" });
   const r = aEscenas([a, nuevoClip(), b]);
   assert.deepEqual(r, [
-    { imagen: "data:x", texto: "uno", textoPos: "abajo", textoTam: "normal", segundos: 4, transicion: "fundido" },
-    { imagen: "data:x", texto: "dos", textoPos: "arriba", textoTam: "grande", segundos: 8, transicion: "fundido" },
+    { imagen: "data:x", texto: "uno", textoPos: "abajo", textoTam: "normal", segundos: 4, transicion: "fundido", transicionSeg: 0.6 },
+    { imagen: "data:x", texto: "dos", textoPos: "arriba", textoTam: "grande", segundos: 8, transicion: "fundido", transicionSeg: 0.6 },
   ]);
 });
 
@@ -329,7 +331,7 @@ test("aEscenas con videos: con su archivo lleva el tramo; sin archivo se ve la p
   const mudo = video({ archivoId: "reelvid-2", sinSonido: true });
   const falta = video({ archivoId: "reelvid-3" });
   const r = aEscenas([v, mudo, falta], { videos: { "reelvid-1": "blob:a", "reelvid-2": "blob:b" } });
-  assert.deepEqual(r[0], { imagen: "data:p", texto: "Hola", textoPos: "abajo", textoTam: "normal", segundos: 3, transicion: "fundido", video: { src: "blob:a", inicio: 2, fin: 8, velocidad: 2, sonido: true } });
+  assert.deepEqual(r[0], { imagen: "data:p", texto: "Hola", textoPos: "abajo", textoTam: "normal", segundos: 3, transicion: "fundido", transicionSeg: 0.6, video: { src: "blob:a", inicio: 2, fin: 8, velocidad: 2, sonido: true } });
   assert.equal(r[1].video?.sonido, false);
   assert.equal(r[2].video, undefined);
   assert.equal(r[2].segundos, 10);
@@ -468,4 +470,35 @@ test("efectosDe: cada efecto suena al empezar su clip", () => {
     { kind: "pop", at: 7 },
   ]);
   assert.deepEqual(efectosDe([foto()]), []);
+});
+
+// ---------- Transiciones avanzadas ----------
+
+test("aEscenas: la transición lleva su duración en segundos (normal si no se eligió)", () => {
+  const r = aEscenas([foto({ transicion: "rafaga", transicionDur: "lenta" }), foto()]);
+  assert.equal(r[0].transicion, "rafaga");
+  assert.equal(r[0].transicionSeg, 1);
+  assert.equal(r[1].transicionSeg, 0.6);
+});
+
+test("normalizarClips conserva la duración de la transición y descarta valores raros", () => {
+  const [a, b] = normalizarClips([{ ...foto(), transicion: "glitch", transicionDur: "rapida" }, { ...foto(), transicionDur: "eterna" }]);
+  assert.equal(a.transicion, "glitch");
+  assert.equal(a.transicionDur, "rapida");
+  assert.equal(b.transicionDur, undefined);
+});
+
+test("transicionATodos: copia la transición y su duración de un clip a todos", () => {
+  const r = transicionATodos([foto({ transicion: "circulo", transicionDur: "lenta" }), foto(), foto({ transicion: "corte" })], 0);
+  assert.ok(r.every((c) => c.transicion === "circulo" && c.transicionDur === "lenta"));
+  const sinElegir = transicionATodos([foto(), foto({ transicion: "corte", transicionDur: "rapida" })], 0);
+  assert.ok(sinElegir.every((c) => c.transicion === "fundido" && c.transicionDur === undefined));
+  const igual = [foto()];
+  assert.equal(transicionATodos(igual, 4), igual);
+});
+
+test("transicionesAlAzar: una distinta por clip, sin dos iguales seguidas", () => {
+  const r = transicionesAlAzar([foto(), foto(), foto(), foto(), foto()], () => 0.5);
+  assert.ok(r.every((c) => c.transicion && c.transicion !== "corte"));
+  for (let i = 1; i < r.length; i++) assert.notEqual(r[i].transicion, r[i - 1].transicion);
 });

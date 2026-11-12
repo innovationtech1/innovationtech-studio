@@ -554,9 +554,27 @@ test("transición por orden: un clip o todos", () => {
   descartada({ tipo: "transicion", valor: "corte" });
   let r = aplicar(estado([foto(), foto()]), [{ tipo: "transicion", clip: "todos", valor: "deslizar" }]);
   assert.ok(r.estado.clips.every((c) => c.transicion === "deslizar"));
-  assert.deepEqual(r.hecho, ["Puse la transición «Deslizar» en todos los clips"]);
+  assert.deepEqual(r.hecho, ["Puse la transición «Deslizar ←» en todos los clips"]);
   r = aplicar(estado([foto(), foto()]), [{ tipo: "transicion", clip: 2, valor: "corte" }]);
   assert.deepEqual(r.estado.clips.map((c) => c.transicion), [undefined, "corte"]);
   r = aplicar(estado([foto()]), [{ tipo: "transicion", clip: 5, valor: "corte" }]);
   assert.deepEqual(r.avisos, ["No existe el clip 5"]);
+});
+
+test("transiciones avanzadas por orden: duración, las nuevas y «sorpresa»", () => {
+  assert.deepEqual(una({ tipo: "transicion", clip: "todos", valor: "rafaga", duracion: "lenta" }), { tipo: "transicion", clip: "todos", valor: "rafaga", duracion: "lenta" });
+  assert.deepEqual(una({ tipo: "transicion", clip: "todos", valor: "sorpresa" }), { tipo: "transicion", clip: "todos", valor: "sorpresa" });
+  assert.deepEqual(una({ tipo: "transicion", clip: "todos", duracion: "rapida" }), { tipo: "transicion", clip: "todos", duracion: "rapida" });
+  descartada({ tipo: "transicion", clip: "todos" });
+  descartada({ tipo: "transicion", clip: 1, valor: "sorpresa" }); // la sorpresa es para todo el video
+  let r = aplicar(estado([foto(), foto(), foto()]), [{ tipo: "transicion", clip: "todos", valor: "sorpresa" }]);
+  assert.ok(r.estado.clips.every((c) => c.transicion && c.transicion !== "corte"));
+  assert.deepEqual(r.hecho, ["Repartí transiciones variadas por todo el video"]);
+  r = aplicar(estado([foto({ transicion: "zoom" }), foto()]), [{ tipo: "transicion", clip: "todos", duracion: "lenta" }]);
+  assert.deepEqual(r.estado.clips.map((c) => [c.transicion, c.transicionDur]), [["zoom", "lenta"], [undefined, "lenta"]]);
+  assert.deepEqual(r.hecho, ["Puse las transiciones lentas en todos los clips"]);
+  r = aplicar(estado([foto(), foto()]), [{ tipo: "transicion", clip: 1, valor: "rafaga", duracion: "rapida" }]);
+  assert.deepEqual([r.estado.clips[0].transicion, r.estado.clips[0].transicionDur], ["rafaga", "rapida"]);
+  assert.match(instr().system, /rafaga/);
+  assert.match(instr().system, /sorpresa/);
 });

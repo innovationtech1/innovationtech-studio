@@ -47,6 +47,8 @@ import {
   rehacerToma,
   sustituir,
   tomasDistintas,
+  transicionATodos,
+  transicionesAlAzar,
   validar,
   volverAnterior,
   type Clip,
@@ -1306,6 +1308,8 @@ export default function ReelStudio({
         onAnimar={(i) => void animarClip(clips[i].id)}
         onRehacer={(i) => void animarClip(clips[i].id, true)}
         onVolver={(i) => interno((l) => volverAnterior(l, i))}
+        onTransicionATodos={(i) => editar((c) => transicionATodos(c, i))}
+        onSorpresa={() => editar((c) => transicionesAlAzar(c))}
         ocupado={!!busy}
         panelImagen={panelImagen}
         videoDe={(id) => urlsVideo[id]}
