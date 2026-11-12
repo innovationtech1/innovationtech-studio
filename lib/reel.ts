@@ -7,6 +7,7 @@ import { medidasTexto } from "./reel-texto";
 import { bajadasDeMusica, gananciaClip, tramosConSonido } from "./reel-sonido";
 import { pasoTransicion } from "./reel-transicion";
 import { renderSfx, type SfxItem } from "./sfx";
+import { FPS_RAPIDO, MUESTRAS_AUDIO, codecDeVideo, cuadrosDe, momentoDe, sirveParaRapido, trozosDeAudio } from "./reel-rapido";
 // Motor de reels: arma un video animado dentro del navegador, gratis y sin límite.
 // Dibuja cada escena en un <canvas> (zoom/movimiento suave + transiciones + textos)
 // y lo graba con MediaRecorder, incluyendo la voz en off si existe.
@@ -485,8 +486,11 @@ async function montar(o: ReelOptions): Promise<Montaje> {
 
 // Conecta la voz, la música y el sonido de los videos propios a `salida` (la grabación o las bocinas)
 // y devuelve cómo arrancar la voz y la música.
-function prepararAudio(m: Montaje, o: ReelOptions, salida: AudioNode): () => void {
-  const { audioCtx, voiceBuffer, musicBuffer, total } = m;
+// `en`: dónde se mezcla. Por defecto, el audio en vivo del montaje; en la exportación rápida,
+// una mezcla que se calcula de golpe (OfflineAudioContext).
+function prepararAudio(m: Montaje, o: ReelOptions, salida: AudioNode, en?: BaseAudioContext): () => void {
+  const { voiceBuffer, musicBuffer, total } = m;
+  const audioCtx = en ?? m.audioCtx;
   if (!audioCtx) return () => {};
   const vol = { voz: o.volumenes?.voz ?? 1, clips: o.volumenes?.clips ?? 1 };
   let source: AudioBufferSourceNode | null = null;
@@ -516,11 +520,11 @@ function prepararAudio(m: Montaje, o: ReelOptions, salida: AudioNode): () => voi
   // Sonido de los videos propios: cada uno con su volumen, que empieza en cero (lo mueve `reproducir`)
   m.escenas.forEach((e, i) => {
     const v = m.clips[i];
-    if (!v || !e.video?.sonido) return;
+    if (!v || !e.video?.sonido || !("createMediaElementSource" in audioCtx)) return;
     try {
       const g = audioCtx.createGain();
       g.gain.value = 0;
-      audioCtx.createMediaElementSource(v).connect(g).connect(salida);
+      (audioCtx as AudioContext).createMediaElementSource(v).connect(g).connect(salida);
       m.ganancias[i] = g;
     } catch {
       v.muted = true; // si el navegador no deja mezclarlo, ese video va sin sonido
@@ -620,8 +624,136 @@ function reproducir(m: Montaje, o: ReelOptions, signal?: AbortSignal): Promise<v
   });
 }
 
-// Graba el video y lo devuelve como archivo.
+// Crea el video y lo devuelve como archivo. Si el video es solo de fotos y el dispositivo puede,
+// se exporta rápido (cuadro por cuadro); si no, o si algo falla, se graba mientras se reproduce.
 export async function renderReel(o: ReelOptions): Promise<ReelResult> {
+  if (sirveParaRapido(o.escenas)) {
+    const rapido = await exportarRapido(o).catch(() => null);
+    if (rapido) return rapido;
+    o.onProgress?.(0);
+  }
+  return grabarEnVivo(o);
+}
+
+// Exportación rápida: dibuja cada cuadro, lo codifica en H.264 y arma el MP4 con su audio (AAC).
+// Devuelve null si este navegador no puede (entonces se usa la grabación en vivo).
+async function exportarRapido(o: ReelOptions): Promise<ReelResult | null> {
+  if (typeof VideoEncoder === "undefined" || typeof VideoFrame === "undefined") return null;
+  const [W, H] = SIZES[o.format];
+  const video = { codec: codecDeVideo(W, H), width: W, height: H, bitrate: 6_000_000, framerate: FPS_RAPIDO, avc: { format: "avc" as const } };
+  if (!(await VideoEncoder.isConfigSupported(video).catch(() => null))?.supported) return null;
+  const audio = { codec: "mp4a.40.2", sampleRate: MUESTRAS_AUDIO, numberOfChannels: 2, bitrate: 128_000 };
+  if (o.voice || o.music || o.efectos?.length) {
+    // Sin AAC el archivo no sonaría en iPhone ni en Instagram: mejor grabar en vivo
+    if (typeof AudioEncoder === "undefined" || typeof AudioData === "undefined") return null;
+    if (!(await AudioEncoder.isConfigSupported(audio).catch(() => null))?.supported) return null;
+  }
+  const { Muxer, ArrayBufferTarget } = await import("mp4-muxer");
+  const m = await montar(o);
+  try {
+    const conAudio = !!(m.voiceBuffer || m.musicBuffer || m.efectosBuffer);
+    if (conAudio && typeof AudioEncoder === "undefined") return null;
+    const destino = new ArrayBufferTarget();
+    const muxer = new Muxer({
+      target: destino,
+      video: { codec: "avc", width: W, height: H, frameRate: FPS_RAPIDO },
+      audio: conAudio ? { codec: "aac", numberOfChannels: 2, sampleRate: MUESTRAS_AUDIO } : undefined,
+      fastStart: "in-memory", // los datos del video van al principio: empieza a verse sin bajarlo completo
+      firstTimestampBehavior: "offset",
+    });
+    let fallo: unknown = null;
+    const respiro = (ms = 0) => new Promise((r) => setTimeout(r, ms));
+
+    // Imagen
+    const codVideo = new VideoEncoder({ output: (c, meta) => muxer.addVideoChunk(c, meta), error: (e) => (fallo = e) });
+    codVideo.configure(video);
+    o.onStatus?.("");
+    const cuadros = cuadrosDe(m.total);
+    const parteVideo = conAudio ? 0.92 : 1;
+    for (let i = 0; i < cuadros; i++) {
+      if (fallo) throw fallo;
+      m.draw(Math.min(m.total - 0.001, momentoDe(i)));
+      const cuadro = new VideoFrame(m.canvas, { timestamp: Math.round(momentoDe(i) * 1e6), duration: Math.round(1e6 / FPS_RAPIDO) });
+      codVideo.encode(cuadro, { keyFrame: i % (FPS_RAPIDO * 2) === 0 });
+      cuadro.close();
+      // Sin esto la pantalla se congela y la memoria se llena de cuadros por codificar
+      if (i % 6 === 0) {
+        o.onProgress?.((i / cuadros) * parteVideo);
+        await respiro();
+      }
+      while (codVideo.encodeQueueSize > 10) await respiro(4);
+    }
+    await codVideo.flush();
+    codVideo.close();
+    if (fallo) throw fallo;
+
+    // Sonido: la misma mezcla que al grabar en vivo (voz, música que baja con la voz, efectos), calculada de golpe
+    if (conAudio) {
+      const mezcla = new OfflineAudioContext(2, Math.ceil(m.total * MUESTRAS_AUDIO), MUESTRAS_AUDIO);
+      prepararAudio(m, o, mezcla.destination, mezcla)();
+      const pista = await mezcla.startRendering();
+      const codAudio = new AudioEncoder({ output: (c, meta) => muxer.addAudioChunk(c, meta), error: (e) => (fallo = e) });
+      codAudio.configure(audio);
+      const izq = pista.getChannelData(0);
+      const der = pista.numberOfChannels > 1 ? pista.getChannelData(1) : izq;
+      for (const t of trozosDeAudio(pista.length)) {
+        const datos = new Float32Array(t.cuantas * 2);
+        datos.set(izq.subarray(t.desde, t.desde + t.cuantas), 0);
+        datos.set(der.subarray(t.desde, t.desde + t.cuantas), t.cuantas);
+        const bloque = new AudioData({
+          format: "f32-planar",
+          sampleRate: MUESTRAS_AUDIO,
+          numberOfFrames: t.cuantas,
+          numberOfChannels: 2,
+          timestamp: Math.round((t.desde / MUESTRAS_AUDIO) * 1e6),
+          data: datos,
+        });
+        codAudio.encode(bloque);
+        bloque.close();
+        if (codAudio.encodeQueueSize > 20) await respiro(2);
+      }
+      await codAudio.flush();
+      codAudio.close();
+      if (fallo) throw fallo;
+    }
+
+    muxer.finalize();
+    const blob = new Blob([destino.buffer], { type: "video/mp4" });
+    if (blob.size < 1000) throw new Error("archivo vacío");
+    // Antes de entregarlo se comprueba que el propio navegador lo abre y dura lo que debe;
+    // si no, se descarta y el video se graba en vivo
+    const url = URL.createObjectURL(blob);
+    if (!(await seAbre(url, m.total))) {
+      URL.revokeObjectURL(url);
+      throw new Error("el archivo no se abre");
+    }
+    o.onProgress?.(1);
+    return { url, blob, ext: "mp4", seconds: Math.round(m.total) };
+  } finally {
+    m.soltar();
+  }
+}
+
+// ¿El navegador abre el video y dura lo esperado (con un segundo de margen)?
+function seAbre(url: string, segundos: number): Promise<boolean> {
+  return new Promise((res) => {
+    const v = document.createElement("video");
+    const fin = (ok: boolean) => {
+      v.removeAttribute("src");
+      v.load();
+      res(ok);
+    };
+    v.muted = true;
+    v.preload = "metadata";
+    v.onloadedmetadata = () => fin(Number.isFinite(v.duration) && Math.abs(v.duration - segundos) < 1 && v.videoWidth > 0);
+    v.onerror = () => fin(false);
+    setTimeout(() => fin(false), 5000);
+    v.src = url;
+  });
+}
+
+// Graba el video mientras se reproduce (sirve en todos los navegadores y con clips de video).
+async function grabarEnVivo(o: ReelOptions): Promise<ReelResult> {
   const rec = supportedRecording();
   if (!rec) throw new Error("Este navegador no puede grabar video. Usa Chrome, Edge o Safari actualizados.");
   const m = await montar(o);
