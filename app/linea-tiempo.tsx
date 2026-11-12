@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, Copy, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Copy, Dices, Plus, Trash2 } from "lucide-react";
+import { MOVIMIENTOS, movimientoAlAzar } from "@/lib/movimientos";
 import { MAX_FOTO, MAX_TOMAS, MIN_FOTO, duracionClip, type Clip, type TextoPos, type TextoTam } from "@/lib/linea-tiempo";
 
 // Segundos con un decimal como mucho: 3 → «3 s», 5.125 → «5.1 s»
@@ -197,12 +198,42 @@ export default function LineaTiempo({
                   </label>
                   {!esToma && tomasMarcadas >= MAX_TOMAS && <p className="hint" style={{ margin: 0 }}>Ya marcaste el máximo de 4 fotos con IA en este video.</p>}
                   {esToma && (
-                    <input
-                      value={clip.movimiento ?? ""}
-                      maxLength={300}
-                      onChange={(e) => onCambiar(elegido, { movimiento: e.target.value })}
-                      placeholder="Movimiento (opcional). Ej.: la cámara se acerca despacio"
-                    />
+                    <div className="lt-mov">
+                      <label htmlFor="lt-mov">¿Cómo se mueve? Toca una opción o escribe la tuya</label>
+                      <div className="lt-mov-opciones">
+                        <button
+                          type="button"
+                          className="btn small"
+                          disabled={ocupado}
+                          onClick={() => onCambiar(elegido, { movimiento: movimientoAlAzar(clip.movimiento ?? "") })}
+                        >
+                          <Dices size={15} aria-hidden /> Sorpréndeme
+                        </button>
+                        {MOVIMIENTOS.map((m) => (
+                          <button
+                            type="button"
+                            key={m.id}
+                            className={`btn ghost small${(clip.movimiento ?? "") === m.texto ? " activo" : ""}`}
+                            aria-pressed={(clip.movimiento ?? "") === m.texto}
+                            disabled={ocupado}
+                            onClick={() => onCambiar(elegido, { movimiento: m.texto })}
+                          >
+                            {m.nombre}
+                          </button>
+                        ))}
+                      </div>
+                      <textarea
+                        id="lt-mov"
+                        value={clip.movimiento ?? ""}
+                        maxLength={300}
+                        rows={2}
+                        onChange={(e) => onCambiar(elegido, { movimiento: e.target.value })}
+                        placeholder="Movimiento (opcional). Ej.: la cámara se acerca despacio"
+                      />
+                      <p className="hint" style={{ margin: 0 }}>
+                        Cambiar el movimiento de una foto ya animada pide una toma nueva.
+                      </p>
+                    </div>
                   )}
                 </>
               )}

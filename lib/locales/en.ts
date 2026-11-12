@@ -1197,6 +1197,18 @@ export const EN: Record<string, string> = {
   "Qué debe verse en la foto. Se usa al tocar «Crear con IA».": "What should be seen in the photo. Used when you tap “Create with AI”.",
   "Generaré 1 toma con IA y grabaré el video": "I'll generate 1 AI take and record the video",
   "Marca primero qué fotos animar con IA": "First mark which photos to animate with AI",
+  "¿Cómo se mueve? Toca una opción o escribe la tuya": "How does it move? Tap an option or write your own",
+  "Sorpréndeme": "Surprise me",
+  "Cambiar el movimiento de una foto ya animada pide una toma nueva.": "Changing the motion of an already animated photo requests a new take.",
+  "Acercar": "Push in",
+  "Alejar": "Pull out",
+  "Paneo derecha": "Pan right",
+  "Paneo izquierda": "Pan left",
+  "Girar alrededor": "Orbit",
+  "Primer plano": "Close-up",
+  "Cámara lenta": "Slow motion",
+  "Cámara en mano": "Handheld",
+  "Dar vida": "Bring to life",
 };
 
 // Textos con números u otras partes que cambian
