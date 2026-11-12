@@ -3,61 +3,30 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Circle, RotateCcw, Square, SwitchCamera, X } from "lucide-react";
 import { MAX_GRABACION, formatoGrabacion, mensajeCamara, relojGrabacion } from "@/lib/camara";
+import { usarCamara } from "./usar-camara";
+import { CamaraNoAbre, SelectorCamara } from "./camara-ayuda";
 
 // Cámara de video dentro de Studio: graba con imagen y sonido (hasta 60 s) sin salir de la app.
 // Al terminar se puede repetir o usar; el video se entrega con onVideo.
 export default function CamaraVideo({ onVideo, onCerrar }: { onVideo: (video: Blob) => void | Promise<void>; onCerrar: () => void }) {
-  const vista = useRef<HTMLVideoElement>(null);
-  const flujo = useRef<MediaStream | null>(null);
   const grabadora = useRef<MediaRecorder | null>(null);
   const reloj = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [frente, setFrente] = useState(false);
-  const [lista, setLista] = useState(false);
-  const [error, setError] = useState("");
-  const [aviso, setAviso] = useState("");
   const [grabando, setGrabando] = useState(false);
   const [segundos, setSegundos] = useState(0);
   const [hecho, setHecho] = useState<{ blob: Blob; url: string } | null>(null);
   const [guardando, setGuardando] = useState(false);
-
-  // Abre la cámara con micrófono (trasera por defecto). Si niegan el micrófono, graba sin sonido y avisa.
-  useEffect(() => {
-    if (hecho) return; // revisando lo grabado: la cámara descansa
-    let vivo = true;
-    setLista(false);
-    setError("");
-    (async () => {
-      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") return setError(mensajeCamara("SinSoporte"));
-      const imagen = { facingMode: frente ? "user" : { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } };
-      try {
-        let s: MediaStream;
-        try {
-          s = await navigator.mediaDevices.getUserMedia({ video: imagen, audio: true });
-          setAviso("");
-        } catch {
-          // Puede ser solo el micrófono: se intenta sin sonido
-          s = await navigator.mediaDevices.getUserMedia({ video: imagen, audio: false });
-          setAviso(mensajeCamara("SinMicrofono"));
-        }
-        if (!vivo) return s.getTracks().forEach((t) => t.stop());
-        flujo.current = s;
-        if (vista.current) {
-          vista.current.srcObject = s;
-          await vista.current.play().catch(() => {});
-        }
-        setLista(true);
-      } catch (e) {
-        if (vivo) setError(mensajeCamara((e as { name?: string }).name ?? ""));
-      }
-    })();
-    return () => {
-      vivo = false;
+  // La cámara con micrófono; mientras se revisa lo grabado, descansa
+  const cam = usarCamara({ sonido: true, ancho: 1280, alto: 720, pausada: !!hecho });
+  const { video: vista, flujo, listo: lista, error, aviso, setError } = cam;
+  const frente = cam.espejo;
+  // Al salir se detiene la grabación en curso
+  useEffect(
+    () => () => {
       if (reloj.current) clearInterval(reloj.current);
       if (grabadora.current?.state === "recording") grabadora.current.stop();
-      flujo.current?.getTracks().forEach((t) => t.stop());
-      flujo.current = null;
-    };
-  }, [frente, hecho]);
+    },
+    []
+  );
 
   // Al cerrar se suelta el video que quedó en revisión
   useEffect(() => () => void (hecho && URL.revokeObjectURL(hecho.url)), [hecho]);
@@ -115,7 +84,7 @@ export default function CamaraVideo({ onVideo, onCerrar }: { onVideo: (video: Bl
           <X size={20} aria-hidden />
         </button>
         <h2>Grabar video</h2>
-        {error && <div className="error">{error}</div>}
+        {error && <CamaraNoAbre error={error} detectadas={cam.lista.length} onReintentar={cam.reintentar} />}
         {!error && (
           <div className="camara-vista">
             {hecho ? (
@@ -132,6 +101,7 @@ export default function CamaraVideo({ onVideo, onCerrar }: { onVideo: (video: Bl
           </div>
         )}
         {aviso && !error && <p className="hint">{aviso}</p>}
+        {!error && !hecho && <SelectorCamara lista={cam.lista} activa={cam.activa} onElegir={cam.elegir} bloqueado={grabando} />}
         {!hecho && !error && <p className="hint">Graba hasta 1 minuto. Después eliges si lo usas o lo repites.</p>}
         <div className="actions camara-botones">
           {hecho ? (
@@ -145,7 +115,7 @@ export default function CamaraVideo({ onVideo, onCerrar }: { onVideo: (video: Bl
             </>
           ) : (
             <>
-              <button className="btn ghost" disabled={!!error || grabando} onClick={() => setFrente((f) => !f)} title="Cambiar de cámara">
+              <button className="btn ghost" disabled={!!error || grabando} onClick={cam.cambiar} title="Cambiar de cámara">
                 <SwitchCamera size={18} aria-hidden /> Cambiar
               </button>
               {grabando ? (

@@ -15,6 +15,8 @@ export function mensajeCamara(nombre: string): string {
       return "La cámara está ocupada por otra aplicación. Ciérrala y vuelve a intentar.";
     case "SinMicrofono":
       return "No hay permiso de micrófono: el video se grabará sin sonido.";
+    case "SinCamaras":
+      return "No detectamos ninguna cámara en este equipo. Conecta una (o revisa que no esté apagada o tapada) y toca «Buscar la cámara otra vez». También puedes subir el archivo desde tu dispositivo.";
     case "SinSoporte":
       return "Este navegador no permite usar la cámara desde la página. Sube la foto desde tus archivos.";
     default:
@@ -51,4 +53,39 @@ export function formatoGrabacion(soporta: (mime: string) => boolean): string | n
     "video/mp4",
   ];
   return opciones.find((m) => soporta(m)) ?? null;
+}
+
+// ---------- Detectar y elegir la cámara ----------
+
+export type CamaraDetectada = { id: string; nombre: string };
+
+// De todo lo que reporta el navegador (enumerateDevices), solo las cámaras que se pueden elegir.
+export function camarasDe(aparatos: { kind: string; deviceId: string; label: string }[]): CamaraDetectada[] {
+  const lista: CamaraDetectada[] = [];
+  for (const a of aparatos) {
+    if (a.kind !== "videoinput" || !a.deviceId || lista.some((c) => c.id === a.deviceId)) continue;
+    lista.push({ id: a.deviceId, nombre: a.label || `Cámara ${lista.length + 1}` });
+  }
+  return lista;
+}
+
+// Qué se le pide al navegador: la cámara elegida por su id, o la delantera / trasera si no se ha elegido.
+export function pedidoDeCamara(o: { id?: string; frente: boolean; ancho?: number; alto?: number }): Record<string, unknown> {
+  const medida = { width: { ideal: o.ancho ?? 1920 }, height: { ideal: o.alto ?? 1080 } };
+  if (o.id) return { deviceId: { exact: o.id }, ...medida };
+  return { facingMode: o.frente ? "user" : { ideal: "environment" }, ...medida };
+}
+
+// La cámara que sigue en la lista (para el botón «Cambiar»). null = no hay otra.
+export function siguienteCamara(lista: CamaraDetectada[], actual: string): string | null {
+  if (lista.length === 0) return null;
+  const i = lista.findIndex((c) => c.id === actual);
+  if (i < 0) return lista[0].id;
+  return lista.length > 1 ? lista[(i + 1) % lista.length].id : null;
+}
+
+// ¿Es la cámara de selfies? (se muestra como espejo). Manda lo que diga el navegador; si no dice, el nombre.
+export function esFrontal(facingMode: string | undefined, nombre: string): boolean {
+  if (facingMode) return facingMode === "user";
+  return /front|frontal|delantera|selfie/i.test(nombre);
 }

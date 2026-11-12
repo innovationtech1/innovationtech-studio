@@ -183,6 +183,11 @@ button.pick { background: none; font: inherit; }
 .camara-vista > .muted { position: absolute; }
 .camara-ultima { position: absolute; right: 10px; bottom: 10px; width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 2px solid var(--paper); }
 .camara-botones { justify-content: center; }
+.camara-selector { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+.camara-selector label { margin: 0; }
+.camara-selector select { min-height: 44px; margin: 0; }
+.camara-fallo { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.camara-fallo .btn { margin-top: 0; min-height: 44px; }
 .camara-reloj { position: absolute; top: 10px; left: 10px; background: rgba(0, 0, 0, 0.6); color: #ff5a5a; font-weight: 700; padding: 4px 10px; border-radius: 99px; font-variant-numeric: tabular-nums; }
 
 .install-bar {
