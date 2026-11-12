@@ -317,6 +317,41 @@ export default function ReelStudio({
       listenNode.current = s;
     });
   const [voice, setVoice] = useState("");
+  // La voz generada se guarda en el dispositivo: al recargar no hay que generarla (ni pagarla) otra vez
+  const [vozArchivo, setVozArchivo] = usePersistentState<{ id: string } | null>("reel:voz-archivo", null);
+  const vozLista = useRef(false); // ya se intentó recuperar la voz guardada
+  const vozGuardada = useRef(""); // el audio que corresponde al archivo guardado
+  useEffect(() => {
+    if (vozLista.current) return;
+    const t = setTimeout(async () => {
+      vozLista.current = true;
+      if (!vozArchivo?.id) return;
+      const blob = await getFile(vozArchivo.id).catch(() => null);
+      if (!blob) return setVozArchivo(null);
+      const audio = await blobToDataUrl(blob);
+      vozGuardada.current = audio;
+      setVoice((v) => v || audio);
+    }, 400); // espera a que se cargue el borrador guardado
+    return () => clearTimeout(t);
+  }, [vozArchivo, setVozArchivo]);
+  useEffect(() => {
+    if (!vozLista.current || voice === vozGuardada.current) return;
+    const anterior = vozArchivo?.id;
+    vozGuardada.current = voice;
+    if (!voice) {
+      setVozArchivo(null);
+      if (anterior) deleteFile(anterior).catch(() => {});
+      return;
+    }
+    const id = `reelvoz-${Math.random().toString(36).slice(2, 10)}`;
+    setVozArchivo({ id });
+    (async () => {
+      const blob = await toBlob(voice);
+      if (blob) await putFile(id, blob).catch(() => {});
+      if (anterior) deleteFile(anterior).catch(() => {});
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice]);
   const [voiceId, setVoiceId] = usePersistentState<string>("reel:voz", DEFAULT_VOICE[getLang()]);
   const [picking, setPicking] = useState<number | null>(null);
   const [busy, setBusy] = useState("");

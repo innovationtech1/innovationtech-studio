@@ -7,6 +7,7 @@ export const MAX_PROYECTOS = 20;
 const PREFIJO = "its-draft:reel:";
 const LLAVE = "its-proyectos";
 const CLIPS = `${PREFIJO}escenas-datos`;
+const VOZ = `${PREFIJO}voz-archivo`;
 const MAX_NOMBRE = 40;
 
 export type Almacen = { length: number; key(i: number): string | null; getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void };
@@ -108,6 +109,13 @@ export function archivosDe(datos: Record<string, string>): { fotos: string[]; vi
     const { imageId, archivoId } = c as { imageId?: unknown; archivoId?: unknown };
     if (typeof imageId === "string" && imageId && !fotos.includes(imageId)) fotos.push(imageId);
     if (typeof archivoId === "string" && archivoId.startsWith("reelvid-") && !videos.includes(archivoId)) videos.push(archivoId);
+  }
+  // La voz en off generada se guarda como archivo: al borrar el proyecto también se va
+  try {
+    const voz = JSON.parse(datos[VOZ] ?? "null") as { id?: unknown } | null;
+    if (voz && typeof voz.id === "string" && voz.id && !fotos.includes(voz.id)) fotos.push(voz.id);
+  } catch {
+    /* dato dañado: no hay voz que borrar */
   }
   return { fotos, videos };
 }
