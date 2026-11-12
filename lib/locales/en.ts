@@ -1259,6 +1259,17 @@ export const EN: Record<string, string> = {
   "Puedes animar con IA máximo 8 fotos distintas por video.": "You can animate at most 8 different photos with AI per video.",
   "Máximo 8 fotos con IA por video": "Maximum 8 AI photos per video",
   "«Crear reel» es gratis: usa las fotos que ya animaste y deja con zoom las que falten. «Generar con IA» anima las que faltan (usa tus tomas) y graba el video.": "“Create reel” is free: it uses the photos you already animated and leaves the rest with zoom. “Generate with AI” animates the missing ones (uses your takes) and records the video.",
+  "Nombre del video": "Video name",
+  "Guardar nombre": "Save name",
+  "Sí, borrar": "Yes, delete",
+  "Mis videos guardados": "My saved videos",
+  "Nuevo video": "New video",
+  "Renombrar": "Rename",
+  "No se pudo guardar en este dispositivo. Libera espacio e intenta de nuevo.": "Couldn't save on this device. Free up space and try again.",
+  "Portada: elige el momento del video": "Cover: choose the moment of the video",
+  "Descargar portada": "Download cover",
+  "Ya tienes 20 videos guardados. Borra alguno para crear otro.": "You already have 20 saved videos. Delete one to create another.",
+  "Mi video": "My video",
 };
 
 // Textos con números u otras partes que cambian
@@ -1350,4 +1361,7 @@ export const EN_PATTERNS: [RegExp, string][] = [
   [/^El clip (\d+) es un video: solo se animan fotos$/, "Clip $1 is a video: only photos can be animated"],
   [/^En tu video dura (.+) s \(el original dura (.+) s\)\.$/, "In your video it lasts $1 s (the original lasts $2 s)."],
   [/^Subiendo la foto (\d+)…$/, "Uploading photo $1…"],
+  [/^¿Borrar «(.*)»\? Se borran sus fotos y videos de este dispositivo\. Los videos ya creados siguen en tu galería\.$/, "Delete “$1”? Its photos and videos are deleted from this device. Videos already created stay in your gallery."],
+  [/^Máximo (\d+) videos guardados$/, "Maximum $1 saved videos"],
+  [/^Video (\d+)$/, "Video $1"],
 ];

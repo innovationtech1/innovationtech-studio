@@ -96,7 +96,11 @@ export default function ReelStudio({
   incomingTopic,
   onEditScene,
   onOpenBrand,
+  videosDeOtros = [],
+  onOcupado,
 }: {
+  videosDeOtros?: string[]; // videos subidos que usan otros proyectos guardados: no se borran al limpiar
+  onOcupado?: (ocupado: boolean) => void; // avisa cuando está grabando o generando (para no cambiar de proyecto a medias)
   sceneUpdate: { scene: number; url: string; n: number } | null;
   incomingTopic?: { text: string; n: number } | null;
   onEditScene: (i: number, src: string) => void;
@@ -234,7 +238,7 @@ export default function ReelStudio({
         interno((all) => all.map((x) => (x.imageId === sc.imageId && !x.image ? { ...x, image: url } : x)));
       }
       // Los videos subidos que ya no usa ningún clip se borran del dispositivo (al abrir no hay nada que deshacer)
-      void limpiarHuerfanos(clipsRef.current.flatMap((c) => (c.archivoId ? [c.archivoId] : [])));
+      void limpiarHuerfanos([...clipsRef.current.flatMap((c) => (c.archivoId ? [c.archivoId] : [])), ...videosDeOtros]);
     }, 400); // espera a que se cargue el borrador guardado
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -320,6 +324,22 @@ export default function ReelStudio({
   const [result, setResult] = useState<{ url: string; ext: string; seconds: number } | null>(null);
   const [error, setError] = useState("");
   const preview = useRef<HTMLCanvasElement>(null);
+  useEffect(() => onOcupado?.(!!busy), [busy, onOcupado]);
+  // Portada: un cuadro del video terminado, para descargarlo como imagen
+  const videoFinal = useRef<HTMLVideoElement>(null);
+  const [momentoPortada, setMomentoPortada] = useState(0);
+  function descargarPortada() {
+    const v = videoFinal.current;
+    if (!v || !v.videoWidth) return;
+    const c = document.createElement("canvas");
+    c.width = v.videoWidth;
+    c.height = v.videoHeight;
+    c.getContext("2d")!.drawImage(v, 0, 0);
+    const a = document.createElement("a");
+    a.href = c.toDataURL("image/jpeg", 0.92);
+    a.download = "portada-innovationtech.jpg";
+    a.click();
+  }
 
   useEffect(() => {
     // Si la app se cerró mientras se creaba una imagen, quitamos el «Creando…».
@@ -1152,7 +1172,7 @@ export default function ReelStudio({
             setPendientes(null);
             Object.values(urlsVideo).forEach((u) => u && URL.revokeObjectURL(u));
             setUrlsVideo({});
-            void limpiarHuerfanos([]);
+            void limpiarHuerfanos(videosDeOtros);
             setPropuesta(null);
             setResultadoDir(null);
             setCola(null);
@@ -1496,12 +1516,39 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
         />
         {result && !busy && (
           <div className="media" style={{ maxWidth: format === "16:9" ? 640 : 360 }}>
-            <video src={result.url} controls playsInline />
+            <video ref={videoFinal} src={result.url} controls playsInline onTimeUpdate={(e) => setMomentoPortada(e.currentTarget.currentTime)} />
             <div className="meta actions">
               <a href={result.url} download={`reel-innovationtech.${result.ext}`}>
                 <Download size={16} aria-hidden /> Descargar video ({result.seconds} s, {result.ext.toUpperCase()})
               </a>
               <span className="muted">· Guardado en tu galería</span>
+            </div>
+            <div className="portada">
+              <div className="slider">
+                <div className="slider-head">
+                  <span>Portada: elige el momento del video</span>
+                  <span data-no-translate>{formatoTiempo(momentoPortada)}</span>
+                </div>
+                <input
+                  type="range"
+                  aria-label="Portada: elige el momento del video"
+                  min={0}
+                  max={result.seconds}
+                  step={0.1}
+                  value={Math.min(momentoPortada, result.seconds)}
+                  onChange={(e) => {
+                    const t = Number(e.target.value);
+                    setMomentoPortada(t);
+                    if (videoFinal.current) {
+                      videoFinal.current.pause();
+                      videoFinal.current.currentTime = t;
+                    }
+                  }}
+                />
+              </div>
+              <button className="btn ghost small" onClick={descargarPortada}>
+                <Download size={15} aria-hidden /> Descargar portada
+              </button>
             </div>
           </div>
         )}
