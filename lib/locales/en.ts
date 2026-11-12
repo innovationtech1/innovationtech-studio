@@ -1297,6 +1297,17 @@ export const EN: Record<string, string> = {
   "Cámaras detectadas: ninguna.": "Cameras detected: none.",
   "Cámaras detectadas: 1.": "Cameras detected: 1.",
   "No detectamos ninguna cámara en este equipo. Conecta una (o revisa que no esté apagada o tapada) y toca «Buscar la cámara otra vez». También puedes subir el archivo desde tu dispositivo.": "We didn't detect any camera on this device. Connect one (or check it isn't off or covered) and tap “Look for the camera again”. You can also upload the file from your device.",
+  "Efectos": "Effects",
+  "Efecto de sonido al empezar este clip": "Sound effect when this clip starts",
+  "Ninguno": "None",
+  "▶ Escuchar": "▶ Listen",
+  "Zoom": "Zoom",
+  "Cambiar canción": "Change song",
+  "Subir canción": "Upload song",
+  "Guardando tu canción…": "Saving your song…",
+  "Sube una canción tuya (MP3, M4A o WAV, hasta 25 MB). Se queda en tu dispositivo. Usa solo música que tengas derecho a usar.": "Upload a song of yours (MP3, M4A or WAV, up to 25 MB). It stays on your device. Only use music you have the right to use.",
+  "Esa canción pesa más de 25 MB.": "That song is larger than 25 MB.",
+  "Ese archivo de audio no se puede abrir en tu navegador.": "That audio file can't be opened in your browser.",
 };
 
 // Textos con números u otras partes que cambian
@@ -1392,4 +1403,6 @@ export const EN_PATTERNS: [RegExp, string][] = [
   [/^Máximo (\d+) videos guardados$/, "Maximum $1 saved videos"],
   [/^Video (\d+)$/, "Video $1"],
   [/^Cámaras detectadas: (\d+)\.$/, "Cameras detected: $1."],
+  [/^Puse la transición «(.+)» en todos los clips$/, "Set the “$1” transition on all clips"],
+  [/^Puse la transición «(.+)» después del clip (\d+)$/, "Set the “$1” transition after clip $2"],
 ];

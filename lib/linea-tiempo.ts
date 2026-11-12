@@ -1,6 +1,8 @@
 // Línea de tiempo del Creador de Reels: la lista de clips del video y lo que se puede hacer con ella.
 // Módulo puro (sin React ni DOM) para poder probarlo. Ninguna función modifica la lista que recibe.
 
+import { esTransicion, type Transicion } from "./reel-transicion";
+
 export const MAX_VIDEO = 120; // segundos, contando el cierre
 export const CIERRE = 3; // segundos del cierre con la marca
 export const MIN_FOTO = 1.5;
@@ -37,6 +39,8 @@ export type Clip = {
   reproduccion?: Reproduccion; // estirar la toma: cámara lenta o repetir
   textoPos?: TextoPos;
   textoTam?: TextoTam;
+  transicion?: Transicion; // cómo se pasa de este clip al siguiente (por defecto, fundido)
+  efecto?: string; // efecto de sonido que suena al empezar este clip (id de lib/sfx.ts)
   // Solo video propio
   archivoId?: string; // dónde está el archivo en el dispositivo (lib/video-propio.ts)
   duracionOriginal?: number; // segundos del archivo
@@ -56,6 +60,7 @@ export type EscenaRender = {
   textoPos: TextoPos;
   textoTam: TextoTam;
   segundos: number;
+  transicion: Transicion; // hacia la escena siguiente
   video?: VideoRender; // toma con IA o video propio; si falta, la imagen se anima con zoom
 };
 
@@ -103,6 +108,8 @@ export function normalizarClips(guardado: unknown, segundosViejos: number = FOTO
     }
     if (POSICIONES.includes(v.textoPos as TextoPos)) clip.textoPos = v.textoPos as TextoPos;
     if (TAMANOS.includes(v.textoTam as TextoTam)) clip.textoTam = v.textoTam as TextoTam;
+    if (esTransicion(v.transicion)) clip.transicion = v.transicion;
+    if (typeof v.efecto === "string" && v.efecto && v.efecto.length <= 30) clip.efecto = v.efecto;
     if (esVideo) {
       clip.archivoId = v.archivoId as string;
       clip.duracionOriginal = dur;
@@ -315,6 +322,7 @@ export function aEscenas(
       textoPos: c.textoPos ?? "abajo",
       textoTam: c.textoTam ?? "normal",
       segundos: duracionClip(c),
+      transicion: c.transicion ?? "fundido",
     };
     if (c.tipo === "toma") {
       const src = fuentes.tomas?.[c.id];
@@ -329,6 +337,18 @@ export function aEscenas(
     }
     return e;
   });
+}
+
+// Los efectos de sonido del video: cada uno suena en el segundo en que empieza su clip
+export function efectosDe(clips: Clip[]): { kind: string; at: number }[] {
+  const lista: { kind: string; at: number }[] = [];
+  let t = 0;
+  for (const c of clips) {
+    if (!presente(c)) continue;
+    if (c.efecto) lista.push({ kind: c.efecto, at: Math.round(t * 100) / 100 });
+    t += duracionClip(c);
+  }
+  return lista;
 }
 
 // Si la voz dura más que el video, reparte el tiempo que falta entre las fotos (todas iguales).

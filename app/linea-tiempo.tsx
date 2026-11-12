@@ -5,6 +5,8 @@ import { ArrowLeft, ArrowRight, Camera, Copy, Dices, Plus, RefreshCw, Scissors, 
 import { MOVIMIENTOS, movimientoAlAzar } from "@/lib/movimientos";
 import { MAX_FOTO, MAX_TOMAS, MIN_FOTO, MIN_TRAMO, VELOCIDADES, duracionClip, presente, tramo, type Clip, type Reproduccion, type TextoPos, type TextoTam } from "@/lib/linea-tiempo";
 import { cuadroDe } from "@/lib/video-propio";
+import { TRANSICIONES, type Transicion } from "@/lib/reel-transicion";
+import { SFX, previewSfx, type SfxId } from "@/lib/sfx";
 
 // Segundos con un decimal como mucho: 3 → «3 s», 5.125 → «5.1 s»
 const segundosTexto = (n: number) => `${Number(n.toFixed(1))} s`;
@@ -62,7 +64,12 @@ export default function LineaTiempo({
   const esToma = clip?.tipo === "toma";
   const esVideo = clip?.tipo === "video";
   // El panel del clip va en pestañas para que no sea una lista larga: imagen o video, texto y animar con IA
-  const [pestana, setPestana] = useState<"medio" | "texto" | "ia">("medio");
+  const [pestana, setPestana] = useState<"medio" | "texto" | "efectos" | "ia">("medio");
+  const audioEfecto = useRef<AudioContext | null>(null);
+  const escucharEfecto = (id: string) => {
+    if (!audioEfecto.current) audioEfecto.current = new AudioContext();
+    void audioEfecto.current.resume().then(() => previewSfx(id as SfxId, audioEfecto.current!));
+  };
   const hayIa = conIa && !esVideo;
   const vista = pestana === "ia" && !hayIa ? "medio" : pestana;
 
@@ -155,6 +162,9 @@ export default function LineaTiempo({
             <button type="button" role="tab" aria-selected={vista === "texto"} className={vista === "texto" ? "activa" : ""} onClick={() => setPestana("texto")}>
               Texto
             </button>
+            <button type="button" role="tab" aria-selected={vista === "efectos"} className={vista === "efectos" ? "activa" : ""} onClick={() => setPestana("efectos")}>
+              Efectos
+            </button>
             {hayIa && (
               <button type="button" role="tab" aria-selected={vista === "ia"} className={vista === "ia" ? "activa" : ""} onClick={() => setPestana("ia")}>
                 Animar con IA
@@ -190,6 +200,33 @@ export default function LineaTiempo({
                   </select>
                 </div>
               </div>
+              </div>
+
+              <div hidden={vista !== "efectos"} className="lt-grupo">
+                <label htmlFor="lt-trans">Transición al siguiente clip</label>
+                <select id="lt-trans" value={clip.transicion ?? "fundido"} disabled={ocupado} onChange={(e) => onCambiar(elegido, { transicion: e.target.value as Transicion })}>
+                  {TRANSICIONES.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.nombre}
+                    </option>
+                  ))}
+                </select>
+                <label htmlFor="lt-efecto">Efecto de sonido al empezar este clip</label>
+                <div className="lt-efecto">
+                  <select id="lt-efecto" value={clip.efecto ?? ""} disabled={ocupado} onChange={(e) => (onCambiar(elegido, { efecto: e.target.value || undefined }), e.target.value && escucharEfecto(e.target.value))}>
+                    <option value="">Ninguno</option>
+                    {SFX.map((x) => (
+                      <option key={x.id} value={x.id}>
+                        {x.emoji} {x.label}
+                      </option>
+                    ))}
+                  </select>
+                  {clip.efecto && (
+                    <button type="button" className="btn ghost small" onClick={() => escucharEfecto(clip.efecto!)}>
+                      ▶ Escuchar
+                    </button>
+                  )}
+                </div>
               </div>
 
               {esVideo && clip && vista === "medio" && (

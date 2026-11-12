@@ -5,6 +5,8 @@ import fixWebmDuration from "fix-webm-duration";
 import type { EscenaRender, TextoPos, TextoTam } from "./linea-tiempo";
 import { medidasTexto } from "./reel-texto";
 import { bajadasDeMusica, gananciaClip, tramosConSonido } from "./reel-sonido";
+import { pasoTransicion } from "./reel-transicion";
+import { renderSfx, type SfxItem } from "./sfx";
 // Motor de reels: arma un video animado dentro del navegador, gratis y sin límite.
 // Dibuja cada escena en un <canvas> (zoom/movimiento suave + transiciones + textos)
 // y lo graba con MediaRecorder, incluyendo la voz en off si existe.
@@ -17,6 +19,8 @@ export type ReelOptions = {
   cierre: number; // segundos del cierre con la marca (3, o 0 si no cabe)
   // Volumen de la voz en off y del sonido de los videos propios (0 a 1; por defecto 1). La música usa music.volume.
   volumenes?: { voz: number; clips: number };
+  // Efectos de sonido: cuál y en qué segundo del video suena (lib/linea-tiempo.ts → efectosDe)
+  efectos?: { kind: string; at: number }[];
   format: ReelFormat;
   accent: string; // color de acento (hex)
   brandName: string;
@@ -25,7 +29,7 @@ export type ReelOptions = {
   font?: string; // letra de la marca para los textos
   voice?: string; // data URL de audio opcional
   subtitles?: { script: string; highlight: string } | null; // subtítulos palabra por palabra de la voz en off
-  music?: { style: MusicStyleId; seed: number; volume: number; song?: string } | null; // música gratis de fondo (song: canción de la biblioteca)
+  music?: { style: MusicStyleId; seed: number; volume: number; song?: string; propia?: string } | null; // música de fondo (song: canción de la biblioteca; propia: enlace local de una canción subida)
   onStatus?: (msg: string) => void;
   onProgress?: (fraction: number) => void;
   previewCanvas?: HTMLCanvasElement; // para ver el reel mientras se graba
@@ -285,6 +289,7 @@ type Montaje = {
   audioCtx: AudioContext | null;
   voiceBuffer: AudioBuffer | null;
   musicBuffer: AudioBuffer | null;
+  efectosBuffer: AudioBuffer | null;
   draw: (time: number) => void;
   soltar: () => void;
 };
@@ -353,7 +358,11 @@ async function montar(o: ReelOptions): Promise<Montaje> {
   // Música de fondo (se compone a la medida exacta del reel)
   let musicBuffer: AudioBuffer | null = null;
   if (o.music) {
-    if (o.music.song) {
+    if (!audioCtx) audioCtx = new AudioContext();
+    if (o.music.propia) {
+      o.onStatus?.("🎵 Cargando canción…");
+      musicBuffer = await audioCtx.decodeAudioData(await (await fetch(o.music.propia)).arrayBuffer());
+    } else if (o.music.song) {
       o.onStatus?.("🎵 Cargando canción…");
       musicBuffer = await loadSong(o.music.song);
     } else {
@@ -361,6 +370,14 @@ async function montar(o: ReelOptions): Promise<Montaje> {
       musicBuffer = await renderMusic({ style: o.music.style, seed: o.music.seed, duration: total + 0.3 });
     }
     if (!audioCtx) audioCtx = new AudioContext();
+  }
+
+  // Efectos de sonido: se arman en una sola pista del largo del video
+  let efectosBuffer: AudioBuffer | null = null;
+  if (o.efectos?.length) {
+    const items = o.efectos.map((e, i) => ({ id: String(i), kind: e.kind, at: e.at, volume: 1 })) as unknown as SfxItem[];
+    efectosBuffer = await renderSfx(items, total).catch(() => null);
+    if (efectosBuffer && !audioCtx) audioCtx = new AudioContext();
   }
 
   const canvas = document.createElement("canvas");
@@ -391,12 +408,28 @@ async function montar(o: ReelOptions): Promise<Montaje> {
       // En escenas muy cortas la transición se acorta para que no se coma la escena
       const fade = Math.min(FADE, per / 3);
       scene(i, local / per);
-      // transición: la siguiente escena aparece encima
+      // transición: la siguiente escena entra encima, según la transición elegida en este clip
+      let blanco = 0;
       if (local > per - fade && i < escenas.length - 1) {
-        ctx.save();
-        ctx.globalAlpha = (local - (per - fade)) / fade;
-        scene(i + 1, 0);
-        ctx.restore();
+        const paso = pasoTransicion(escenas[i].transicion, (local - (per - fade)) / fade);
+        blanco = paso.blanco;
+        if (paso.alfa > 0) {
+          ctx.save();
+          ctx.globalAlpha = paso.alfa;
+          if (paso.recorte < 1) {
+            ctx.beginPath();
+            ctx.rect(0, 0, W * paso.recorte, H);
+            ctx.clip();
+          }
+          if (paso.dx) ctx.translate(W * paso.dx, 0);
+          if (paso.escala !== 1) {
+            ctx.translate(W / 2, H / 2);
+            ctx.scale(paso.escala, paso.escala);
+            ctx.translate(-W / 2, -H / 2);
+          }
+          scene(i + 1, 0);
+          ctx.restore();
+        }
       }
       const fadeOut = local > per - fade ? 1 - (local - (per - fade)) / fade : 1;
       ctx.save();
@@ -404,6 +437,13 @@ async function montar(o: ReelOptions): Promise<Montaje> {
       const e = escenas[i];
       drawCaption(ctx, e.texto || "", W, H, (local - 0.15) / 0.5, o.accent, e.textoPos, e.textoTam);
       ctx.restore();
+      if (blanco > 0) {
+        ctx.save();
+        ctx.globalAlpha = blanco;
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, W, H);
+        ctx.restore();
+      }
       drawLogo(ctx, logo, W, H);
       const cue = subCues.find((c) => time >= c.start && time <= c.end + 0.05);
       if (cue)
@@ -440,7 +480,7 @@ async function montar(o: ReelOptions): Promise<Montaje> {
     });
     audioCtx?.close().catch(() => {});
   };
-  return { W, H, total, slidesTime, starts, canvas, clips, escenas, durs, ganancias: escenas.map(() => null), audioCtx, voiceBuffer, musicBuffer, draw, soltar };
+  return { W, H, total, slidesTime, starts, canvas, clips, escenas, durs, ganancias: escenas.map(() => null), audioCtx, voiceBuffer, musicBuffer, efectosBuffer, draw, soltar };
 }
 
 // Conecta la voz, la música y el sonido de los videos propios a `salida` (la grabación o las bocinas)
@@ -462,10 +502,16 @@ function prepararAudio(m: Montaje, o: ReelOptions, salida: AudioNode): () => voi
   if (musicBuffer && o.music) {
     musicSource = audioCtx.createBufferSource();
     musicSource.buffer = musicBuffer;
-    musicSource.loop = !!o.music.song && musicBuffer.duration < total;
+    musicSource.loop = !!(o.music.song || o.music.propia) && musicBuffer.duration < total;
     musicGain = audioCtx.createGain();
     musicGain.gain.value = o.music.volume;
     musicSource.connect(musicGain).connect(salida);
+  }
+  let efectos: AudioBufferSourceNode | null = null;
+  if (m.efectosBuffer) {
+    efectos = audioCtx.createBufferSource();
+    efectos.buffer = m.efectosBuffer;
+    efectos.connect(salida);
   }
   // Sonido de los videos propios: cada uno con su volumen, que empieza en cero (lo mueve `reproducir`)
   m.escenas.forEach((e, i) => {
@@ -494,14 +540,15 @@ function prepararAudio(m: Montaje, o: ReelOptions, salida: AudioNode): () => voi
         musicGain.gain.setValueAtTime(v * 0.35, now + b.hasta);
         musicGain.gain.linearRampToValueAtTime(v, now + b.hasta + 0.5);
       }
-      if (o.music.song) {
-        // La canción de la biblioteca se desvanece al terminar el reel
+      if (o.music.song || o.music.propia) {
+        // Una canción (de la biblioteca o propia) se desvanece al terminar el reel
         const fadeAt = Math.max(now + 0.9 + (voiceBuffer?.duration || 0), now + total - 1.5);
         musicGain.gain.setValueAtTime(v, fadeAt);
         musicGain.gain.linearRampToValueAtTime(0, now + total);
       }
     }
     if (source) source.start(audioCtx.currentTime + 0.3);
+    if (efectos) efectos.start(audioCtx.currentTime);
   };
 }
 

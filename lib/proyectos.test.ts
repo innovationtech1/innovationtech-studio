@@ -144,3 +144,7 @@ test("archivosDe: la voz guardada del proyecto también es suya", () => {
   assert.deepEqual(archivosDe({ "its-draft:reel:voz-archivo": "null" }), { fotos: [], videos: [] });
   assert.deepEqual(archivosDe({ "its-draft:reel:voz-archivo": "{roto" }), { fotos: [], videos: [] });
 });
+
+test("archivosDe: la canción propia del proyecto también es suya", () => {
+  assert.deepEqual(archivosDe({ "its-draft:reel:cancion-propia": JSON.stringify({ id: "reelsong-1", nombre: "mi.mp3" }) }), { fotos: ["reelsong-1"], videos: [] });
+});

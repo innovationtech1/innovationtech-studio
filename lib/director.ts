@@ -21,6 +21,7 @@ import {
   type TextoPos,
   type TextoTam,
 } from "./linea-tiempo";
+import { TRANSICIONES, esTransicion, type Transicion } from "./reel-transicion";
 
 export const MAX_ACCIONES = 20;
 export const MAX_ORDEN = 500; // caracteres de la orden
@@ -48,6 +49,7 @@ export type Accion =
   | { tipo: "duracion_total"; segundos: number }
   | { tipo: "texto"; clip: number; texto: string }
   | { tipo: "estilo_texto"; clip: RefClip; posicion?: TextoPos; tamano?: TextoTam }
+  | { tipo: "transicion"; clip: RefClip; valor: Transicion }
   | { tipo: "imagen"; clip: number; descripcion: string }
   | { tipo: "animar"; clip: number; activar: boolean; movimiento?: string }
   | { tipo: "formato"; valor: Formato }
@@ -70,6 +72,7 @@ export const TIPOS_DE_ACCION: Accion["tipo"][] = [
   "duracion_total",
   "texto",
   "estilo_texto",
+  "transicion",
   "imagen",
   "animar",
   "formato",
@@ -169,6 +172,10 @@ function validarUna(a: Cruda, cat: Catalogo): Accion | null {
       const tamano = TAMANOS.includes(a.tamano as TextoTam) ? (a.tamano as TextoTam) : undefined;
       if (clip === null || (!posicion && !tamano)) return null;
       return { tipo: "estilo_texto", clip, ...(posicion ? { posicion } : {}), ...(tamano ? { tamano } : {}) };
+    }
+    case "transicion": {
+      const clip = refClip(a.clip);
+      return clip === null || !esTransicion(a.valor) ? null : { tipo: "transicion", clip, valor: a.valor };
     }
     case "imagen": {
       const clip = nClip(a.clip);
@@ -392,6 +399,19 @@ export function aplicarAcciones(estado: Estado, acciones: Accion[], cat: Catalog
         if (i < 0) break;
         clips = cambiar(clips, i, cambios);
         hecho.push(`Cambié el estilo del texto del clip ${a.clip}`);
+        break;
+      }
+      case "transicion": {
+        const nombre = TRANSICIONES.find((t) => t.id === a.valor)?.nombre ?? a.valor;
+        if (a.clip === "todos") {
+          clips = clips.map((c) => ({ ...c, transicion: a.valor }));
+          hecho.push(`Puse la transición «${nombre}» en todos los clips`);
+          break;
+        }
+        const i = lugar(a.clip);
+        if (i < 0) break;
+        clips = cambiar(clips, i, { transicion: a.valor });
+        hecho.push(`Puse la transición «${nombre}» después del clip ${a.clip}`);
         break;
       }
       case "imagen": {
@@ -627,6 +647,7 @@ export function instruccionesDirector(o: {
     '- {"tipo": "duracion_total", "segundos": S}: cuánto dura el video completo (hasta 120).',
     '- {"tipo": "texto", "clip": N, "texto": "..."}: el texto en pantalla de ese clip (máximo 8 palabras).',
     '- {"tipo": "estilo_texto", "clip": N o "todos", "posicion": "arriba" | "centro" | "abajo", "tamano": "chico" | "normal" | "grande"}',
+    '- {"tipo": "transicion", "clip": N o "todos", "valor": "fundido" | "corte" | "deslizar" | "zoom" | "destello" | "barrido"}: cómo se pasa de ese clip al siguiente.',
     '- {"tipo": "imagen", "clip": N, "descripcion": "..."}: crea con IA la imagen de ese clip. Úsala solo si la piden.',
     '- {"tipo": "animar", "clip": N, "activar": true | false, "movimiento": "..."}: marca la foto para animarla con IA (movimiento real, 5 s). Úsala solo si la piden.',
     '- {"tipo": "generar_ia"}: genera las tomas con IA de las fotos marcadas y graba el video. Ponla al final cuando pidan animar fotos o generar el video con IA.',
