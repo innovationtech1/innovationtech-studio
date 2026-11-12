@@ -1,10 +1,11 @@
 import { jsonError } from "@/lib/replicate";
 import { clavePropiaCF, getCreds, refund } from "@/lib/cf-auth";
 import { jsonAcceso, requireAccess, type Acceso } from "@/lib/account";
+import { MAX_ORDEN, instruccionesDirector } from "@/lib/director";
 
 export const maxDuration = 60;
 
-type Gen = { system: string; user: string; maxTokens: number };
+type Gen = { system: string; user: string; maxTokens: number; temperatura?: number };
 
 // Llama al proveedor elegido (Cloudflare gratis o Claude de pago) y devuelve el texto.
 async function generate(req: Request, acceso: Extract<Acceso, { ok: true }>, provider: string, model: string | undefined, g: Gen): Promise<string> {
@@ -26,7 +27,7 @@ async function generate(req: Request, acceso: Extract<Acceso, { ok: true }>, pro
           { role: "user", content: g.user },
         ],
         max_tokens: g.maxTokens,
-        temperature: 0.8,
+        temperature: g.temperatura ?? 0.8,
       }),
     });
     const data = await res.json().catch(() => ({}));
@@ -87,8 +88,9 @@ function parseJson(text: string): Record<string, unknown> | null {
 }
 
 export async function POST(req: Request) {
-  const { prompt, platform, brand, model, provider, mode, scenes, dates, previous } = await req.json().catch(() => ({}));
+  const { prompt, platform, brand, model, provider, mode, scenes, dates, previous, estado, catalogo } = await req.json().catch(() => ({}));
   if (!prompt || typeof prompt !== "string") return jsonError("Escribe qué quieres crear.");
+  if (mode === "director" && prompt.length > MAX_ORDEN) return jsonError(`La orden es muy larga (máximo ${MAX_ORDEN} caracteres).`);
   const english = req.headers.get("x-lang") === "en";
   const brandBlock =
     (brand ? `\nContexto de la marca:\n${brand}` : "") +
@@ -178,6 +180,29 @@ export async function POST(req: Request) {
         coverImagePrompt: typeof json?.cover_image_prompt === "string" ? json.cover_image_prompt : "",
         caption: typeof json?.caption === "string" ? json.caption : "",
       });
+    }
+
+    // Modo director: la orden (escrita o dictada) se traduce a acciones del catálogo (lib/director.ts).
+    // La app las valida y las aplica; aquí solo se le pregunta a la IA.
+    if (mode === "director") {
+      const corto = (v: unknown) => String(v ?? "").slice(0, 60);
+      const lista = (v: unknown) => (Array.isArray(v) ? v.slice(0, 40).filter((x) => x && typeof x === "object") : []) as Record<string, unknown>[];
+      const cat = (catalogo && typeof catalogo === "object" ? catalogo : {}) as Record<string, unknown>;
+      const resumen = estado && typeof estado === "object" && JSON.stringify(estado).length <= 12000 ? (estado as Record<string, unknown>) : {};
+      const i = instruccionesDirector({
+        resumen,
+        estilos: lista(cat.estilos).map((e) => ({ id: corto(e.id), nombre: corto(e.nombre) })),
+        voces: lista(cat.voces).map((v) => ({ id: corto(v.id), nombre: corto(v.nombre), genero: corto(v.genero) })),
+        marca: typeof brand === "string" ? brand : undefined,
+        ingles: english,
+      });
+      const text = await generate(req, acceso, provider, model, { system: i.system, user: i.user(prompt), maxTokens: 1500, temperatura: 0.2 });
+      const json = parseJson(text);
+      if (!json || !Array.isArray(json.acciones)) {
+        await acceso.devolver(); // no se entendió: no se cobra el texto
+        return jsonError("No entendí la orden. Dila de otra forma.", 502);
+      }
+      return Response.json({ acciones: json.acciones, mensaje: typeof json.mensaje === "string" ? json.mensaje.slice(0, 300) : "" });
     }
 
     // Modo reel: textos cortos por escena + cierre + guion de voz.

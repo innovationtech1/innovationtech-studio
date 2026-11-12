@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   aplicarAcciones,
   clipsPara,
+  TIPOS_DE_ACCION,
   costoDe,
+  instruccionesDirector,
   resumenProyecto,
   textoCosto,
   validarAcciones,
@@ -409,4 +411,39 @@ test("resumenProyecto: textos y números, nunca las fotos", () => {
   ]);
   assert.equal(r.guion, "g");
   assert.equal(r.formato, "9:16");
+});
+
+// ---------- Instrucciones para la IA ----------
+
+const instr = (extra: Partial<Parameters<typeof instruccionesDirector>[0]> = {}) =>
+  instruccionesDirector({
+    resumen: { formato: "9:16", clips: [{ n: 1, tipo: "foto", segundos: 3, foto: true, texto: "Hola" }] },
+    estilos: [{ id: "pop", nombre: "Alegre pop" }, { id: "lofi", nombre: "Lo-fi relajado" }],
+    voces: [{ id: "es-selena", nombre: "Selena", genero: "mujer" }],
+    ...extra,
+  });
+
+test("instrucciones: nombran todo el catálogo y las reglas de costo", () => {
+  const { system } = instr();
+  assert.equal(TIPOS_DE_ACCION.length, 19);
+  for (const t of TIPOS_DE_ACCION) assert.ok(system.includes(`"${t}"`), `falta ${t}`);
+  assert.match(system, /Responde SOLO con un objeto JSON/);
+  assert.ok(system.includes("pop") && system.includes("lofi") && system.includes("es-selena"));
+  assert.match(system, /entre 7 y 10 segundos/);
+  assert.match(system, /dividida entre 8/);
+  assert.match(system, /2\.3 palabras por segundo/);
+  assert.match(system, /nunca inventes acciones/i);
+  assert.match(system, /"acciones": \[\]/); // ejemplo de «no se puede»
+});
+
+test("instrucciones: el mensaje lleva la orden y el estado del video", () => {
+  const u = instr().user("quita el clip 2");
+  assert.ok(u.includes("quita el clip 2"));
+  assert.ok(u.includes('"texto":"Hola"'));
+});
+
+test("instrucciones: marca e inglés", () => {
+  assert.ok(instr({ marca: "Tortas Tortuga, comida mexicana" }).system.includes("Tortas Tortuga, comida mexicana"));
+  assert.match(instr({ ingles: true }).system, /in English/);
+  assert.doesNotMatch(instr().system, /in English/);
 });
