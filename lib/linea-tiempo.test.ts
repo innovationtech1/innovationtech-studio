@@ -16,6 +16,7 @@ import {
   mover,
   normalizarClips,
   nuevoClip,
+  descartaToma,
   ponerToma,
   recortar,
   rehacerToma,
@@ -501,4 +502,18 @@ test("transicionesAlAzar: una distinta por clip, sin dos iguales seguidas", () =
   const r = transicionesAlAzar([foto(), foto(), foto(), foto(), foto()], () => 0.5);
   assert.ok(r.every((c) => c.transicion && c.transicion !== "corte"));
   for (let i = 1; i < r.length; i++) assert.notEqual(r[i].transicion, r[i - 1].transicion);
+});
+
+test("descartaToma: avisa solo cuando el cambio tira una toma con IA ya generada", () => {
+  const hecha = nuevoClip({ tipo: "toma", image: "foto", movimiento: "zoom lento", trabajoId: "t1" });
+  assert.equal(descartaToma(hecha, { movimiento: "paneo" }), true);
+  assert.equal(descartaToma(hecha, { image: "otra" }), true);
+  assert.equal(descartaToma(hecha, { tipo: "foto" }), true);
+  // lo que no toca la toma no avisa
+  assert.equal(descartaToma(hecha, { caption: "Hola" }), false);
+  assert.equal(descartaToma(hecha, { movimiento: " zoom lento " }), false);
+  assert.equal(descartaToma(hecha, { transicion: "corte" }), false);
+  // sin toma generada no hay nada que perder
+  assert.equal(descartaToma(nuevoClip({ tipo: "toma", image: "foto" }), { movimiento: "paneo" }), false);
+  assert.equal(descartaToma(nuevoClip({ image: "foto" }), { image: "otra" }), false);
 });

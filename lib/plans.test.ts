@@ -296,7 +296,8 @@ test("tomas con IA: configuración de video por defecto", () => {
       estandar: { id: "minimax/h3-max-turbo/image-to-video", centavosPorSegundo: 4, resolucion: "768P" },
     },
     segundosToma: 5,
-    topeDiarioCentavos: 500,
+    topeDiarioCentavos: 3000,
+    tomasPorNegocioDia: 20,
     umbralDemo: 0.8,
     simultaneos: 3,
     minutosAtorado: 15,
@@ -312,7 +313,7 @@ test("mezclarConfig mezcla videoIa sin perder los valores por defecto", () => {
   assert.equal(cfg.videoIa.simultaneos, 3);
   assert.deepEqual(cfg.videoIa.modelos.demo, { id: "fal-ai/otro", centavosPorSegundo: 2.5, resolucion: "480P" });
   assert.deepEqual(cfg.videoIa.modelos.estandar, DEFAULT_CONFIG.videoIa.modelos.estandar);
-  assert.equal(DEFAULT_CONFIG.videoIa.topeDiarioCentavos, 500);
+  assert.equal(DEFAULT_CONFIG.videoIa.topeDiarioCentavos, 3000);
   assert.equal(cfg.paquetes.video.monto, 15);
   assert.equal(mezclarConfig({ limitesMes: { pro: { textos: 5 } } } as never).limitesMes.pro.tomas_ia, 20);
 });

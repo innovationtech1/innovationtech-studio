@@ -216,6 +216,24 @@ export async function crearVideo(
 
     // Cuota: solo las tomas nuevas. El guardián revisa sesión, plan y descuenta del mes o del saldo.
     nuevas = preparadas.filter((p) => !p.clipKey).length;
+    // Límite por cliente y por día: un solo cliente no se gasta lo de todos. Se revisa antes de cobrar.
+    if (nuevas > 0) {
+      const hoy = diaChicago(m.ahora);
+      const deHoy = (await m.videos.trabajosDeNegocio(negocio.id, m.ahora - 36 * 60 * 60 * 1000)).filter(
+        (t) => !t.desdeCache && t.estado !== "fallo" && diaChicago(t.creado) === hoy,
+      ).length;
+      const limite = cfg.videoIa.tomasPorNegocioDia;
+      if (deHoy + nuevas > limite) {
+        const quedan = Math.max(0, limite - deHoy);
+        return falla(
+          429,
+          quedan > 0
+            ? `Hoy puedes generar ${quedan} ${quedan === 1 ? "toma" : "tomas"} más con IA (el límite es de ${limite} al día). Mañana puedes seguir.`
+            : `Llegaste al límite de hoy: ${limite} tomas con IA. Mañana puedes seguir; tus créditos no se pierden.`,
+          "LIMITE_DIA",
+        );
+      }
+    }
     let delMes = 0;
     let mes = "";
     let devolver = async () => {};
@@ -483,6 +501,7 @@ export async function resumenVideo(
       encendido: boolean;
       gastoHoyCentavos: number;
       topeCentavos: number;
+      tomasPorNegocioDia: number;
       enProceso: number;
       enFila: number;
       fallos: { fecha: number; negocio: string; motivo: string }[];
@@ -507,8 +526,29 @@ export async function resumenVideo(
     encendido: m.encendido && !!m.r2,
     gastoHoyCentavos: gasto,
     topeCentavos: cfg.videoIa.topeDiarioCentavos,
+    tomasPorNegocioDia: cfg.videoIa.tomasPorNegocioDia,
     enProceso,
     enFila: fila.length,
     fallos: fallidos.map((t) => ({ fecha: t.actualizado, negocio: nombres.get(t.negocioId) ?? t.negocioId, motivo: t.error ?? "Sin detalle" })),
   };
+}
+
+// El administrador cambia el tope de gasto del día (centavos) y el límite de tomas por cliente al día.
+export async function ajustarVideo(
+  adminEmail: string,
+  emailVerified: boolean,
+  cuerpo: unknown,
+  deps: DepsVideo = {},
+): Promise<{ ok: true; topeCentavos: number; tomasPorNegocioDia: number } | Falla> {
+  if (!esCorreoAdmin(adminEmail, emailVerified)) return falla(403, "No tienes permiso para el panel de administrador.", "NO_ADMIN");
+  const c = (cuerpo ?? {}) as { topeDiarioCentavos?: unknown; tomasPorNegocioDia?: unknown };
+  const entero = (v: unknown, min: number, max: number) => typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
+  // De $1 a $1,000 al día; de 1 a 500 tomas por cliente
+  if (!entero(c.topeDiarioCentavos, 100, 100_000)) return falla(400, "El tope del día va de $1 a $1,000.");
+  if (!entero(c.tomasPorNegocioDia, 1, 500)) return falla(400, "El límite por cliente va de 1 a 500 tomas al día.");
+  const m = mundoDe(deps);
+  const cfg = await m.store.getConfig();
+  const videoIa = { ...cfg.videoIa, topeDiarioCentavos: c.topeDiarioCentavos as number, tomasPorNegocioDia: c.tomasPorNegocioDia as number };
+  await m.store.guardarConfig({ videoIa });
+  return { ok: true, topeCentavos: videoIa.topeDiarioCentavos, tomasPorNegocioDia: videoIa.tomasPorNegocioDia };
 }
