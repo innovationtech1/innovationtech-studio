@@ -43,6 +43,7 @@ import {
   nuevoClip,
   ponerToma,
   ponerEnLibre,
+  descartaToma,
   sinFuente,
   presente,
   quitarToma,
@@ -1229,7 +1230,12 @@ export default function ReelStudio({
     setElegido(Math.min(i, clipsRef.current.length - 1));
     setPicking(null);
   };
+  // Antes de tirar una toma con IA ya generada se pregunta (una sola vez: después ya no hay toma que perder)
+  const seguroDe = (clip: Clip | undefined, cambios: Partial<Clip>) =>
+    !descartaToma(clip, cambios) ||
+    confirm("Este clip ya tiene su toma con IA. Con este cambio se quita y habrá que animarlo otra vez. ¿Continuar?");
   const alCambiar = (i: number, cambios: Partial<Clip>) => {
+    if (!seguroDe(clipsRef.current[i], cambios)) return;
     const campo = Object.keys(cambios).join(",");
     // Escribir o arrastrar la duración: varios cambios seguidos cuentan como un solo paso
     const seguido = campo === "caption" || campo === "movimiento" || campo === "segundos" || campo === "prompt";
@@ -1259,7 +1265,7 @@ export default function ReelStudio({
               onChange={async (e) => {
                 const f = e.target.files?.[0];
                 e.target.value = "";
-                if (f) run("Cargando foto…", async () => editar(porId(sc.id, { image: await fileToResizedDataUrl(f, 1280) })));
+                if (f && seguroDe(sc, { image: "" })) run("Cargando foto…", async () => editar(porId(sc.id, { image: await fileToResizedDataUrl(f, 1280) })));
               }}
             />
           </label>
@@ -1269,7 +1275,7 @@ export default function ReelStudio({
           <button
             className="btn ghost small"
             disabled={!!busy || sc.loading}
-            onClick={() => run("Creando imagen…", () => makeImage(sc.id, sc.prompt || `${topic}, ${sc.caption}, advertising photography`))}
+            onClick={() => seguroDe(sc, { image: "" }) && run("Creando imagen…", () => makeImage(sc.id, sc.prompt || `${topic}, ${sc.caption}, advertising photography`))}
           >
             Crear con IA
           </button>
@@ -1282,6 +1288,7 @@ export default function ReelStudio({
             <button
               className="btn ghost small"
               onClick={() => {
+                if (!seguroDe(sc, { image: "" })) return;
                 editar(porId(sc.id, { image: "", imageId: undefined }));
                 olvidarFoto(sc.imageId);
               }}
