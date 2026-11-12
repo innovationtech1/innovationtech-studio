@@ -5,7 +5,7 @@ import fixWebmDuration from "fix-webm-duration";
 import type { EscenaRender, TextoPos, TextoTam } from "./linea-tiempo";
 import { medidasTexto } from "./reel-texto";
 import { bajadasDeMusica, gananciaClip, tramosConSonido } from "./reel-sonido";
-import { pasoTransicion } from "./reel-transicion";
+import { dibujarTransicion } from "./reel-transicion-dibujo";
 import { renderSfx, type SfxItem } from "./sfx";
 import { FPS_RAPIDO, MUESTRAS_AUDIO, codecDeVideo, cuadrosDe, momentoDe, sirveParaRapido, trozosDeAudio } from "./reel-rapido";
 // Motor de reels: arma un video animado dentro del navegador, gratis y sin límite.
@@ -406,45 +406,25 @@ async function montar(o: ReelOptions): Promise<Montaje> {
       while (i > 0 && time < starts[i]) i--;
       const per = durs[i];
       const local = Math.min(per, time - starts[i]);
-      // En escenas muy cortas la transición se acorta para que no se coma la escena
-      const fade = Math.min(FADE, per / 3);
-      scene(i, local / per);
-      // transición: la siguiente escena entra encima, según la transición elegida en este clip
-      let blanco = 0;
+      // La transición ocupa el final del clip: lo elegido (rápida, normal o lenta), sin comerse más de un tercio
+      const fade = Math.min(escenas[i].transicionSeg || FADE, per / 3);
       if (local > per - fade && i < escenas.length - 1) {
-        const paso = pasoTransicion(escenas[i].transicion, (local - (per - fade)) / fade);
-        blanco = paso.blanco;
-        if (paso.alfa > 0) {
-          ctx.save();
-          ctx.globalAlpha = paso.alfa;
-          if (paso.recorte < 1) {
-            ctx.beginPath();
-            ctx.rect(0, 0, W * paso.recorte, H);
-            ctx.clip();
-          }
-          if (paso.dx) ctx.translate(W * paso.dx, 0);
-          if (paso.escala !== 1) {
-            ctx.translate(W / 2, H / 2);
-            ctx.scale(paso.escala, paso.escala);
-            ctx.translate(-W / 2, -H / 2);
-          }
-          scene(i + 1, 0);
-          ctx.restore();
-        }
-      }
+        dibujarTransicion(escenas[i].transicion, {
+          ctx,
+          W,
+          H,
+          p: (local - (per - fade)) / fade,
+          sale: () => scene(i, local / per),
+          entra: () => scene(i + 1, 0),
+          acento: o.accent,
+        });
+      } else scene(i, local / per);
       const fadeOut = local > per - fade ? 1 - (local - (per - fade)) / fade : 1;
       ctx.save();
       ctx.globalAlpha = fadeOut;
       const e = escenas[i];
       drawCaption(ctx, e.texto || "", W, H, (local - 0.15) / 0.5, o.accent, e.textoPos, e.textoTam);
       ctx.restore();
-      if (blanco > 0) {
-        ctx.save();
-        ctx.globalAlpha = blanco;
-        ctx.fillStyle = "#fff";
-        ctx.fillRect(0, 0, W, H);
-        ctx.restore();
-      }
       drawLogo(ctx, logo, W, H);
       const cue = subCues.find((c) => time >= c.start && time <= c.end + 0.05);
       if (cue)

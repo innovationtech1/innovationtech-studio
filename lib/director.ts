@@ -17,11 +17,12 @@ import {
   nuevoClip,
   presente,
   tomasDistintas,
+  transicionesAlAzar,
   type Clip,
   type TextoPos,
   type TextoTam,
 } from "./linea-tiempo";
-import { TRANSICIONES, esTransicion, type Transicion } from "./reel-transicion";
+import { TRANSICIONES, esDuracionTransicion, esTransicion, nombreTransicion, type DuracionTransicion, type Transicion } from "./reel-transicion";
 
 export const MAX_ACCIONES = 20;
 export const MAX_ORDEN = 500; // caracteres de la orden
@@ -49,7 +50,7 @@ export type Accion =
   | { tipo: "duracion_total"; segundos: number }
   | { tipo: "texto"; clip: number; texto: string }
   | { tipo: "estilo_texto"; clip: RefClip; posicion?: TextoPos; tamano?: TextoTam }
-  | { tipo: "transicion"; clip: RefClip; valor: Transicion }
+  | { tipo: "transicion"; clip: RefClip; valor?: Transicion | "sorpresa"; duracion?: DuracionTransicion }
   | { tipo: "imagen"; clip: number; descripcion: string }
   | { tipo: "animar"; clip: number; activar: boolean; movimiento?: string }
   | { tipo: "formato"; valor: Formato }
@@ -175,7 +176,17 @@ function validarUna(a: Cruda, cat: Catalogo): Accion | null {
     }
     case "transicion": {
       const clip = refClip(a.clip);
-      return clip === null || !esTransicion(a.valor) ? null : { tipo: "transicion", clip, valor: a.valor };
+      if (clip === null) return null;
+      const r: Extract<Accion, { tipo: "transicion" }> = { tipo: "transicion", clip };
+      if (a.valor === "sorpresa") {
+        if (clip !== "todos") return null; // la sorpresa reparte por todo el video
+        r.valor = "sorpresa";
+      } else if (a.valor !== undefined) {
+        if (!esTransicion(a.valor)) return null;
+        r.valor = a.valor;
+      }
+      if (esDuracionTransicion(a.duracion)) r.duracion = a.duracion;
+      return r.valor || r.duracion ? r : null;
     }
     case "imagen": {
       const clip = nClip(a.clip);
@@ -402,16 +413,24 @@ export function aplicarAcciones(estado: Estado, acciones: Accion[], cat: Catalog
         break;
       }
       case "transicion": {
-        const nombre = TRANSICIONES.find((t) => t.id === a.valor)?.nombre ?? a.valor;
+        const cambios: Partial<Clip> = {};
+        if (a.valor && a.valor !== "sorpresa") cambios.transicion = a.valor;
+        if (a.duracion) cambios.transicionDur = a.duracion;
+        const DURACION = { rapida: "rápidas", normal: "de duración normal", lenta: "lentas" } as const;
         if (a.clip === "todos") {
-          clips = clips.map((c) => ({ ...c, transicion: a.valor }));
-          hecho.push(`Puse la transición «${nombre}» en todos los clips`);
+          if (a.valor === "sorpresa") {
+            clips = transicionesAlAzar(clips).map((c) => (a.duracion ? { ...c, transicionDur: a.duracion } : c));
+            hecho.push("Repartí transiciones variadas por todo el video");
+            break;
+          }
+          clips = clips.map((c) => ({ ...c, ...cambios }));
+          hecho.push(cambios.transicion ? `Puse la transición «${nombreTransicion(cambios.transicion)}» en todos los clips` : `Puse las transiciones ${DURACION[a.duracion!]} en todos los clips`);
           break;
         }
         const i = lugar(a.clip);
         if (i < 0) break;
-        clips = cambiar(clips, i, { transicion: a.valor });
-        hecho.push(`Puse la transición «${nombre}» después del clip ${a.clip}`);
+        clips = cambiar(clips, i, cambios);
+        hecho.push(cambios.transicion ? `Puse la transición «${nombreTransicion(cambios.transicion)}» después del clip ${a.clip}` : `Cambié la duración de la transición del clip ${a.clip}`);
         break;
       }
       case "imagen": {
@@ -647,7 +666,7 @@ export function instruccionesDirector(o: {
     '- {"tipo": "duracion_total", "segundos": S}: cuánto dura el video completo (hasta 120).',
     '- {"tipo": "texto", "clip": N, "texto": "..."}: el texto en pantalla de ese clip (máximo 8 palabras).',
     '- {"tipo": "estilo_texto", "clip": N o "todos", "posicion": "arriba" | "centro" | "abajo", "tamano": "chico" | "normal" | "grande"}',
-    '- {"tipo": "transicion", "clip": N o "todos", "valor": "fundido" | "corte" | "deslizar" | "zoom" | "destello" | "barrido"}: cómo se pasa de ese clip al siguiente.',
+`- {"tipo": "transicion", "clip": N o "todos", "valor": id, "duracion": "rapida" | "normal" | "lenta"}: cómo se pasa de ese clip al siguiente. Ids: ${TRANSICIONES.map((t) => `${t.id} (${t.nombre})`).join(", ")}. Con "clip": "todos" también vale "valor": "sorpresa", que reparte transiciones variadas. Pon solo los campos que cambien.`,
     '- {"tipo": "imagen", "clip": N, "descripcion": "..."}: crea con IA la imagen de ese clip. Úsala solo si la piden.',
     '- {"tipo": "animar", "clip": N, "activar": true | false, "movimiento": "..."}: marca la foto para animarla con IA (movimiento real, 5 s). Úsala solo si la piden.',
     '- {"tipo": "generar_ia"}: genera las tomas con IA de las fotos marcadas y graba el video. Ponla al final cuando pidan animar fotos o generar el video con IA.',

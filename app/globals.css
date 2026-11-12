@@ -296,6 +296,17 @@ h3.step { margin: 22px 0 6px; font-size: 16px; }
 .lt-pestanas button.activa { color: var(--paper); border-bottom-color: var(--red); }
 .lt-grupo { display: flex; flex-direction: column; gap: 8px; }
 .lt-grupo label { margin: 0; }
+.lt-rotulo { font-size: 13px; color: var(--muted); font-weight: 600; }
+.lt-trans { display: flex; flex-direction: column; gap: 8px; }
+.lt-trans-grupo { display: flex; flex-direction: column; gap: 4px; }
+.lt-trans-opciones { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 6px; }
+.lt-trans-boton { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 6px 8px; background: var(--navy-800); color: var(--text); border: 1px solid var(--navy-600); border-radius: 8px; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.lt-trans-boton > span { flex: 0 0 22px; text-align: center; font-size: 16px; color: var(--muted); }
+.lt-trans-boton.activa { border-color: var(--red); background: var(--navy-900); box-shadow: inset 0 0 0 1px var(--red); }
+.lt-trans-boton.activa > span { color: var(--red); }
+.lt-trans-boton:disabled { opacity: 0.5; cursor: default; }
+.lt-trans-grupo.exclusiva .lt-trans-boton { border-style: dashed; border-color: var(--red); }
+.lt-trans-grupo.exclusiva .lt-trans-opciones { grid-template-columns: minmax(0, 220px); }
 .lt-efecto { display: flex; gap: 8px; align-items: center; }
 .lt-efecto select { flex: 1; min-width: 0; margin: 0; }
 .lt-efecto .btn { margin: 0; min-height: 44px; flex: 0 0 auto; }

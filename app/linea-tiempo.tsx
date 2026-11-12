@@ -5,7 +5,7 @@ import { ArrowLeft, ArrowRight, Camera, Copy, Dices, Plus, RefreshCw, Scissors, 
 import { MOVIMIENTOS, movimientoAlAzar } from "@/lib/movimientos";
 import { MAX_FOTO, MAX_TOMAS, MIN_FOTO, MIN_TRAMO, VELOCIDADES, duracionClip, presente, tramo, type Clip, type Reproduccion, type TextoPos, type TextoTam } from "@/lib/linea-tiempo";
 import { cuadroDe } from "@/lib/video-propio";
-import { TRANSICIONES, type Transicion } from "@/lib/reel-transicion";
+import { GRUPOS_TRANSICION, type DuracionTransicion } from "@/lib/reel-transicion";
 import { SFX, previewSfx, type SfxId } from "@/lib/sfx";
 
 // Segundos con un decimal como mucho: 3 → «3 s», 5.125 → «5.1 s»
@@ -35,6 +35,8 @@ export default function LineaTiempo({
   onAnimar,
   onRehacer,
   onVolver,
+  onTransicionATodos,
+  onSorpresa,
 }: {
   clips: Clip[];
   elegido: number; // índice del clip abierto (−1 = ninguno)
@@ -57,6 +59,8 @@ export default function LineaTiempo({
   onAnimar: (i: number) => void; // genera la toma de ese clip (1 toma)
   onRehacer: (i: number) => void; // pide otra versión con el mismo movimiento (1 toma)
   onVolver: (i: number) => void; // vuelve a la toma anterior (no cuesta)
+  onTransicionATodos: (i: number) => void; // la transición de ese clip pasa a todos
+  onSorpresa: () => void; // transiciones distintas al azar por todo el video
 }) {
   const [arrastrando, setArrastrando] = useState<number | null>(null);
   const [encima, setEncima] = useState<number | null>(null);
@@ -203,14 +207,57 @@ export default function LineaTiempo({
               </div>
 
               <div hidden={vista !== "efectos"} className="lt-grupo">
-                <label htmlFor="lt-trans">Transición al siguiente clip</label>
-                <select id="lt-trans" value={clip.transicion ?? "fundido"} disabled={ocupado} onChange={(e) => onCambiar(elegido, { transicion: e.target.value as Transicion })}>
-                  {TRANSICIONES.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.nombre}
-                    </option>
+                <span className="lt-rotulo" id="lt-trans">Transición al siguiente clip</span>
+                <div className="lt-trans" role="radiogroup" aria-labelledby="lt-trans">
+                  {GRUPOS_TRANSICION.map((g) => (
+                    <div key={g.id} className={`lt-trans-grupo${g.id === "exclusiva" ? " exclusiva" : ""}`}>
+                      <span className="muted">{g.nombre}</span>
+                      <div className="lt-trans-opciones">
+                        {g.transiciones.map((t) => {
+                          const activa = (clip.transicion ?? "fundido") === t.id;
+                          return (
+                            <button
+                              type="button"
+                              key={t.id}
+                              role="radio"
+                              aria-checked={activa}
+                              className={`lt-trans-boton${activa ? " activa" : ""}`}
+                              disabled={ocupado}
+                              onClick={() => onCambiar(elegido, { transicion: t.id })}
+                            >
+                              <span aria-hidden data-no-translate>{t.icono}</span>
+                              {t.nombre}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   ))}
-                </select>
+                </div>
+                <span className="lt-rotulo" id="lt-trans-dur">Duración de la transición</span>
+                <div className="seg" role="radiogroup" aria-labelledby="lt-trans-dur">
+                  {(["rapida", "normal", "lenta"] as DuracionTransicion[]).map((d) => (
+                    <button
+                      type="button"
+                      key={d}
+                      role="radio"
+                      aria-checked={(clip.transicionDur ?? "normal") === d}
+                      className={(clip.transicionDur ?? "normal") === d ? "active" : ""}
+                      disabled={ocupado}
+                      onClick={() => onCambiar(elegido, { transicionDur: d })}
+                    >
+                      {d === "rapida" ? "Rápida" : d === "normal" ? "Normal" : "Lenta"}
+                    </button>
+                  ))}
+                </div>
+                <div className="actions lt-video-botones">
+                  <button type="button" className="btn ghost small" disabled={ocupado || clips.length < 2} onClick={() => onTransicionATodos(elegido)}>
+                    Aplicar a todos los clips
+                  </button>
+                  <button type="button" className="btn ghost small" disabled={ocupado || clips.length < 2} onClick={onSorpresa}>
+                    <Dices size={15} aria-hidden /> Sorpréndeme
+                  </button>
+                </div>
                 <label htmlFor="lt-efecto">Efecto de sonido al empezar este clip</label>
                 <div className="lt-efecto">
                   <select id="lt-efecto" value={clip.efecto ?? ""} disabled={ocupado} onChange={(e) => (onCambiar(elegido, { efecto: e.target.value || undefined }), e.target.value && escucharEfecto(e.target.value))}>
