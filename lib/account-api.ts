@@ -53,6 +53,7 @@ export type EstadoCuenta =
       uso: Record<Contador, number>; // del mes
       saldo: Saldo; // paquetes comprados (no vencen)
       reinicio: number; // ms: cuando los contadores del mes vuelven a cero
+      tomasPorDia: number; // lo más que se puede generar de video con IA en un día
       paquetes: { id: PaqueteId; monto: number; contenido: Saldo }[]; // los que el plan puede comprar
       esAdmin: boolean;
       esDueno: boolean;
@@ -102,6 +103,7 @@ export async function obtenerCuenta(
     uso,
     saldo: { ...negocio.paquetes },
     reinicio: inicioMesSiguienteChicago(ahora),
+    tomasPorDia: cfg.videoIa.tomasPorNegocioDia,
     paquetes: efectivo.estado === "activo" && (plan === "basico" || plan === "pro")
       ? (Object.entries(cfg.paquetes) as [PaqueteId, (typeof cfg.paquetes)[PaqueteId]][])
           .filter(([, p]) => p.planes.includes(plan))

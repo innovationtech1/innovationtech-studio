@@ -1455,4 +1455,5 @@ export const EN_PATTERNS: [RegExp, string][] = [
   [/^Un video admite hasta (\d+) clips$/, "A video can have up to $1 clips"],
   [/^Hoy puedes generar (\d+) (toma|tomas) más con IA \(el límite es de (\d+) al día\)\. Mañana puedes seguir\.$/, "You can generate $1 more AI take(s) today (the limit is $3 per day). You can continue tomorrow."],
   [/^Llegaste al límite de hoy: (\d+) tomas con IA\. Mañana puedes seguir; tus créditos no se pierden\.$/, "You've reached today's limit: $1 AI takes. You can continue tomorrow; your credits aren't lost."],
+  [/^Hasta (\d+) por día$/, "Up to $1 per day"],
 ];
