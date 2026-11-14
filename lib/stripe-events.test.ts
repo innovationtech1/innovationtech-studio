@@ -1323,6 +1323,7 @@ test("comprarPaquete: dueño Pro activo compra Voz (pago único con el cliente e
   assert.equal(p.mode, "payment");
   assert.deepEqual(p.line_items, [{ price: PRECIO_VOZ, quantity: 1 }]);
   assert.deepEqual(p.metadata, { negocioId: "n1", paquete: "voz" });
+  assert.deepEqual(p.invoice_creation, { enabled: true }, "el cobro del paquete lleva factura");
   assert.equal(p.success_url, `${ORIGEN}/?paquete=ok`);
   assert.equal(p.cancel_url, `${ORIGEN}/?paquete=cancelado`);
   assert.equal(p.client_reference_id, "n1");

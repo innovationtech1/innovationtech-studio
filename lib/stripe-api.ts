@@ -484,6 +484,9 @@ export async function comprarPaquete(
     const sesion = await cliente.checkout.sessions.create({
       mode: "payment",
       line_items: [{ price: conf.stripePriceId, quantity: 1 }],
+      // Factura del cobro: en un pago único Stripe no la crea sola (en el plan mensual sí).
+      // Con esto queda en el portal del cliente y Stripe la manda por correo si está encendido.
+      invoice_creation: { enabled: true },
       client_reference_id: negocio.id,
       ...(customer ? { customer } : correo ? { customer_email: correo } : {}),
       success_url: `${origin}/?paquete=ok`,
