@@ -1382,6 +1382,10 @@ export const EN: Record<string, string> = {
   "¿Crear 1 imagen? Usa 1 imagen de tu plan.": "Create 1 image? Uses 1 image from your plan.",
   "Primero crea un texto para poder corregirlo.": "Create a text first so it can be edited.",
   "No pude aplicar ese cambio. Dilo de otra forma.": "I couldn't apply that change. Say it another way.",
+  "Créditos y licencias": "Credits and licenses",
+  "Ya la tienes instalada": "It's already installed",
+  "Estás usando InnovationTECH Studio como app.": "You're using InnovationTECH Studio as an app.",
+  "Abre el menú de tu navegador (⋮) y elige «Instalar aplicación» o «Agregar a pantalla de inicio».": "Open your browser menu (⋮) and choose “Install app” or “Add to Home screen”.",
 };
 
 // Textos con números u otras partes que cambian
