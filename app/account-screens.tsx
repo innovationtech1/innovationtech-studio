@@ -791,6 +791,7 @@ export function MiCuenta({
                   {extra > 0 && (
                     <span className="acct-saldo">{`+${extra} de paquete`}</span>
                   )}
+                  {c === "tomas_ia" && (tope > 0 || extra > 0) && <span className="muted">{`Hasta ${cuenta.tomasPorDia} por día`}</span>}
                 </li>
               );
             })}

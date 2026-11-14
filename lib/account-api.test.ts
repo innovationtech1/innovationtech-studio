@@ -687,3 +687,11 @@ test("obtenerCuenta: legible false con llave distinta o sin llave; null sin clav
   const sin = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA, llave: null });
   assert.equal(sin.iaPropia?.legible, false);
 });
+
+test("la cuenta dice cuántas tomas con IA se pueden generar por día (para mostrarlo en «Mi cuenta»)", async () => {
+  const store = memoryStore({ usuarios: [dueno], negocios: [negocio()] });
+  const cfg = await store.getConfig();
+  await store.guardarConfig({ videoIa: { ...cfg.videoIa, tomasPorNegocioDia: 12 } });
+  const c = await cuenta("u1", "dueno@ejemplo.com", true, { store, now: AHORA });
+  assert.equal(c.tomasPorDia, 12);
+});
