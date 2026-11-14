@@ -1349,6 +1349,8 @@ export const EN: Record<string, string> = {
   "Tomas por cliente al día": "Takes per customer per day",
   "Guardar límites": "Save limits",
   "Límites guardados.": "Limits saved.",
+  "Replicate (opcional)": "Replicate (optional)",
+  "Clave de Replicate (solo si eliges Replicate para tus imágenes) — replicate.com/account/api-tokens": "Replicate key (only if you choose Replicate for your images) — replicate.com/account/api-tokens",
 };
 
 // Textos con números u otras partes que cambian
