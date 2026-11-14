@@ -30,10 +30,6 @@ type Tab = "texto" | "imagen" | "editor" | "video" | "galeria" | "marca" | "conf
 // «Remover fondo» (solo en el navegador)
 const BgRemover = dynamic(() => import("./bg-remover"), { ssr: false });
 const ShapeCrop = dynamic(() => import("./shape-crop"), { ssr: false });
-const VideoEditor = dynamic(() => import("./video-editor"), {
-  ssr: false,
-  loading: () => <section className="card">Cargando editor de video…</section>,
-});
 
 // Videos y calendario: se cargan hasta que se abren, para que la app arranque ligera.
 const ReelProyectos = dynamic(() => import("./reel-proyectos"), {
@@ -115,7 +111,6 @@ export default function Home() {
   const galleryStore = useGallery();
   const gallery = galleryStore.items;
   const [imagePrompt, setImagePrompt] = usePersistentState("imagen:prompt", "");
-  const [videoPrompt, setVideoPrompt] = usePersistentState("video:prompt", "");
   // Imagen enviada con «Animar en video» desde la pestaña Imágenes
   const [handoff, setHandoff] = useState<{ url: string; n: number } | null>(null);
   // Imagen enviada al editor con «Editar»
@@ -141,7 +136,6 @@ export default function Home() {
   const [slideUpdate, setSlideUpdate] = useState<{ slide: number; url: string; n: number } | null>(null);
   const [imageMode, setImageMode] = usePersistentState<"ia" | "carrusel">("imagen:modo", "ia");
   const [ready, setReady] = useState(false);
-  const [videoMode, setVideoMode] = usePersistentState<"reel" | "editor" | "ia">("video:mode", "reel");
   const { status: demo } = useDemo();
   const [welcomeDone, setWelcomeDone] = usePersistentState("bienvenida", false);
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -322,7 +316,7 @@ export default function Home() {
             brand={brand}
             onUseImage={(p) => (setImagePrompt(p), setTab("imagen"))}
             onToEditor={textToEditor}
-            onUseVideo={(p) => (setReelTopic((r) => ({ text: p, n: (r?.n || 0) + 1 })), setVideoMode("reel"), setTab("video"))}
+            onUseVideo={(p) => (setReelTopic((r) => ({ text: p, n: (r?.n || 0) + 1 })), setTab("video"))}
           />
         </div>
         <div hidden={textMode !== "calendario"}>
@@ -332,7 +326,7 @@ export default function Home() {
             brand={brand}
             onImage={(p) => (setImagePrompt(p), go("imagen"))}
             onEditor={textToEditor}
-            onReel={(t) => (setReelTopic((r) => ({ text: t, n: (r?.n || 0) + 1 })), setVideoMode("reel"), go("video"))}
+            onReel={(t) => (setReelTopic((r) => ({ text: t, n: (r?.n || 0) + 1 })), go("video"))}
           />
           )}
         </div>
@@ -366,7 +360,6 @@ export default function Home() {
           onEdit={openInEditor}
           onAnimate={async (src, p) => {
             const url = await toDataUrl(src);
-            setVideoPrompt(p);
             setHandoff((h) => ({ url, n: (h?.n || 0) + 1 }));
             setTab("video");
           }}
@@ -387,7 +380,6 @@ export default function Home() {
               return;
             }
             setSceneUpdate((u) => ({ scene: to.scene, url, n: (u?.n || 0) + 1 }));
-            setVideoMode("reel");
             go("video");
           }}
           gallery={gallery}
@@ -723,60 +715,21 @@ function ImageStudio({
     }
   }
 
+  // Al abrir una herramienta de recorte (sus botones están abajo), la pantalla sube a donde aparece
+  useEffect(() => {
+    if (cutSrc || shapeSrc) window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [cutSrc, shapeSrc]);
+  // «Usar mis fotos» se abre solo cuando ya hay fotos puestas (o llega una desde otra sección)
+  const [fotosAbierto, setFotosAbierto] = useState(refs.length > 0);
+  useEffect(() => {
+    if (refs.length > 0) setFotosAbierto(true);
+  }, [refs.length]);
   return (
     <>
-    {/* ---------- Remover fondo ---------- */}
+    {/* ---------- Herramienta de recorte abierta y sus resultados ---------- */}
+    {(cutSrc || shapeSrc || cutResults.length > 0) && (
     <section className="card">
-      <div className="card-head">
-        <div>
-          <h2>Recortar, quitar fondo y borrar</h2>
-          <p className="hint" style={{ margin: 0 }}>
-            Quita el fondo, recorta con figuras modernas (círculo, arco, corazón, estrella…) o borra a mano zonas. Se descarga en PNG
-            transparente. Gratis, en tu dispositivo.
-          </p>
-        </div>
-        <div className="actions">
-          <label className="btn" style={{ margin: 0 }}>
-            <ImagePlus size={16} aria-hidden /> Quitar fondo
-            <input
-              type="file"
-              accept="image/*"
-              hidden
-              onChange={async (e) => {
-                const f = e.target.files?.[0];
-                e.target.value = "";
-                if (f) (setShapeSrc(null), setCutEraser(false), setCutSrc(await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png")));
-              }}
-            />
-          </label>
-          <label className="btn ghost" style={{ margin: 0 }}>
-            <Shapes size={16} aria-hidden /> Recortar con forma
-            <input
-              type="file"
-              accept="image/*"
-              hidden
-              onChange={async (e) => {
-                const f = e.target.files?.[0];
-                e.target.value = "";
-                if (f) (setCutSrc(null), setShapeSrc(await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png")));
-              }}
-            />
-          </label>
-          <label className="btn ghost" style={{ margin: 0 }}>
-            <Eraser size={16} aria-hidden /> Borrador
-            <input
-              type="file"
-              accept="image/*"
-              hidden
-              onChange={async (e) => {
-                const f = e.target.files?.[0];
-                e.target.value = "";
-                if (f) (setShapeSrc(null), setCutEraser(true), setCutSrc(await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png")));
-              }}
-            />
-          </label>
-        </div>
-      </div>
+      <h2>Recortar, quitar fondo y borrar</h2>
       {cutSrc && (
         <BgRemover
           src={cutSrc}
@@ -826,6 +779,7 @@ function ImageStudio({
         </div>
       )}
     </section>
+    )}
 
     <section className="card">
       <h2>Crear imágenes</h2>
@@ -833,7 +787,21 @@ function ImageStudio({
         Funciona mejor si describes la imagen en inglés, con estilo, luz y composición. Proveedor:{" "}
         <strong>{settings.imageProvider === "cloudflare" ? "Cloudflare (gratis)" : "Replicate"}</strong>
       </p>
-      <label>Imágenes de referencia (opcional)</label>
+      <label>{refs.length > 0 ? "¿Qué hacer con tus imágenes?" : "Descripción de la imagen"}</label>
+      <textarea
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        placeholder={
+          refs.length > 0
+            ? "Ej.: place this torta on a rustic wooden table, warm restaurant light, food photography"
+            : "Ej.: appetizing Mexican torta on a rustic wooden table, warm light, food photography, close-up"
+        }
+      />
+      <details className="plegable" open={fotosAbierto} onToggle={(e) => setFotosAbierto(e.currentTarget.open)}>
+        <summary>
+          <strong>Usar mis fotos (opcional)</strong>
+          <span className="muted">{refs.length > 0 ? (refs.length === 1 ? "1 foto" : `${refs.length} fotos`) : "Subir, tomar foto o elegir de la galería"}</span>
+        </summary>
       <div className="upload">
         {refs.map((r, i) => (
           <div className="thumb" key={i}>
@@ -879,16 +847,13 @@ function ImageStudio({
           ? "La IA usará tus fotos como base. Describe qué quieres: por ejemplo, «put this product on a wooden table with warm light» o «same person, now in a professional studio portrait»."
           : `Sube hasta ${maxRefs} foto(s) de tu producto, local o logo para crear imágenes a partir de ellas, o déjalo vacío para crear desde cero.`}
       </p>
-      <label>{refs.length > 0 ? "¿Qué hacer con tus imágenes?" : "Descripción de la imagen"}</label>
-      <textarea
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        placeholder={
-          refs.length > 0
-            ? "Ej.: place this torta on a rustic wooden table, warm restaurant light, food photography"
-            : "Ej.: appetizing Mexican torta on a rustic wooden table, warm light, food photography, close-up"
-        }
-      />
+      </details>
+      <details className="plegable">
+        <summary>
+          <strong>Formato y opciones</strong>
+          <span className="muted" data-no-translate>{`${ratio} · ${count} · `}</span>
+          <span className="muted">{useBrand ? "Con mis colores" : "Sin mis colores"}</span>
+        </summary>
       <div className="row">
         <div>
           <label>Formato</label>
@@ -915,9 +880,12 @@ function ImageStudio({
           </select>
         </div>
       </div>
+      </details>
+      <div className="actions" style={{ marginTop: 14 }}>
       <button className="btn" disabled={loading || !prompt} onClick={() => generate()}>
         {loading ? "Generando… (hasta 1 min)" : "Generar imagen"}
       </button>
+      </div>
       {error && (
         <div className="error">
           {error}
@@ -983,147 +951,60 @@ function ImageStudio({
         </div>
       )}
     </section>
-    </>
-  );
-}
 
-/* ---------------- Videos ---------------- */
-
-function VideoStudio({
-  settings,
-  brand,
-  prompt,
-  setPrompt,
-  onDone,
-  handoff,
-}: {
-  settings: Settings;
-  brand: Brand;
-  prompt: string;
-  setPrompt: (p: string) => void;
-  onDone: (items: Item[]) => void;
-  handoff: { url: string; n: number } | null;
-}) {
-  const [firstFrame, setFirstFrame] = useState("");
-  const [status, setStatus] = useState("");
-  const [urls, setUrls] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (handoff) setFirstFrame(handoff.url);
-  }, [handoff]);
-
-  async function generate() {
-    setLoading(true);
-    setError("");
-    setUrls([]);
-    setStatus("Enviando…");
-    const headers = { "content-type": "application/json", "x-replicate-key": settings.replicateKey };
-    try {
-      const res = await fetch("/api/video", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          prompt: prompt + brandVisual(brand),
-          model: settings.videoModel,
-          imageUrl: firstFrame || undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-
-      const started = Date.now();
-      // Consultamos cada 5 segundos hasta 15 minutos.
-      while (Date.now() - started < 15 * 60 * 1000) {
-        await new Promise((r) => setTimeout(r, 5000));
-        const mins = Math.floor((Date.now() - started) / 60000);
-        const sres = await fetch(`/api/video/${data.id}`, { headers });
-        const s = await sres.json();
-        if (!sres.ok) throw new Error(s.error);
-        if (s.status === "succeeded") {
-          setUrls(s.urls);
-          setStatus("¡Listo!");
-          onDone(s.urls.map((url: string) => ({ kind: "video", url, prompt, date: new Date().toISOString() })));
-          return;
-        }
-        if (s.status === "failed" || s.status === "canceled") throw new Error(s.error || "El video no se pudo generar.");
-        setStatus(`Generando video… ${mins} min. Los videos suelen tardar de 2 a 6 minutos.`);
-      }
-      throw new Error("Se agotó el tiempo de espera. Revisa tu panel de Replicate.");
-    } catch (e) {
-      setError(friendlyError((e as Error).message));
-      setStatus("");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <section className="card">
-      <h2>Crear videos</h2>
-      <p className="hint">Clips cortos para reels y anuncios. Describe la escena y el movimiento de cámara, idealmente en inglés.</p>
-      <label>Descripción del video</label>
-      <textarea
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        placeholder="Ej.: slow cinematic dolly-in on a sizzling torta being assembled, steam rising, warm restaurant light"
-      />
-      <label>Imagen inicial (opcional)</label>
-      <div className="upload">
-        {firstFrame ? (
-          <div className="thumb">
-            <img src={firstFrame} alt="Imagen inicial" />
-            <button title="Quitar" onClick={() => setFirstFrame("")}>
-              ×
-            </button>
-          </div>
-        ) : (
-          <label className="pick">
+    {/* ---------- Recortar, quitar fondo y borrar: plegado hasta que se necesita ---------- */}
+    <details className="plegable img-herramientas">
+      <summary>
+        <strong>Recortar, quitar fondo y borrar</strong>
+        <span className="muted">Gratis, en tu dispositivo</span>
+      </summary>
+      <p className="hint">
+        Quita el fondo, recorta con figuras modernas (círculo, arco, corazón, estrella…) o borra a mano zonas. Se descarga en PNG
+        transparente.
+      </p>
+      <div className="actions">
+          <label className="btn" style={{ margin: 0 }}>
+            <ImagePlus size={16} aria-hidden /> Quitar fondo
             <input
               type="file"
               accept="image/*"
+              hidden
               onChange={async (e) => {
-                const file = e.target.files?.[0];
+                const f = e.target.files?.[0];
                 e.target.value = "";
-                if (!file) return;
-                try {
-                  setError("");
-                  setFirstFrame(await fileToResizedDataUrl(file, 1280));
-                } catch (err) {
-                  setError((err as Error).message);
-                }
+                if (f) (setShapeSrc(null), setCutEraser(false), setCutSrc(await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png")));
               }}
             />
-            <span>＋ Subir foto</span>
           </label>
-        )}
+          <label className="btn ghost" style={{ margin: 0 }}>
+            <Shapes size={16} aria-hidden /> Recortar con forma
+            <input
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) (setCutSrc(null), setShapeSrc(await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png")));
+              }}
+            />
+          </label>
+          <label className="btn ghost" style={{ margin: 0 }}>
+            <Eraser size={16} aria-hidden /> Borrador
+            <input
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) (setShapeSrc(null), setCutEraser(true), setCutSrc(await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png")));
+              }}
+            />
+          </label>
       </div>
-      <p className="hint" style={{ marginTop: 8 }}>
-        {firstFrame
-          ? "El video empezará con esta imagen. Describe el movimiento: por ejemplo, «slow camera zoom in, steam rising, people smiling»."
-          : "Sube una foto de tu producto o local para darle vida, o déjalo vacío para crear el video solo con la descripción."}
-      </p>
-      <button className="btn" disabled={loading || !prompt} onClick={generate}>
-        {loading ? "Generando…" : "Generar video"}
-      </button>
-      {status && <div className="ok">{status}</div>}
-      {error && <div className="error">{error}</div>}
-      {urls.length > 0 && (
-        <div className="grid">
-          {urls.map((u) => (
-            <div className="media" key={u}>
-              <video src={u} controls playsInline />
-              <div className="meta">
-                <a href={u} target="_blank" rel="noreferrer" download>
-                  Descargar video
-                </a>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
+    </details>
+    </>
   );
 }
 
@@ -1552,11 +1433,8 @@ function Config({
         </>
       )}
 
-      <h2 style={{ marginTop: 28 }}>Videos</h2>
-      <label>
-        Clave de Replicate (videos{s.imageProvider === "replicate" ? " e imágenes" : ""}) —
-        replicate.com/account/api-tokens
-      </label>
+      <h2 style={{ marginTop: 28 }}>Replicate (opcional)</h2>
+      <label>Clave de Replicate (solo si eliges Replicate para tus imágenes) — replicate.com/account/api-tokens</label>
       <input type="password" {...f("replicateKey")} placeholder="r8_…" autoComplete="off" />
 
       <h2 style={{ marginTop: 28 }}>Modelos</h2>
@@ -1588,10 +1466,6 @@ function Config({
         <div>
           <label>Imagen con foto (Replicate)</label>
           <input {...f("editModel")} />
-        </div>
-        <div>
-          <label>Modelo de video</label>
-          <input {...f("videoModel")} />
         </div>
       </div>
       <button className="btn" onClick={() => (onSave(s), setSaved(true))}>

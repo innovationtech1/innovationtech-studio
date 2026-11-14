@@ -1,10 +1,15 @@
 import type { NextConfig } from "next";
 import { reescriturasDeAuth } from "./lib/auth-dominio";
+import { direccionFija } from "./lib/enlace-fijo";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   // Versión publicada (para «Reportar un problema»): Netlify usa COMMIT_REF y Vercel VERCEL_GIT_COMMIT_SHA.
-  env: { NEXT_PUBLIC_COMMIT_SHA: process.env.COMMIT_REF || process.env.VERCEL_GIT_COMMIT_SHA || "" },
+  // NEXT_PUBLIC_DIRECCION_FIJA: a dónde mandar a quien entra por un enlace temporal de Netlify (lib/enlace-fijo.ts).
+  env: {
+    NEXT_PUBLIC_COMMIT_SHA: process.env.COMMIT_REF || process.env.VERCEL_GIT_COMMIT_SHA || "",
+    NEXT_PUBLIC_DIRECCION_FIJA: direccionFija(process.env),
+  },
   // Inicio de sesión con Google: /__/auth/… se sirve desde Firebase pero bajo la dirección de Studio
   // (así funciona también en el celular). Ver lib/auth-dominio.ts.
   async rewrites() {

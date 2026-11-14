@@ -1009,3 +1009,4 @@ body.acct-con-aviso .rail { top: var(--acct-espacio, var(--acct-aviso)); }
   .adm-nombre { font-size: 17px; }
   .adm-acciones .btn { flex: 1 1 40%; }
 }
+.img-herramientas { margin-top: 16px; }

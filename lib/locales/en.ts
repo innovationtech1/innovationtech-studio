@@ -1344,6 +1344,21 @@ export const EN: Record<string, string> = {
   "Una toma anterior ya no está disponible: esa foto se ve con zoom. Tócala y elige «Animar» para generarla de nuevo.": "An earlier take is no longer available: that photo shows with zoom. Tap it and choose “Animate” to generate it again.",
   "Este video tardó demasiado en abrir. Prueba con uno más corto o en formato MP4.": "This video took too long to open. Try a shorter one or an MP4 file.",
   "No se pudo conectar con la IA de texto. Intenta de nuevo.": "Couldn't reach the text AI. Try again.",
+  "Este clip ya tiene su toma con IA. Con este cambio se quita y habrá que animarlo otra vez. ¿Continuar?": "This clip already has its AI take. This change removes it and you'll need to animate it again. Continue?",
+  "Gasto máximo por día (USD)": "Max spend per day (USD)",
+  "Tomas por cliente al día": "Takes per customer per day",
+  "Guardar límites": "Save limits",
+  "Límites guardados.": "Limits saved.",
+  "Replicate (opcional)": "Replicate (optional)",
+  "Clave de Replicate (solo si eliges Replicate para tus imágenes) — replicate.com/account/api-tokens": "Replicate key (only if you choose Replicate for your images) — replicate.com/account/api-tokens",
+  "Usar mis fotos (opcional)": "Use my photos (optional)",
+  "Subir, tomar foto o elegir de la galería": "Upload, take a photo or pick from the gallery",
+  "1 foto": "1 photo",
+  "Formato y opciones": "Format and options",
+  "Con mis colores": "With my colors",
+  "Sin mis colores": "Without my colors",
+  "Gratis, en tu dispositivo": "Free, on your device",
+  "Quita el fondo, recorta con figuras modernas (círculo, arco, corazón, estrella…) o borra a mano zonas. Se descarga en PNG transparente.": "Remove the background, crop with modern shapes (circle, arch, heart, star…) or erase areas by hand. Downloads as a transparent PNG.",
 };
 
 // Textos con números u otras partes que cambian
@@ -1448,4 +1463,8 @@ export const EN_PATTERNS: [RegExp, string][] = [
   [/^El video del clip (\d+) no se pudo abrir: en esa parte se ve su imagen fija\.$/, "The video in clip $1 couldn't be opened: its still image shows in that part."],
   [/^El clip (\d+) ya se borró en esta misma orden$/, "Clip $1 was already deleted in this same order"],
   [/^Un video admite hasta (\d+) clips$/, "A video can have up to $1 clips"],
+  [/^Hoy puedes generar (\d+) (toma|tomas) más con IA \(el límite es de (\d+) al día\)\. Mañana puedes seguir\.$/, "You can generate $1 more AI take(s) today (the limit is $3 per day). You can continue tomorrow."],
+  [/^Llegaste al límite de hoy: (\d+) tomas con IA\. Mañana puedes seguir; tus créditos no se pierden\.$/, "You've reached today's limit: $1 AI takes. You can continue tomorrow; your credits aren't lost."],
+  [/^Hasta (\d+) por día$/, "Up to $1 per day"],
+  [/^(\d+) fotos$/, "$1 photos"],
 ];

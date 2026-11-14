@@ -221,6 +221,15 @@ export function borrar(clips: Clip[], i: number): Clip[] {
   return r.length ? r : [nuevoClip()];
 }
 
+// ¿Este cambio tira una toma con IA ya generada? (para preguntar antes de hacerlo)
+export function descartaToma(clip: Clip | undefined, cambios: Partial<Clip>): boolean {
+  if (!clip || clip.tipo !== "toma" || !clip.trabajoId) return false;
+  const mov = (m?: string) => (m ?? "").trim();
+  if ("tipo" in cambios && cambios.tipo !== "toma") return true;
+  if ("image" in cambios && cambios.image !== clip.image) return true;
+  return "movimiento" in cambios && mov(cambios.movimiento) !== mov(clip.movimiento);
+}
+
 export function cambiar(clips: Clip[], i: number, cambios: Partial<Clip>): Clip[] {
   if (!dentro(clips, i)) return clips;
   const c = { ...cambios };

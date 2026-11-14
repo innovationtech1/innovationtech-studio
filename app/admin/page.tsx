@@ -157,6 +157,7 @@ function ResumenVideo() {
     encendido: boolean;
     gastoHoyCentavos: number;
     topeCentavos: number;
+    tomasPorNegocioDia: number;
     enProceso: number;
     enFila: number;
     fallos: { fecha: number; negocio: string; motivo: string }[];
@@ -170,8 +171,30 @@ function ResumenVideo() {
     setError("");
     const r = await pedir("/api/admin/video");
     setOcupado(false);
-    if (r.ok) setDatos(r.datos as unknown as Resumen);
-    else setError(String(r.datos.error ?? "No se pudo leer el resumen de video."));
+    if (r.ok) {
+      const d = r.datos as unknown as Resumen;
+      setDatos(d);
+      setTope(String(d.topeCentavos / 100));
+      setPorCliente(String(d.tomasPorNegocioDia));
+    } else setError(String(r.datos.error ?? "No se pudo leer el resumen de video."));
+  }
+  // Límites: cuánto se gasta como máximo al día y cuántas tomas puede generar un solo cliente al día
+  const [tope, setTope] = useState("");
+  const [porCliente, setPorCliente] = useState("");
+  const [guardado, setGuardado] = useState("");
+  async function guardarLimites() {
+    setOcupado(true);
+    setError("");
+    setGuardado("");
+    const r = await pedir("/api/admin/video", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topeDiarioCentavos: Math.round(Number(tope) * 100), tomasPorNegocioDia: Number(porCliente) }),
+    });
+    setOcupado(false);
+    if (!r.ok) return setError(String(r.datos.error ?? "No se pudieron guardar los límites."));
+    setGuardado("Límites guardados.");
+    setDatos((d) => (d ? { ...d, topeCentavos: Number(r.datos.topeCentavos), tomasPorNegocioDia: Number(r.datos.tomasPorNegocioDia) } : d));
   }
   const dolares = (c: number) => `$${(c / 100).toFixed(2)}`;
 
@@ -186,6 +209,20 @@ function ResumenVideo() {
           <p>
             {datos.encendido ? "Encendido" : "En pausa (falta configuración o VIDEO_IA=off)"} · Gasto de hoy:{" "}
             {dolares(datos.gastoHoyCentavos)} de {dolares(datos.topeCentavos)} · Generando: {datos.enProceso} · En fila: {datos.enFila}
+          </p>
+          <p>
+            <label>
+              Gasto máximo por día (USD){" "}
+              <input type="number" min={1} max={1000} step={1} value={tope} onChange={(e) => setTope(e.target.value)} style={{ width: 90 }} />
+            </label>{" "}
+            <label>
+              Tomas por cliente al día{" "}
+              <input type="number" min={1} max={500} step={1} value={porCliente} onChange={(e) => setPorCliente(e.target.value)} style={{ width: 70 }} />
+            </label>{" "}
+            <button className="btn ghost small" disabled={ocupado} onClick={() => void guardarLimites()}>
+              Guardar límites
+            </button>{" "}
+            {guardado}
           </p>
           {datos.fallos.length === 0 ? (
             <p>Sin fallos en los últimos 7 días.</p>

@@ -3,6 +3,7 @@ import "@fontsource-variable/bricolage-grotesque/opsz.css";
 import "@fontsource-variable/instrument-sans/index.css";
 import "./globals.css";
 import PwaSetup from "./pwa-setup";
+import EnlaceFijo from "./enlace-fijo";
 import { CuentasRaiz } from "./account-context";
 
 // Cuentas y planes: apagado mientras NEXT_PUBLIC_STUDIO_CUENTAS no sea "on" (la app queda igual que antes).
@@ -84,6 +85,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         {CUENTAS ? <CuentasRaiz>{children}</CuentasRaiz> : children}
+        <EnlaceFijo />
         <PwaSetup />
       </body>
     </html>
