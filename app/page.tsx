@@ -14,7 +14,10 @@ import { useDemo } from "@/lib/use-demo";
 import { getLang, installLangHeader, locale, setLang, startDomTranslation } from "@/lib/i18n";
 import { Bug, Languages, MessagesSquare } from "lucide-react";
 import MicButton from "./mic-button";
-import { Bot, CalendarDays, GalleryHorizontal, Clapperboard, Download, Eraser, Film, FolderOpen, ImageIcon, ImagePlus, Images, Palette, Pencil, PenLine, Plug, RefreshCw, Rocket, Scissors, Settings as SettingsIcon, Shapes, Trash2, type LucideIcon, Wand2 } from "lucide-react";
+import Director from "./director";
+import { AJUSTES_RAPIDOS, confirmarImagen, plataformaDe } from "@/lib/director-secciones";
+import { MAX_ORDEN } from "@/lib/orden";
+import { Bot, Undo2, CalendarDays, GalleryHorizontal, Clapperboard, Download, Eraser, Film, FolderOpen, ImageIcon, ImagePlus, Images, Palette, Pencil, PenLine, Plug, RefreshCw, Rocket, Scissors, Settings as SettingsIcon, Shapes, Trash2, type LucideIcon, Wand2 } from "lucide-react";
 import { CheckList, CloudflareCuenta, CloudflareWizard, testCloudflare, Welcome } from "./setup-wizard";
 import { EVENTO_AJUSTES } from "@/lib/limpiar-dispositivo";
 import { formatBytes, storageUsage, toDataUrl } from "@/lib/media-store";
@@ -492,23 +495,56 @@ function TextStudio({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  const encabezados: Record<string, string> =
+    settings.textProvider === "cloudflare"
+      ? { "content-type": "application/json", "x-cf-account": settings.cfAccountId, "x-cf-token": settings.cfToken }
+      : { "content-type": "application/json", "x-anthropic-key": settings.anthropicKey };
+  const modeloTexto = settings.textProvider === "cloudflare" ? settings.cfTextModel : settings.textModel;
+
+  // Director en Textos: después de crear, se le piden cambios al texto («más corto», «en inglés»…)
+  const [cambio, setCambio] = useState("");
+  const [antes, setAntes] = useState(""); // el texto anterior al último cambio, para deshacerlo
+  async function ajustar(orden: string) {
+    const o = orden.trim();
+    if (!o || !result || loading) return;
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/text", {
+        method: "POST",
+        headers: encabezados,
+        body: JSON.stringify({ mode: "ajustar", prompt: o, texto: result, provider: settings.textProvider, model: modeloTexto }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setAntes(result);
+      setResult(data.text);
+      setCambio("");
+    } catch (e) {
+      setError(friendlyError((e as Error).message));
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function generate() {
     setLoading(true);
     setError("");
     setResult("");
+    setAntes("");
+    // Si el texto nombra la red social («para Facebook»), se elige sola
+    const red = plataformaDe(prompt, REDES) ?? platform;
+    if (red !== platform) setPlatform(red);
     try {
       const res = await fetch("/api/text", {
         method: "POST",
-        headers:
-          settings.textProvider === "cloudflare"
-            ? { "content-type": "application/json", "x-cf-account": settings.cfAccountId, "x-cf-token": settings.cfToken }
-            : { "content-type": "application/json", "x-anthropic-key": settings.anthropicKey },
+        headers: encabezados,
         body: JSON.stringify({
           prompt,
-          platform,
+          platform: red,
           brand: brandContext(brand),
           provider: settings.textProvider,
-          model: settings.textProvider === "cloudflare" ? settings.cfTextModel : settings.textModel,
+          model: modeloTexto,
         }),
       });
       const data = await res.json();
@@ -534,12 +570,15 @@ function TextStudio({
           </button>
         )}
       </div>
-      <p className="hint">Describe tu campaña o publicación. La IA escribe el copy, ganchos, hashtags y las ideas visuales.</p>
+      <p className="hint">
+        Describe tu campaña o publicación. La IA escribe el copy, ganchos, hashtags y las ideas visuales. Si dices la red social («para
+        Facebook»), se elige sola.
+      </p>
       <div className="row">
         <div>
           <label>Plataforma</label>
           <select value={platform} onChange={(e) => setPlatform(e.target.value)}>
-            {["Instagram", "Facebook", "TikTok", "LinkedIn", "X (Twitter)", "YouTube", "Anuncio pagado", "Email"].map((p) => (
+            {REDES.map((p) => (
               <option key={p}>{p}</option>
             ))}
           </select>
@@ -564,6 +603,44 @@ function TextStudio({
       {result && (
         <>
           <pre className="result">{result}</pre>
+          <div className="dir">
+            <div className="dir-titulo">
+              <Wand2 size={18} aria-hidden />
+              <strong>¿Qué le cambio?</strong>
+              <span className="muted">Toca una opción o escribe o dicta el cambio.</span>
+            </div>
+            <div className="dir-ejemplos">
+              {AJUSTES_RAPIDOS.map((a) => (
+                <button type="button" key={a.nombre} className="btn ghost small" disabled={loading} onClick={() => void ajustar(a.orden)}>
+                  {a.nombre}
+                </button>
+              ))}
+            </div>
+            <div className="dir-fila">
+              <input
+                value={cambio}
+                maxLength={MAX_ORDEN}
+                disabled={loading}
+                onChange={(e) => setCambio(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && void ajustar(cambio)}
+                placeholder="Ej.: menciona que hay envío a domicilio"
+                aria-label="Cambio para el texto"
+              />
+              <MicButton
+                cfHeaders={{ "x-cf-account": settings.cfAccountId, "x-cf-token": settings.cfToken }}
+                disabled={loading}
+                onText={(t) => setCambio((c) => `${c} ${t}`.trim().slice(0, MAX_ORDEN))}
+              />
+              <button type="button" className="btn" disabled={loading || !cambio.trim()} onClick={() => void ajustar(cambio)}>
+                {loading ? "Cambiando…" : "Cambiar"}
+              </button>
+            </div>
+            {antes && (
+              <button type="button" className="btn ghost small" disabled={loading} onClick={() => (setResult(antes), setAntes(""))}>
+                <Undo2 size={15} aria-hidden /> Deshacer cambio
+              </button>
+            )}
+          </div>
           <div className="actions">
             <button className="btn ghost small" onClick={() => navigator.clipboard.writeText(result)}>
               Copiar todo
@@ -599,6 +676,8 @@ function TextStudio({
 }
 
 /* ---------------- Imágenes ---------------- */
+
+const REDES = ["Instagram", "Facebook", "TikTok", "LinkedIn", "X (Twitter)", "YouTube", "Anuncio pagado", "Email"];
 
 function ImageStudio({
   settings,
@@ -715,6 +794,60 @@ function ImageStudio({
     }
   }
 
+  // Director en Imágenes: la orden llena la descripción (en inglés), el formato y la cantidad; antes de gastar, pregunta
+  const [ordenando, setOrdenando] = useState(false);
+  const [porCrear, setPorCrear] = useState(0); // cuántas imágenes esperan el «sí» (0 = nada pendiente)
+  const [dicho, setDicho] = useState<{ mensaje: string; hecho: string[]; avisos: string[] } | null>(null);
+  const [previo, setPrevio] = useState<{ prompt: string; ratio: string; count: number; useBrand: boolean } | null>(null);
+  async function ordenar(orden: string): Promise<boolean> {
+    setOrdenando(true);
+    setError("");
+    try {
+      const res = await fetch("/api/text", {
+        method: "POST",
+        headers:
+          settings.textProvider === "cloudflare"
+            ? { "content-type": "application/json", "x-cf-account": settings.cfAccountId, "x-cf-token": settings.cfToken }
+            : { "content-type": "application/json", "x-anthropic-key": settings.anthropicKey },
+        body: JSON.stringify({
+          mode: "director_imagen",
+          prompt: orden,
+          actual: { descripcion: prompt, formato: ratio, cantidad: count, marca: useBrand, fotos: refs.length },
+          brand: brandContext(brand),
+          provider: settings.textProvider,
+          model: settings.textProvider === "cloudflare" ? settings.cfTextModel : settings.textModel,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setPrevio({ prompt, ratio, count, useBrand });
+      const hecho = ["Escribí la descripción en inglés"];
+      setPrompt(String(data.descripcion));
+      if (data.formato && data.formato !== ratio) (setRatio(data.formato), hecho.push(`Formato: ${data.formato}`));
+      const n = typeof data.cantidad === "number" ? data.cantidad : count;
+      if (n !== count) (setCount(n), hecho.push(n === 1 ? "Cantidad: 1 imagen" : `Cantidad: ${n} imágenes`));
+      if (typeof data.marca === "boolean" && data.marca !== useBrand) (setUseBrand(data.marca), hecho.push(data.marca ? "Con tus colores" : "Sin tus colores"));
+      setDicho({ mensaje: String(data.mensaje ?? ""), hecho, avisos: [] });
+      setPorCrear(n);
+      return true;
+    } catch (e) {
+      setError(friendlyError((e as Error).message));
+      return false;
+    } finally {
+      setOrdenando(false);
+    }
+  }
+  function deshacerOrden() {
+    if (!previo) return;
+    setPrompt(previo.prompt);
+    setRatio(previo.ratio);
+    setCount(previo.count);
+    setUseBrand(previo.useBrand);
+    setPrevio(null);
+    setDicho(null);
+    setPorCrear(0);
+  }
+
   // Al abrir una herramienta de recorte (sus botones están abajo), la pantalla sube a donde aparece
   useEffect(() => {
     if (cutSrc || shapeSrc) window.scrollTo({ top: 0, behavior: "smooth" });
@@ -787,6 +920,19 @@ function ImageStudio({
         Funciona mejor si describes la imagen en inglés, con estilo, luz y composición. Proveedor:{" "}
         <strong>{settings.imageProvider === "cloudflare" ? "Cloudflare (gratis)" : "Replicate"}</strong>
       </p>
+      <Director
+        titulo="¿Qué imagen quieres?"
+        ayuda="Dilo con tus palabras, escrito o dictado. La IA escribe la descripción en inglés y elige formato y cantidad. Antes de crear, te pregunta."
+        ejemplo="Ej.: una torta en mesa rústica con luz cálida, vertical para historia, 2 opciones"
+        ejemplos={["Foto de mi producto estrella para un post", "Historia vertical anunciando una promoción", "Ahora con luz más cálida y 2 opciones"]}
+        textoDeshacer="Deshacer orden"
+        ocupado={ordenando || loading}
+        cfHeaders={{ "x-cf-account": settings.cfAccountId, "x-cf-token": settings.cfToken }}
+        onEnviar={ordenar}
+        confirmar={porCrear > 0 ? { texto: confirmarImagen(porCrear), onSi: () => (setPorCrear(0), void generate()), onNo: () => setPorCrear(0) } : null}
+        resultado={dicho}
+        onDeshacer={previo ? deshacerOrden : null}
+      />
       <label>{refs.length > 0 ? "¿Qué hacer con tus imágenes?" : "Descripción de la imagen"}</label>
       <textarea
         value={prompt}
