@@ -448,6 +448,19 @@ export default function Home() {
         <footer>
           Proyecto open source de InnovationTECH, licencia MIT. Tus claves se guardan solo en tu navegador.
           <span className="footer-links">
+            {/* Instalar como app: vuelve a mostrar la barra de instalación aunque se haya cerrado antes */}
+            <a href="#" onClick={(e) => (e.preventDefault(), window.dispatchEvent(new Event("its-instalar")))}>
+              Instalar la app
+            </a>
+            <a href="/terminos" target="_blank" rel="noreferrer">
+              Términos
+            </a>
+            <a href="/privacidad" target="_blank" rel="noreferrer">
+              Privacidad
+            </a>
+            <a href="/creditos" target="_blank" rel="noreferrer">
+              Créditos y licencias
+            </a>
             <a href="https://github.com/innovationtech1/innovationtech-studio" target="_blank" rel="noreferrer">
               GitHub
             </a>
