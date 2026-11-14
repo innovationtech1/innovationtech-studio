@@ -22,7 +22,7 @@ Cada persona usa **sus propias claves de API** y paga solo lo que genera. El có
 | 🎞️ Reels (gratis) | Reels animados con tus imágenes: zoom y movimiento, transiciones, textos en pantalla, cierre con tu marca y logo, **voz en off con IA**. **Línea de tiempo**: cada foto es un clip que se mueve, se duplica o se borra, con su propia duración (1.5 a 15 s) y su texto (arriba, centro o abajo; chico, normal o grande), videos de hasta 2 minutos, deshacer y rehacer, y vista previa sin grabar. **Videos propios**: un clip puede ser un video grabado con la cámara de Studio (hasta 1 minuto, con sonido), subido (hasta 100 MB) o de tu galería; se recorta, se divide, cambia de velocidad, lleva su sonido (con interruptor y volumen) y se le puede congelar un cuadro como foto; los videos se quedan en tu dispositivo. **Tomas con IA por clip**: anima o rehace una sola foto, vuelve a la toma anterior, estira la toma (cámara lenta o repetir) y usa hasta 8 fotos animadas por video; duplicar o volver a grabar no cuesta. **Varios videos guardados**: hasta 20 proyectos con nombre en tu dispositivo, y **portada** del video terminado para descargar como imagen. **Transiciones y sonido**: 25 transiciones entre clips en seis grupos (básicas, movimiento en cuatro direcciones, formas, zoom y giro, efectos y la exclusiva «Ráfaga de marca», que usa el color de la marca), con duración rápida, normal o lenta, «aplicar a todos» y «sorpréndeme», efecto de sonido al empezar un clip y música con tu propia canción. **Exportación rápida**: los videos hechos de fotos se codifican cuadro por cuadro (WebCodecs + `mp4-muxer`), varias veces más rápido que el tiempo real; con clips de video o en navegadores sin soporte se graba en vivo como siempre. **Director con IA**: escribe o dicta una orden («hazme un video de 30 segundos de mi promo», «quita el clip 2», «baja la música») y la IA arma o corrige el video; confirma antes de gastar imágenes o voz y usa pocas imágenes de 7 a 10 s cada una. Se crean en el navegador, sin costo ni límite. Exporta MP4 (o WebM en algunos navegadores) | Navegador + Cloudflare Workers AI (textos, imágenes y voz gratis) |
 | ✂️ Editor de video | Une videos y fotos; recortar, dividir, reordenar, duplicar, velocidad (0.5x–2x), volumen, encuadre, 8 filtros, 6 transiciones, textos animados, formatos 9:16, 1:1 y 16:9; el proyecto se guarda en el dispositivo | Navegador (gratis) |
 | 🎵 Música gratis | La app **compone música original sin derechos de autor** a la medida del video, en **20 estilos** agrupados por ánimo: alegre (pop, house, funk disco, divertida, fiestas, corporativo), latina (latino pop, reguetón, cumbia, norteño), tranquila (bossa nova, lo-fi, acústico, inspiradora, romántica) e intensa (electrónica, hip-hop/trap, rock, épico, suspenso). Cada «otra versión» cambia tempo, tono, ritmo, instrumentos y melodía, y la canción se arma por secciones (intro, verso, coro, puente y final). También puedes subir tu propia canción. En el Creador de Reels baja sola cuando habla la voz | Navegador (gratis) |
-| 🎬 Video con IA (opcional) | Clips generados por IA desde texto o animando una foto | Modelos de video en Replicate (de pago) |
+| 🎬 Video con IA (con cuenta) | Anima las fotos de tus clips con movimiento real, dentro del Creador de Reels | fal.ai (se configura en el servidor) |
 | 🎨 Mi marca | Logo, paleta de colores, letra de títulos, contacto, giro, público y tono. La IA la usa en cada pedido y en el editor y los reels se aplica con un toque | — |
 | 🧩 Plantillas | 14 diseños por giro (comida, belleza, bienes raíces, tiendas, eventos, servicios) que salen con tu marca; los títulos se ajustan solos | Navegador |
 | 💬 Asistente | Chat de marketing que recuerda la conversación, responde en tiempo real y acepta cambios con un toque (más corto, más formal, variantes…); dictado por voz, leer en voz alta, llevar al editor y crear la imagen; conversaciones guardadas en el dispositivo | Cloudflare Workers AI (gratis) o Claude |
@@ -47,7 +47,7 @@ El flujo ideal: escribes la idea en **Textos**, la IA te da el copy y las descri
 
 1. **Cloudflare Workers AI (textos e imágenes gratis):** crea una cuenta gratuita en <https://dash.cloudflare.com>, entra a *AI → Workers AI → Use REST API*, copia tu **Account ID** y crea un **token de Workers AI**. Los mismos datos sirven para textos e imágenes. El plan gratuito da una cantidad de uso diaria, compartida entre textos e imágenes, que se reinicia a medianoche UTC.
 2. **Anthropic (textos de pago, opcional):** crea una cuenta en <https://console.anthropic.com>, compra crédito en *Plans & Billing* y genera una API key. La suscripción de Claude.ai no incluye crédito de API.
-3. **Replicate (videos, e imágenes de pago):** crea una cuenta en <https://replicate.com>, compra crédito en *Billing* y copia tu token en *Account → API tokens*.
+3. **Replicate (opcional, imágenes de pago):** crea una cuenta en <https://replicate.com>, compra crédito en *Billing* y copia tu token en *Account → API tokens*.
 
 Luego, dentro de la app, ve a **⚙️ Configuración**, elige los proveedores de textos e imágenes, pega tus claves y guarda. Con solo Cloudflare ya puedes crear textos e imágenes sin pagar nada.
 
@@ -90,7 +90,6 @@ Abre <http://localhost:3000>.
 En **Configuración** puedes escribir cualquier modelo de Replicate, por ejemplo uno open source más nuevo:
 
 - Imagen: `black-forest-labs/flux-schnell` (rápido y barato), `black-forest-labs/flux-dev`, u otro.
-- Video: `minimax/video-01` por defecto; busca en <https://replicate.com/explore> la sección *video* para ver los modelos actuales.
 - Texto: `claude-sonnet-5-5` por defecto; puedes usar cualquier modelo de Claude disponible en tu cuenta.
 
 Los modelos usan el formato `dueño/nombre` o `dueño/nombre:version`. Si un modelo de video no acepta imagen inicial, deja ese campo vacío.
@@ -106,7 +105,6 @@ app/
   reel-studio.tsx         Creador de reels
   linea-tiempo.tsx        Fila de clips del Creador de reels (mover, duplicar, borrar, duración y texto por clip)
   director.tsx            Director con IA: órdenes escritas o dictadas para armar y corregir el reel
-  video-editor.tsx        Editor de video, stickers y subtítulos automáticos
   content-calendar.tsx    Calendario de contenido
   carousel-studio.tsx     Carrusel para Instagram
   setup-wizard.tsx        Asistente para conectar Cloudflare y bienvenida
@@ -114,7 +112,6 @@ app/
   api/image/              Imágenes (Cloudflare o Replicate)
   api/voice/              Voz en off (Cloudflare MeloTTS)
   api/transcribe/         Subtítulos automáticos (Cloudflare Whisper)
-  api/video/              Video con IA (Replicate)
   api/cf-test/, api/status/  «Probar conexión» y modo demo
 lib/
   brand.ts                Kit de marca
@@ -122,7 +119,7 @@ lib/
   templates.ts            Plantillas por giro
   carousel.ts             Diseño de las diapositivas del carrusel
   captions.ts             Subtítulos palabra por palabra
-  video-engine.ts, reel.ts, music.ts   Video, reels y música generada
+  reel.ts, music.ts       Reels y música generada
   linea-tiempo.ts, historial.ts        Clips del reel y deshacer/rehacer (lógica pura, con pruebas)
   proyectos.ts            Varios videos guardados en el dispositivo (lógica pura, con pruebas)
   reel-transicion.ts, reel-transicion-dibujo.ts   Catálogo de transiciones (puro, con pruebas) y cómo se dibuja cada una
