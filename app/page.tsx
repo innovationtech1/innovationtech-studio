@@ -715,60 +715,21 @@ function ImageStudio({
     }
   }
 
+  // Al abrir una herramienta de recorte (sus botones están abajo), la pantalla sube a donde aparece
+  useEffect(() => {
+    if (cutSrc || shapeSrc) window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [cutSrc, shapeSrc]);
+  // «Usar mis fotos» se abre solo cuando ya hay fotos puestas (o llega una desde otra sección)
+  const [fotosAbierto, setFotosAbierto] = useState(refs.length > 0);
+  useEffect(() => {
+    if (refs.length > 0) setFotosAbierto(true);
+  }, [refs.length]);
   return (
     <>
-    {/* ---------- Remover fondo ---------- */}
+    {/* ---------- Herramienta de recorte abierta y sus resultados ---------- */}
+    {(cutSrc || shapeSrc || cutResults.length > 0) && (
     <section className="card">
-      <div className="card-head">
-        <div>
-          <h2>Recortar, quitar fondo y borrar</h2>
-          <p className="hint" style={{ margin: 0 }}>
-            Quita el fondo, recorta con figuras modernas (círculo, arco, corazón, estrella…) o borra a mano zonas. Se descarga en PNG
-            transparente. Gratis, en tu dispositivo.
-          </p>
-        </div>
-        <div className="actions">
-          <label className="btn" style={{ margin: 0 }}>
-            <ImagePlus size={16} aria-hidden /> Quitar fondo
-            <input
-              type="file"
-              accept="image/*"
-              hidden
-              onChange={async (e) => {
-                const f = e.target.files?.[0];
-                e.target.value = "";
-                if (f) (setShapeSrc(null), setCutEraser(false), setCutSrc(await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png")));
-              }}
-            />
-          </label>
-          <label className="btn ghost" style={{ margin: 0 }}>
-            <Shapes size={16} aria-hidden /> Recortar con forma
-            <input
-              type="file"
-              accept="image/*"
-              hidden
-              onChange={async (e) => {
-                const f = e.target.files?.[0];
-                e.target.value = "";
-                if (f) (setCutSrc(null), setShapeSrc(await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png")));
-              }}
-            />
-          </label>
-          <label className="btn ghost" style={{ margin: 0 }}>
-            <Eraser size={16} aria-hidden /> Borrador
-            <input
-              type="file"
-              accept="image/*"
-              hidden
-              onChange={async (e) => {
-                const f = e.target.files?.[0];
-                e.target.value = "";
-                if (f) (setShapeSrc(null), setCutEraser(true), setCutSrc(await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png")));
-              }}
-            />
-          </label>
-        </div>
-      </div>
+      <h2>Recortar, quitar fondo y borrar</h2>
       {cutSrc && (
         <BgRemover
           src={cutSrc}
@@ -818,6 +779,7 @@ function ImageStudio({
         </div>
       )}
     </section>
+    )}
 
     <section className="card">
       <h2>Crear imágenes</h2>
@@ -825,7 +787,21 @@ function ImageStudio({
         Funciona mejor si describes la imagen en inglés, con estilo, luz y composición. Proveedor:{" "}
         <strong>{settings.imageProvider === "cloudflare" ? "Cloudflare (gratis)" : "Replicate"}</strong>
       </p>
-      <label>Imágenes de referencia (opcional)</label>
+      <label>{refs.length > 0 ? "¿Qué hacer con tus imágenes?" : "Descripción de la imagen"}</label>
+      <textarea
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        placeholder={
+          refs.length > 0
+            ? "Ej.: place this torta on a rustic wooden table, warm restaurant light, food photography"
+            : "Ej.: appetizing Mexican torta on a rustic wooden table, warm light, food photography, close-up"
+        }
+      />
+      <details className="plegable" open={fotosAbierto} onToggle={(e) => setFotosAbierto(e.currentTarget.open)}>
+        <summary>
+          <strong>Usar mis fotos (opcional)</strong>
+          <span className="muted">{refs.length > 0 ? (refs.length === 1 ? "1 foto" : `${refs.length} fotos`) : "Subir, tomar foto o elegir de la galería"}</span>
+        </summary>
       <div className="upload">
         {refs.map((r, i) => (
           <div className="thumb" key={i}>
@@ -871,16 +847,13 @@ function ImageStudio({
           ? "La IA usará tus fotos como base. Describe qué quieres: por ejemplo, «put this product on a wooden table with warm light» o «same person, now in a professional studio portrait»."
           : `Sube hasta ${maxRefs} foto(s) de tu producto, local o logo para crear imágenes a partir de ellas, o déjalo vacío para crear desde cero.`}
       </p>
-      <label>{refs.length > 0 ? "¿Qué hacer con tus imágenes?" : "Descripción de la imagen"}</label>
-      <textarea
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        placeholder={
-          refs.length > 0
-            ? "Ej.: place this torta on a rustic wooden table, warm restaurant light, food photography"
-            : "Ej.: appetizing Mexican torta on a rustic wooden table, warm light, food photography, close-up"
-        }
-      />
+      </details>
+      <details className="plegable">
+        <summary>
+          <strong>Formato y opciones</strong>
+          <span className="muted" data-no-translate>{`${ratio} · ${count} · `}</span>
+          <span className="muted">{useBrand ? "Con mis colores" : "Sin mis colores"}</span>
+        </summary>
       <div className="row">
         <div>
           <label>Formato</label>
@@ -907,9 +880,12 @@ function ImageStudio({
           </select>
         </div>
       </div>
+      </details>
+      <div className="actions" style={{ marginTop: 14 }}>
       <button className="btn" disabled={loading || !prompt} onClick={() => generate()}>
         {loading ? "Generando… (hasta 1 min)" : "Generar imagen"}
       </button>
+      </div>
       {error && (
         <div className="error">
           {error}
@@ -975,6 +951,59 @@ function ImageStudio({
         </div>
       )}
     </section>
+
+    {/* ---------- Recortar, quitar fondo y borrar: plegado hasta que se necesita ---------- */}
+    <details className="plegable img-herramientas">
+      <summary>
+        <strong>Recortar, quitar fondo y borrar</strong>
+        <span className="muted">Gratis, en tu dispositivo</span>
+      </summary>
+      <p className="hint">
+        Quita el fondo, recorta con figuras modernas (círculo, arco, corazón, estrella…) o borra a mano zonas. Se descarga en PNG
+        transparente.
+      </p>
+      <div className="actions">
+          <label className="btn" style={{ margin: 0 }}>
+            <ImagePlus size={16} aria-hidden /> Quitar fondo
+            <input
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) (setShapeSrc(null), setCutEraser(false), setCutSrc(await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png")));
+              }}
+            />
+          </label>
+          <label className="btn ghost" style={{ margin: 0 }}>
+            <Shapes size={16} aria-hidden /> Recortar con forma
+            <input
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) (setCutSrc(null), setShapeSrc(await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png")));
+              }}
+            />
+          </label>
+          <label className="btn ghost" style={{ margin: 0 }}>
+            <Eraser size={16} aria-hidden /> Borrador
+            <input
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) (setShapeSrc(null), setCutEraser(true), setCutSrc(await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png")));
+              }}
+            />
+          </label>
+      </div>
+    </details>
     </>
   );
 }
