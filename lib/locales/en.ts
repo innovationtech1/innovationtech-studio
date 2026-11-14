@@ -1351,6 +1351,14 @@ export const EN: Record<string, string> = {
   "Límites guardados.": "Limits saved.",
   "Replicate (opcional)": "Replicate (optional)",
   "Clave de Replicate (solo si eliges Replicate para tus imágenes) — replicate.com/account/api-tokens": "Replicate key (only if you choose Replicate for your images) — replicate.com/account/api-tokens",
+  "Usar mis fotos (opcional)": "Use my photos (optional)",
+  "Subir, tomar foto o elegir de la galería": "Upload, take a photo or pick from the gallery",
+  "1 foto": "1 photo",
+  "Formato y opciones": "Format and options",
+  "Con mis colores": "With my colors",
+  "Sin mis colores": "Without my colors",
+  "Gratis, en tu dispositivo": "Free, on your device",
+  "Quita el fondo, recorta con figuras modernas (círculo, arco, corazón, estrella…) o borra a mano zonas. Se descarga en PNG transparente.": "Remove the background, crop with modern shapes (circle, arch, heart, star…) or erase areas by hand. Downloads as a transparent PNG.",
 };
 
 // Textos con números u otras partes que cambian
@@ -1458,4 +1466,5 @@ export const EN_PATTERNS: [RegExp, string][] = [
   [/^Hoy puedes generar (\d+) (toma|tomas) más con IA \(el límite es de (\d+) al día\)\. Mañana puedes seguir\.$/, "You can generate $1 more AI take(s) today (the limit is $3 per day). You can continue tomorrow."],
   [/^Llegaste al límite de hoy: (\d+) tomas con IA\. Mañana puedes seguir; tus créditos no se pierden\.$/, "You've reached today's limit: $1 AI takes. You can continue tomorrow; your credits aren't lost."],
   [/^Hasta (\d+) por día$/, "Up to $1 per day"],
+  [/^(\d+) fotos$/, "$1 photos"],
 ];
