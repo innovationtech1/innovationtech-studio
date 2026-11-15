@@ -37,6 +37,17 @@ test("PRIVACIDAD menciona a fal.ai (video con IA) y el almacenamiento de fotos y
   }
 });
 
+test("TERMINOS: el contenido es responsabilidad del usuario, se cobra en dólares y cada cobro lleva factura, en es y en", () => {
+  for (const lang of ["es", "en"] as const) {
+    const texto = JSON.stringify(TERMINOS[lang]);
+    assert.match(texto, /(no se hace responsable del contenido|is not responsible for the content)/, `${lang}: contenido`);
+    assert.match(texto, /(guiones|scripts)/, `${lang}: guiones`);
+    assert.match(texto, /USD/, `${lang}: dólares`);
+    assert.match(texto, /Cash App de InnovationTECH|InnovationTECH Cash App/, `${lang}: Cash App`);
+    assert.match(texto, /(factura|invoice)/, `${lang}: factura`);
+  }
+});
+
 // ---------- Créditos y licencias ----------
 
 test("CREDITOS: es y en con las mismas secciones y sin textos vacíos", () => revisar("CREDITOS", CREDITOS));
