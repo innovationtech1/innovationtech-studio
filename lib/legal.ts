@@ -289,7 +289,7 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
   },
   en: {
     titulo: "Privacy Policy",
-    actualizado: "Last updated: November 10, 2026",
+    actualizado: "Last updated: November 15, 2026",
     secciones: [
       {
         titulo: "1. Who is responsible",
