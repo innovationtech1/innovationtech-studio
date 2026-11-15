@@ -1405,6 +1405,10 @@ export const EN: Record<string, string> = {
   "No pudimos cancelar tu suscripción, así que no borramos nada. Intenta de nuevo en un momento.": "We couldn't cancel your subscription, so nothing was deleted. Try again in a moment.",
   "No se pudo borrar la cuenta. Intenta de nuevo.": "The account couldn't be deleted. Try again.",
   "Cobrar impuesto sobre ventas (Stripe Tax)": "Charge sales tax (Stripe Tax)",
+  "No se pudo guardar una de tus fotos en este dispositivo. Puedes crear tu video ahora; si cierras la app, vuelve a poner esa foto.": "One of your photos couldn't be saved on this device. You can create your video now; if you close the app, add that photo again.",
+  "Tu navegador no dejó guardar en este dispositivo; suele pasar en modo privado o incógnito. Puedes crear tu video ahora, pero si cierras la app eso no estará al volver. Abre Studio en una ventana normal o instálala como app.": "Your browser didn't allow saving on this device; this usually happens in private or incognito mode. You can create your video now, but if you close the app it won't be here when you return. Open Studio in a normal window or install it as an app.",
+  "La voz no se pudo generar. Intenta de nuevo; si se repite, usa un guion más corto.": "The voice couldn't be generated. Try again; if it happens again, use a shorter script.",
+  "La voz no se pudo generar. Intenta de nuevo.": "The voice couldn't be generated. Try again.",
 };
 
 // Textos con números u otras partes que cambian
@@ -1519,4 +1523,5 @@ export const EN_PATTERNS: [RegExp, string][] = [
   [/^Las otras (\d+) personas de tu equipo pierden el acceso\.$/, "The other $1 people on your team lose access."],
   [/^Para confirmar, escribe (\w+)$/, "To confirm, type $1"],
   [/^Para borrar tu cuenta escribe (\w+)\.$/, "To delete your account type $1."],
+  [/^No hay espacio para guardar en tu dispositivo \(ocupado: (\d+ MB) de (\d+ MB)\)\. Puedes crear tu video ahora, pero si cierras la app eso no estará al volver\. Para liberar espacio borra proyectos o videos de la Galería que ya no uses\.$/, "There's no space to save on your device (used: $1 of $2). You can create your video now, but if you close the app it won't be here when you return. To free up space, delete projects or Gallery videos you no longer use."],
 ];

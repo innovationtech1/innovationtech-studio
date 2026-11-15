@@ -7,8 +7,8 @@ import { fileToResizedDataUrl } from "@/lib/resize";
 import { ReelFormat, ReelOptions, renderReel, supportedRecording, vistaPrevia } from "@/lib/reel";
 import type { Item, Settings } from "@/lib/types";
 import { clearDrafts, usePersistentState } from "@/lib/persist";
-import { deleteFile, getFile, putFile, toBlob, toDataUrl } from "@/lib/media-store";
-import { AVISO_SIN_ESPACIO, guardarConfirmado } from "@/lib/guardado";
+import { deleteFile, getFile, putFile, storageUsage, toBlob, toDataUrl } from "@/lib/media-store";
+import { avisoDeGuardado, guardarConfirmado, type FalloGuardado } from "@/lib/guardado";
 
 const blobToDataUrl = (b: Blob) =>
   new Promise<string>((res, rej) => {
@@ -179,7 +179,9 @@ export default function ReelStudio({
   const restored = useRef(false);
   const [recuperado, setRecuperado] = useState(false); // ya se recuperaron las fotos guardadas
   const [avisosVideo, setAvisosVideo] = useState<string[]>([]); // lo que no salió como se pidió en el último video
-  const [sinEspacio, setSinEspacio] = useState(false); // un guardado en el dispositivo no entró
+  const [avisoGuardado, setAvisoGuardado] = useState(""); // un guardado en el dispositivo no entró: qué decirle
+  // Dice la causa real: sin espacio (con cuánto hay ocupado), navegador en modo privado, o una foto que no se pudo leer
+  const noSeGuardo = (causa: FalloGuardado) => void storageUsage().then((uso) => setAvisoGuardado(avisoDeGuardado(causa, uso)));
   const guardando = useRef(new Map<string, string>()); // id del clip → foto que se está guardando
   const noGuardadas = useRef(new Map<string, string>()); // id del clip → foto que no se pudo guardar (no se reintenta sola)
 
@@ -290,9 +292,10 @@ export default function ReelStudio({
           vigente: () => clipsRef.current.some((x) => x.id === sc.id && x.image === imagen),
         });
         if (guardando.current.get(sc.id) === imagen) guardando.current.delete(sc.id);
-        if (r === "fallo") {
+        if (r === "sin_leer" || r === "sin_espacio") {
           noGuardadas.current.set(sc.id, imagen);
-          setSinEspacio(true);
+          // Una imagen que es un enlace de internet no necesita copia: el enlace mismo queda guardado en el proyecto
+          if (!(r === "sin_leer" && /^https?:/.test(imagen))) noSeGuardo(r);
           return;
         }
         if (r !== "ok") return;
@@ -434,7 +437,7 @@ export default function ReelStudio({
       if (anterior) deleteFile(anterior).catch(() => {});
       if (r === "ok") return setVozArchivo({ id });
       setVozArchivo(null);
-      setSinEspacio(true);
+      noSeGuardo(r === "sin_leer" ? "sin_leer" : "sin_espacio");
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voice]);
@@ -596,8 +599,9 @@ export default function ReelStudio({
         headers: { "content-type": "application/json", ...cfHeaders },
         body: JSON.stringify({ text: texto, lang: getLang(), voice: voz }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      // Si el servidor responde vacío (se cortó), se dice algo claro en vez de un error técnico
+      const data = await res.json().catch(() => ({ error: "La voz no se pudo generar. Intenta de nuevo; si se repite, usa un guion más corto." }));
+      if (!res.ok || !data.audio) throw new Error(data.error || "La voz no se pudo generar. Intenta de nuevo.");
       audio = data.audio as string;
       vocesHechas.current.set(llave, audio);
     }
@@ -1345,7 +1349,7 @@ export default function ReelStudio({
             // La canción propia también se quita del dispositivo (si no, se queda ocupando espacio)
             if (cancionPropia?.id) deleteFile(cancionPropia.id).catch(() => {});
             setCancionPropia(null);
-            setSinEspacio(false);
+            setAvisoGuardado("");
             setAvisosVideo([]);
             setResult(null);
             setError("");
@@ -1740,10 +1744,10 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
             {a}
           </div>
         ))}
-        {sinEspacio && (
+        {avisoGuardado && (
           <div className="notice">
-            {AVISO_SIN_ESPACIO}{" "}
-            <button className="btn ghost small" onClick={() => setSinEspacio(false)}>
+            {avisoGuardado}{" "}
+            <button className="btn ghost small" onClick={() => setAvisoGuardado("")}>
               Entendido
             </button>
           </div>
