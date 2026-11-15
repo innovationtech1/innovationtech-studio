@@ -212,7 +212,7 @@ export const TERMINOS: Record<"es" | "en", DocumentoLegal> = {
 export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
   es: {
     titulo: "Política de privacidad",
-    actualizado: "Última actualización: 10 de noviembre de 2026",
+    actualizado: "Última actualización: 15 de noviembre de 2026",
     secciones: [
       {
         titulo: "1. Quién es responsable",
@@ -256,13 +256,14 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
       {
         titulo: "6. Cuánto tiempo los guardamos",
         parrafos: [
-          "Mientras tengas una cuenta. Si nos pides borrarla, eliminamos los datos de tu cuenta y de tu negocio en un plazo razonable, salvo lo que debamos conservar por ley (por ejemplo, registros de pagos).",
+          "Mientras tengas una cuenta. Puedes borrarla tú en cualquier momento desde Mi cuenta → «Borrar mi cuenta»: se cancela tu suscripción y eliminamos los datos de tu cuenta y de tu negocio, incluidas las fotos y los clips de video con IA guardados en nuestro almacenamiento. Si eres el dueño del negocio, las personas de tu equipo pierden el acceso.",
+          "Después de borrar la cuenta conservamos solo lo que debemos guardar por ley (por ejemplo, registros de pagos), sin tu nombre ni tu correo, y una huella cifrada de tu correo que no permite reconstruirlo; sirve únicamente para no volver a dar la prueba gratis al mismo correo.",
         ],
       },
       {
         titulo: "7. Tus derechos",
         parrafos: [
-          `Puedes pedirnos ver, corregir o borrar tus datos. El dueño del negocio puede desconectar la cuenta de Cloudflare en cualquier momento desde Mi cuenta. Escríbenos a ${CONTACTO_LEGAL}; te responderemos en un plazo razonable.`,
+          `Puedes borrar tu cuenta y tus datos tú mismo desde Mi cuenta → «Borrar mi cuenta». También puedes pedirnos ver o corregir tus datos, o que los borremos por ti: escríbenos a ${CONTACTO_LEGAL} y te responderemos en un plazo razonable. El dueño del negocio puede desconectar la cuenta de Cloudflare en cualquier momento desde Mi cuenta.`,
           "Al cerrar sesión puedes pedir que Studio borre de ese navegador tus claves guardadas, tu galería y «Mi marca». Hazlo si usas un dispositivo compartido.",
         ],
       },
@@ -332,13 +333,14 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
       {
         titulo: "6. How long we keep it",
         parrafos: [
-          "While you have an account. If you ask us to delete it, we remove your account and business data within a reasonable time, except what we must keep by law (for example, payment records).",
+          "While you have an account. You can delete it yourself at any time from My account → “Delete my account”: your subscription is canceled and we remove your account and business data, including the photos and AI video clips kept in our storage. If you are the business owner, the people on your team lose access.",
+          "After the account is deleted we keep only what we must keep by law (for example, payment records), without your name or email, and an encrypted fingerprint of your email that cannot be turned back into it; it is used only so the same email does not get the free trial again.",
         ],
       },
       {
         titulo: "7. Your rights",
         parrafos: [
-          `You can ask us to access, correct or delete your data. The business owner can disconnect the Cloudflare account at any time from My account. Write to ${CONTACTO_LEGAL}; we will reply within a reasonable time.`,
+          `You can delete your account and your data yourself from My account → “Delete my account”. You can also ask us to access or correct your data, or to delete it for you: write to ${CONTACTO_LEGAL} and we will reply within a reasonable time. The business owner can disconnect the Cloudflare account at any time from My account.`,
           "When you sign out you can ask Studio to delete your saved keys, your gallery and “My brand” from that browser. Do this if you use a shared device.",
         ],
       },
