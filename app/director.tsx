@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Send, Undo2, Wand2 } from "lucide-react";
 import MicButton from "./mic-button";
-import { MAX_ORDEN } from "@/lib/director";
+import { MAX_ORDEN } from "@/lib/orden";
 
 const EJEMPLOS = [
   "Hazme un video de mi promoción de esta semana",
@@ -21,7 +21,18 @@ export default function Director({
   resultado,
   onDeshacer,
   sugerida,
+  titulo = "¿Qué video quieres?",
+  ayuda = "Escribe o dicta tu idea y la IA arma el video. Después pídele cambios aquí mismo.",
+  ejemplo = "Ej.: Hazme un video de 30 segundos de mi promoción de esta semana",
+  ejemplos = EJEMPLOS,
+  textoDeshacer = "Deshacer orden",
 }: {
+  // Textos de la sección donde vive (por defecto, los de Videos)
+  titulo?: string;
+  ayuda?: string;
+  ejemplo?: string;
+  ejemplos?: string[];
+  textoDeshacer?: string;
   sugerida?: { text: string; n: number } | null; // un tema que llega de otra sección (calendario, asistente): queda escrito, listo para enviar
   ocupado: boolean;
   cfHeaders: Record<string, string>;
@@ -47,8 +58,8 @@ export default function Director({
     <div className="dir">
       <div className="dir-titulo">
         <Wand2 size={18} aria-hidden />
-        <strong>¿Qué video quieres?</strong>
-        <span className="muted">Escribe o dicta tu idea y la IA arma el video. Después pídele cambios aquí mismo.</span>
+        <strong>{titulo}</strong>
+        <span className="muted">{ayuda}</span>
       </div>
       <div className="dir-fila">
         <input
@@ -57,7 +68,7 @@ export default function Director({
           disabled={ocupado}
           onChange={(e) => (setDictando(""), setOrden(e.target.value))}
           onKeyDown={(e) => e.key === "Enter" && enviar()}
-          placeholder="Ej.: Hazme un video de 30 segundos de mi promoción de esta semana"
+          placeholder={ejemplo}
           aria-label="Orden para la IA"
         />
         <MicButton
@@ -72,7 +83,7 @@ export default function Director({
       </div>
       {!resultado && !confirmar && (
         <div className="dir-ejemplos">
-          {EJEMPLOS.map((e) => (
+          {ejemplos.map((e) => (
             <button type="button" key={e} className="btn ghost small" disabled={ocupado} onClick={() => setOrden(e)}>
               {e}
             </button>
@@ -109,7 +120,7 @@ export default function Director({
           ))}
           {onDeshacer && (
             <button type="button" className="btn ghost small" disabled={ocupado} onClick={onDeshacer}>
-              <Undo2 size={15} aria-hidden /> Deshacer orden
+              <Undo2 size={15} aria-hidden /> {textoDeshacer}
             </button>
           )}
         </div>

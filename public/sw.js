@@ -20,7 +20,7 @@ async function trim(cache) {
 const SHELL = ["/", "/offline.html", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/favicon.ico"];
 // Términos y Privacidad (lib/rutas-publicas.ts): se guardan con su propia dirección para que nunca
 // reemplacen la copia de la app ("/") ni se abra la app en su lugar sin conexión.
-const LEGALES = ["/terminos", "/privacidad"];
+const LEGALES = ["/terminos", "/privacidad", "/creditos"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

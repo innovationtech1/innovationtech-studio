@@ -15,6 +15,7 @@ export default function PwaSetup() {
   const [installed, setInstalled] = useState(false);
   const [showIosHelp, setShowIosHelp] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const [pedida, setPedida] = useState(false); // la persona tocó «Instalar la app» en el pie de la página
 
   useEffect(() => {
     if ("serviceWorker" in navigator) {
@@ -44,18 +45,45 @@ export default function PwaSetup() {
       setInstalled(true);
       setInstallEvent(null);
     };
+    // «Instalar la app» (pie de la página): la barra vuelve aunque se haya cerrado antes
+    const onPedida = () => {
+      setPedida(true);
+      setDismissed(false);
+      if (ios) setShowIosHelp(true);
+    };
+    window.addEventListener("its-instalar", onPedida);
     window.addEventListener("beforeinstallprompt", onPrompt);
     window.addEventListener("appinstalled", onInstalled);
     return () => {
+      window.removeEventListener("its-instalar", onPedida);
       window.removeEventListener("beforeinstallprompt", onPrompt);
       window.removeEventListener("appinstalled", onInstalled);
     };
   }, []);
 
-  if (installed || dismissed || (!installEvent && !isIos)) return null;
+  // Ya instalada y la pidieron: se dice, en vez de no hacer nada
+  if (installed) {
+    if (!pedida) return null;
+    return (
+      <div className="install-bar" role="status">
+        <img src="/icons/favicon-48.png" alt="" width={36} height={36} />
+        <div className="install-text">
+          <strong>Ya la tienes instalada</strong>
+          <span>Estás usando InnovationTECH Studio como app.</span>
+        </div>
+        <button className="install-close" aria-label="Cerrar" onClick={() => setPedida(false)}>
+          ×
+        </button>
+      </div>
+    );
+  }
+  if (dismissed || (!installEvent && !isIos && !pedida)) return null;
+  // Navegador sin instalación con un clic (o ya se usó): se explica cómo hacerlo desde el menú
+  const manual = !installEvent && !isIos;
 
   const dismiss = () => {
     setDismissed(true);
+    setPedida(false);
     try {
       localStorage.setItem("its-install-dismissed", "1");
     } catch {
@@ -73,7 +101,7 @@ export default function PwaSetup() {
             Toca <b>Compartir</b> <Share size={15} aria-hidden style={{ verticalAlign: "-2px" }} /> en Safari y luego <b>Agregar a pantalla de inicio</b>.
           </span>
         ) : (
-          <span>Ábrela como app desde tu pantalla de inicio o escritorio.</span>
+          <span>{manual ? "Abre el menú de tu navegador (⋮) y elige «Instalar aplicación» o «Agregar a pantalla de inicio»." : "Ábrela como app desde tu pantalla de inicio o escritorio."}</span>
         )}
       </div>
       {installEvent ? (
@@ -88,7 +116,7 @@ export default function PwaSetup() {
           Instalar
         </button>
       ) : (
-        !showIosHelp && (
+        !showIosHelp && !manual && (
           <button className="btn small" onClick={() => setShowIosHelp(true)}>
             ¿Cómo?
           </button>
