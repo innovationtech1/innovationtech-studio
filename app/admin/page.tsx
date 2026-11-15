@@ -292,11 +292,31 @@ function PrepararStripe() {
     }
   }
 
+  // Impuesto sobre ventas con Stripe Tax: apagado hasta tener el permiso de impuestos
+  const [impuestos, setImpuestos] = useState<boolean | null>(null);
+  useEffect(() => {
+    void pedir("/api/admin/stripe", { cache: "no-store" }).then((r) => r.ok && setImpuestos(r.datos.impuestos === true));
+  }, []);
+  async function cambiarImpuestos(activo: boolean) {
+    if (activo && !confirm("¿Encender el cobro de impuestos? Hazlo solo si ya tienes tu permiso de impuestos y Stripe Tax configurado en tu cuenta de Stripe. Si no, los cobros nuevos pueden fallar.")) return;
+    setOcupado(true);
+    const r = await pedir("/api/admin/stripe", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ activo }) });
+    setOcupado(false);
+    if (r.ok) setImpuestos(r.datos.impuestos === true);
+    else setResultado({ ok: false, texto: String(r.datos.error ?? "No se pudo cambiar el cobro de impuestos.") });
+  }
+
   return (
     <>
       <button className="btn small" disabled={ocupado} onClick={() => void preparar()}>
         {ocupado ? "Preparando…" : "Preparar Stripe"}
       </button>
+      {impuestos !== null && (
+        <label className="check" style={{ margin: 0 }}>
+          <input type="checkbox" checked={impuestos} disabled={ocupado} onChange={(e) => void cambiarImpuestos(e.target.checked)} />
+          Cobrar impuesto sobre ventas (Stripe Tax)
+        </label>
+      )}
       {resultado && (
         <p className={resultado.ok ? "adm-ok" : "adm-error"} role="status" data-no-translate>
           {resultado.texto}

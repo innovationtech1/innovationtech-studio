@@ -325,7 +325,7 @@ export function crearCheckout(
   email: string,
   priceId: string,
   origin: string,
-  opciones: { trialEnd?: number } = {},
+  opciones: { trialEnd?: number; impuestos?: boolean } = {},
 ) {
   const customer = negocio.stripe?.customerId;
   const correo = email.trim();
@@ -335,6 +335,7 @@ export function crearCheckout(
     line_items: [{ price: priceId, quantity: 1 }],
     client_reference_id: negocio.id,
     ...(customer ? { customer } : correo ? { customer_email: correo } : {}),
+    ...conImpuestos(opciones.impuestos === true, !!customer),
     success_url: `${origin}/?pago=ok`,
     cancel_url: `${origin}/?pago=cancelado`,
     metadata: { negocioId: negocio.id },
@@ -343,6 +344,28 @@ export function crearCheckout(
       ...(trialEnd !== undefined ? { trial_end: trialEnd } : {}),
     },
   });
+}
+
+// Impuesto sobre ventas con Stripe Tax (interruptor `impuestos` de la configuración).
+// Con un cliente ya existente, Stripe exige guardar en él la dirección que escriba en el pago.
+function conImpuestos(activo: boolean, conCliente: boolean): Partial<Stripe.Checkout.SessionCreateParams> {
+  if (!activo) return {};
+  return { automatic_tax: { enabled: true }, ...(conCliente ? { customer_update: { address: "auto" } } : {}) };
+}
+
+// El administrador enciende o apaga el cálculo de impuestos en los cobros nuevos.
+export async function ajustarImpuestos(
+  adminEmail: string,
+  emailVerified: boolean,
+  cuerpo: unknown,
+  deps: DepsStripe = {},
+): Promise<{ ok: true; activo: boolean } | Falla> {
+  if (!esCorreoAdmin(adminEmail, emailVerified)) return falla(403, "No tienes permiso para el panel de administrador.", "NO_ADMIN");
+  const activo = (cuerpo as { activo?: unknown } | null)?.activo;
+  if (typeof activo !== "boolean") return falla(400, "Indica si el cálculo de impuestos va encendido o apagado.");
+  const store = deps.store ?? firestoreStore();
+  await store.guardarConfig({ impuestos: activo });
+  return { ok: true, activo };
 }
 
 // Pagado en efectivo y vigente (sin suscripción que cobre): solo el mismo plan y sin cobrar hoy.
@@ -453,7 +476,7 @@ export async function pagarPlan(
       trialEnd = r;
     }
 
-    const sesion = await crearCheckout(cliente, negocio, email, priceId, origin, { trialEnd });
+    const sesion = await crearCheckout(cliente, negocio, email, priceId, origin, { trialEnd, impuestos: cfg.impuestos });
     if (!sesion.url) return ERROR_STRIPE();
     // Se guarda como pendiente para revisarla si vuelven a pulsar «Elegir»
     let otra: string | undefined;
@@ -524,6 +547,7 @@ export async function comprarPaquete(
       line_items: [{ price: conf.stripePriceId, quantity: 1 }],
       client_reference_id: negocio.id,
       ...(customer ? { customer } : correo ? { customer_email: correo } : {}),
+      ...conImpuestos(cfg.impuestos, !!customer),
       success_url: `${origin}/?paquete=ok`,
       cancel_url: `${origin}/?paquete=cancelado`,
       metadata: { negocioId: negocio.id, paquete },

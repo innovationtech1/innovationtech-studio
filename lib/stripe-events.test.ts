@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import Stripe from "stripe";
 import { aplicarEvento, EVENTOS_STRIPE } from "./stripe-events";
 import { obtenerCuenta } from "./account-api";
-import { abrirPortal, cancelarSuscripciones, comprarPaquete, pagarPlan, pasarAManual, prepararStripe, procesarWebhook, type ClienteStripe } from "./stripe-api";
+import { abrirPortal, ajustarImpuestos, cancelarSuscripciones, comprarPaquete, pagarPlan, pasarAManual, prepararStripe, procesarWebhook, type ClienteStripe } from "./stripe-api";
 import type { Usuario } from "./account-store";
 import { memoryStore, type MemoryStore } from "./account-store-memory";
 import { aplicarCambios, estadoEfectivo, mezclarConfig, type CambiosNegocio, type Negocio, type PlanesConfig } from "./plans";
@@ -1977,4 +1977,64 @@ test("cancelarSuscripciones: vence la sesión de pago que quedó abierta", async
   const f = stripeFalso({ suscripciones: [], sesiones: { cs_1: { status: "open" } } });
   await cancelarSuscripciones(negocioEnStripe({ checkoutPendiente: "cs_1", subscriptionId: undefined }), { stripe: f.cliente, stripeLive: false });
   assert.ok(f.llamadas.some((l) => l.metodo === "checkout.sessions.expire" && l.args[0] === "cs_1"));
+});
+
+/* ---------- Impuestos automáticos (interruptor del administrador) ---------- */
+
+const sesionCreada = (f: ReturnType<typeof stripeFalso>) =>
+  f.llamadas.find((l) => l.metodo === "checkout.sessions.create")!.args[0] as Record<string, unknown>;
+
+test("impuestos apagados (por defecto): el cobro del plan no pide cálculo de impuestos", async () => {
+  const f = stripeFalso();
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "pro", ORIGEN, depsP(nuevoStore(), f.cliente));
+  assert.ok(r.ok);
+  const p = sesionCreada(f);
+  assert.equal("automatic_tax" in p, false);
+  assert.equal("customer_update" in p, false);
+});
+
+test("impuestos encendidos: el cobro del plan calcula el impuesto (cliente nuevo)", async () => {
+  const f = stripeFalso();
+  const store = memoryStore({ negocios: [negocio()], usuarios: [dueno, miembro], config: { ...CONFIG, impuestos: true } });
+  const r = await pagarPlan("u1", "dueno@ejemplo.com", "pro", ORIGEN, depsP(store, f.cliente));
+  assert.ok(r.ok);
+  const p = sesionCreada(f);
+  assert.deepEqual(p.automatic_tax, { enabled: true });
+  assert.equal("customer_update" in p, false); // sin cliente guardado, Stripe pide la dirección por su cuenta
+});
+
+test("impuestos encendidos con cliente ya existente: la dirección que escriba se guarda en su cliente (lo exige Stripe)", async () => {
+  const f = stripeFalso();
+  const r = await comprar(storePaq(proActivo(), { ...CONFIG_PAQ, impuestos: true }), "voz", f);
+  assert.ok(r.ok);
+  const p = sesionCreada(f);
+  assert.deepEqual(p.automatic_tax, { enabled: true });
+  assert.deepEqual(p.customer_update, { address: "auto" });
+  assert.equal(p.customer, "cus_1");
+});
+
+test("impuestos apagados: la compra de paquetes tampoco los calcula", async () => {
+  const f = stripeFalso();
+  await comprar(storePaq(proActivo()), "voz", f);
+  assert.equal("automatic_tax" in sesionCreada(f), false);
+});
+
+test("ajustarImpuestos: solo el administrador enciende o apaga el cálculo de impuestos", async () => {
+  const store = nuevoStore();
+  const no = await ajustarImpuestos("otro@x.com", true, { activo: true }, { store });
+  assert.ok(!no.ok);
+  assert.equal((await store.getConfig()).impuestos, false);
+  const si = await ajustarImpuestos(ADMIN, true, { activo: true }, { store });
+  assert.deepEqual(si, { ok: true, activo: true });
+  assert.equal((await store.getConfig()).impuestos, true);
+  assert.equal((await store.getConfig()).precios.pro.stripePriceId, PRECIO_P); // lo demás no se toca
+  assert.deepEqual(await ajustarImpuestos(ADMIN, true, { activo: false }, { store }), { ok: true, activo: false });
+});
+
+test("ajustarImpuestos: rechaza un valor que no sea sí o no", async () => {
+  const store = nuevoStore();
+  for (const malo of [{}, null, { activo: "si" }, { activo: 1 }]) {
+    const r = await ajustarImpuestos(ADMIN, true, malo, { store });
+    assert.ok(!r.ok);
+  }
 });

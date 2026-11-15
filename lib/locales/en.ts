@@ -1404,6 +1404,7 @@ export const EN: Record<string, string> = {
   "La cuenta de administrador no se puede borrar desde aquí.": "The administrator account can't be deleted from here.",
   "No pudimos cancelar tu suscripción, así que no borramos nada. Intenta de nuevo en un momento.": "We couldn't cancel your subscription, so nothing was deleted. Try again in a moment.",
   "No se pudo borrar la cuenta. Intenta de nuevo.": "The account couldn't be deleted. Try again.",
+  "Cobrar impuesto sobre ventas (Stripe Tax)": "Charge sales tax (Stripe Tax)",
 };
 
 // Textos con números u otras partes que cambian
