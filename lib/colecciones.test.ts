@@ -21,6 +21,8 @@ test("colecciones: sin prefijo, los nombres de siempre", () => {
     stripeEventos: "studio_stripe_eventos",
     movimientosPaquetes: "studio_paquetes_movimientos",
     clavesIa: "studio_claves_ia",
+    cuentasBorradas: "studio_cuentas_borradas",
+    huellasPrueba: "studio_huellas_prueba",
     trabajosVideo: "studio_trabajos_video",
     cacheVideo: "studio_cache_video",
     gastoVideo: "studio_gasto_video",

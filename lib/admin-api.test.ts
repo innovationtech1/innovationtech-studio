@@ -414,3 +414,14 @@ test("quitarManualPendiente: no admin → 403 sin cambios; negocio que no existe
   assert.equal(r3.ok, false);
   if (!r3.ok) assert.equal(r3.status, 404);
 });
+
+test("listar incluye las cuentas borradas (sin nombre ni correo), de la más reciente a la más vieja", async () => {
+  const store = memoryStore({ negocios: [negocio()] });
+  await store.anotarBorrado({ negocioId: "n_viejo", fecha: AHORA - DIA, personas: 1, pendientes: [] });
+  await store.anotarBorrado({ negocioId: "n_nuevo", fecha: AHORA, customerId: "cus_9", personas: 3, pendientes: ["archivos: negocios/n_nuevo/"] });
+  const r = await listar(ADMIN, true, { store, now: AHORA });
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  assert.deepEqual(r.borradas.map((b) => b.negocioId), ["n_nuevo", "n_viejo"]);
+  assert.deepEqual(r.borradas[0].pendientes, ["archivos: negocios/n_nuevo/"]);
+});

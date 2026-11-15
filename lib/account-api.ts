@@ -4,6 +4,7 @@ import { stripeModoLive } from "./stripe-server";
 import { cifrarClave, descifrarClave, llaveDeEntorno } from "./cifrado";
 import { probarCloudflare, type Check } from "./probar-cloudflare";
 import { VERSION_LEGAL } from "./legal";
+import { huellaCorreo } from "./huella";
 import {
   estadoEfectivo,
   inicioMesSiguienteChicago,
@@ -21,7 +22,7 @@ import {
 // las rutas solo verifican la sesión y las envuelven.
 
 // stripeLive: modo de las claves de Stripe (si no se pasa, se mira STRIPE_SECRET_KEY).
-export type DepsCuenta = { store?: AccountStore; now?: number; stripeLive?: boolean };
+export type DepsCuenta = { store?: AccountStore; now?: number; stripeLive?: boolean; secretoHuella?: string };
 const modo = (deps: DepsCuenta) => ({ stripeLive: deps.stripeLive ?? stripeModoLive() });
 
 export type Falla = { ok: false; status: number; error: string; codigo?: string };
@@ -232,6 +233,8 @@ export async function crearCuenta(
     );
   }
   if (aceptaTerminos !== true) return sinTerminos();
+  // Una sola prueba gratis por correo: quien borró su cuenta y vuelve empieza con la prueba ya vencida
+  const yaProbo = await store.tieneHuella(huellaCorreo(correo, deps.secretoHuella));
   // Id fijo por persona: un doble clic no puede producir dos negocios
   const idNegocio = `n_${uid}`;
   await store.crearNegocio(
@@ -241,7 +244,7 @@ export async function crearCuenta(
     miembros: [uid],
     plan: "pro",
     estado: "prueba",
-    pruebaHasta: ahora + cfg.pruebaMinutos * 60000, // siempre: sin esto la prueba no vencería nunca
+    pruebaHasta: yaProbo ? ahora : ahora + cfg.pruebaMinutos * 60000, // siempre: sin esto la prueba no vencería nunca
     origen: null,
     creado: ahora,
     actualizado: ahora,

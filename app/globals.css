@@ -1010,3 +1010,9 @@ body.acct-con-aviso .rail { top: var(--acct-espacio, var(--acct-aviso)); }
   .adm-acciones .btn { flex: 1 1 40%; }
 }
 .img-herramientas { margin-top: 16px; }
+/* Borrar mi cuenta */
+.acct-peligro { color: #ff8f9c; }
+.acct-lista { margin: 8px 0 14px; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
+.btn.peligro { background: #c8102e; border-color: #c8102e; color: #fff; }
+.btn.peligro:disabled { opacity: 0.5; }
+.adm-borradas { margin-top: 24px; font-size: 14px; } .adm-borradas ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px; }

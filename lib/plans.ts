@@ -59,6 +59,9 @@ export type PlanesConfig = {
   personas: Record<"basico" | "pro", number>;
   pruebaMinutos: number;
   videoIa: ConfigVideoIa;
+  // Cobrar el impuesto sobre ventas con Stripe Tax. Apagado hasta tener el permiso de impuestos
+  // y Stripe Tax configurado; se enciende en el panel de administrador.
+  impuestos: boolean;
 };
 
 const BASE: Herramienta[] = [
@@ -90,6 +93,7 @@ export const DEFAULT_CONFIG: PlanesConfig = {
   },
   personas: { basico: 1, pro: 3 },
   pruebaMinutos: 10,
+  impuestos: false,
   videoIa: {
     modelos: {
       // MiniMax H3 Max Turbo en fal.ai: $0.025/s a 480P y $0.04/s a 768P (precio normal desde el 16 nov 2026)
@@ -399,6 +403,7 @@ export function mezclarConfig(g: Partial<PlanesConfig> | null | undefined): Plan
     },
     personas: { ...d.personas, ...guardada.personas },
     pruebaMinutos: guardada.pruebaMinutos ?? d.pruebaMinutos,
+    impuestos: guardada.impuestos === true,
     videoIa: {
       ...d.videoIa,
       ...guardada.videoIa,
