@@ -264,6 +264,14 @@ export default function AccountGate({ children }: { children: React.ReactNode })
     setConfirmarSalida(false);
   }
   const salir = () => void fbConLimpieza?.salir();
+  // La cuenta ya se borró en el servidor: se cierra la sesión aquí (y, si lo pidió, se limpia el dispositivo)
+  const [despedida, setDespedida] = useState(false);
+  async function cuentaBorrada(limpiar: boolean) {
+    setModal(null);
+    setDespedida(true);
+    await limpiarAlSalir(limpiar).catch(() => {});
+    await fb?.salir().catch(() => {});
+  }
 
   async function pagarReactivar() {
     // Sin suscripción de tarjeta que se pueda pagar (cancelada o pago a mano): elegir plan de nuevo
@@ -348,6 +356,7 @@ export default function AccountGate({ children }: { children: React.ReactNode })
             onCerrar={() => setModal(null)}
             onRefrescar={refrescar}
             onPlanes={() => setModal("planes")}
+            onBorrada={(limpiar) => void cuentaBorrada(limpiar)}
           />
         )}
         {modal === "pago" && <PagoPendiente mensaje={mensajePago} onCerrar={() => setModal(null)} />}
@@ -377,6 +386,19 @@ export default function AccountGate({ children }: { children: React.ReactNode })
         </div>
       )}
       {confirmarSalida && <CerrarSesion onCancelar={() => setConfirmarSalida(false)} onSalir={(c) => void salirDeVerdad(c)} />}
+      {despedida && (
+        <div className="welcome-backdrop acct-capa" role="alertdialog" aria-modal="true" aria-label="Cuenta borrada">
+          <div className="acct-caja">
+            <h2>Tu cuenta se borró</h2>
+            <p className="muted">Ya no se te hará ningún cobro. Gracias por haber usado InnovationTECH Studio.</p>
+            <div className="actions">
+              <button className="btn" onClick={() => setDespedida(false)}>
+                Entendido
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </ContextoCuenta.Provider>
   );
 }

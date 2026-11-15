@@ -1,5 +1,5 @@
 import "server-only";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldPath, FieldValue } from "firebase-admin/firestore";
 import { colecciones } from "./colecciones";
 import type { Cifrado } from "./cifrado";
 import { db } from "./firebase-server";
@@ -96,7 +96,28 @@ export interface AccountStore {
   guardarClaveIA(negocioId: string, x: Cifrado): Promise<void>;
   leerClaveIA(negocioId: string): Promise<Cifrado | null>;
   borrarClaveIA(negocioId: string): Promise<void>;
+
+  // ---------- Borrar cuenta (lib/borrar-cuenta.ts) ----------
+  // Borra el negocio y lo que cuelga de él: contadores de uso, invitaciones y la clave de Cloudflare.
+  // Los pagos a mano y los movimientos de paquetes NO se borran (se conservan por ley).
+  borrarNegocio(negocioId: string): Promise<void>;
+  // Borra el usuario solo si pertenece a ese negocio.
+  borrarUsuario(uid: string, negocioId: string): Promise<void>;
+  // Anotación de una cuenta borrada (sin nombre ni correo) para el administrador.
+  anotarBorrado(b: CuentaBorrada): Promise<void>;
+  listarBorrados(): Promise<CuentaBorrada[]>; // del más reciente al más viejo
+  // Huella del correo de quien ya usó su prueba gratis y borró su cuenta (no es el correo).
+  guardarHuella(huella: string, fecha: number): Promise<void>;
+  tieneHuella(huella: string): Promise<boolean>;
 }
+
+export type CuentaBorrada = {
+  negocioId: string;
+  fecha: number;
+  customerId?: string; // para encontrar sus pagos en Stripe
+  personas: number; // cuántas personas tenía el negocio
+  pendientes: string[]; // lo que no se pudo borrar solo y hay que revisar a mano
+};
 
 // De dónde salió lo reservado: del contador del mes o del saldo de paquetes.
 export type Reserva = { delMes: number; delSaldo: number };
@@ -423,6 +444,47 @@ export function firestoreStore(): AccountStore {
 
     async borrarClaveIA(negocioId) {
       await db().collection(COL_CLAVES_IA).doc(negocioId).delete();
+    },
+
+    async borrarNegocio(negocioId) {
+      // Los contadores se llaman «<negocio>_<AAAA-MM>»: se buscan por ese rango de nombre
+      const usos = await db()
+        .collection(COL_USO)
+        .where(FieldPath.documentId(), ">=", `${negocioId}_`)
+        .where(FieldPath.documentId(), "<", `${negocioId}_\uf8ff`)
+        .get();
+      const invs = await db().collection(COL_INVITACIONES).where("negocioId", "==", negocioId).get();
+      const lote = db().batch();
+      for (const d of [...usos.docs, ...invs.docs]) lote.delete(d.ref);
+      lote.delete(db().collection(COL_CLAVES_IA).doc(negocioId));
+      lote.delete(db().collection(COL_NEGOCIOS).doc(negocioId));
+      await lote.commit();
+    },
+
+    async borrarUsuario(uid, negocioId) {
+      const ref = db().collection(COL_USUARIOS).doc(uid);
+      await db().runTransaction(async (t) => {
+        const u = await t.get(ref);
+        if (u.exists && u.data()?.negocioId === negocioId) t.delete(ref);
+      });
+    },
+
+    async anotarBorrado(b) {
+      const limpio = Object.fromEntries(Object.entries(b).filter(([, v]) => v !== undefined));
+      await db().collection(C.cuentasBorradas).doc(`${b.negocioId}_${b.fecha}`).set(limpio);
+    },
+
+    async listarBorrados() {
+      const q = await db().collection(C.cuentasBorradas).get();
+      return q.docs.map((d) => d.data() as CuentaBorrada).sort((a, b) => b.fecha - a.fecha);
+    },
+
+    async guardarHuella(huella, fecha) {
+      await db().collection(C.huellasPrueba).doc(huella).set({ fecha });
+    },
+
+    async tieneHuella(huella) {
+      return (await db().collection(C.huellasPrueba).doc(huella).get()).exists;
     },
   };
 }

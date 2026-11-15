@@ -1386,6 +1386,24 @@ export const EN: Record<string, string> = {
   "Ya la tienes instalada": "It's already installed",
   "Estás usando InnovationTECH Studio como app.": "You're using InnovationTECH Studio as an app.",
   "Abre el menú de tu navegador (⋮) y elige «Instalar aplicación» o «Agregar a pantalla de inicio».": "Open your browser menu (⋮) and choose “Install app” or “Add to Home screen”.",
+  "Borrar mi cuenta": "Delete my account",
+  "¿Borrar tu cuenta?": "Delete your account?",
+  "Esto no se puede deshacer.": "This can't be undone.",
+  "Se borra tu negocio en Studio: tu plan, tu saldo de paquetes y tus tomas de video con IA.": "Your business in Studio is deleted: your plan, your package balance and your AI video takes.",
+  "Tu suscripción se cancela ahora mismo y no se te vuelve a cobrar. El tiempo que ya pagaste se pierde.": "Your subscription is canceled right now and you won't be charged again. The time you already paid for is lost.",
+  "La otra persona de tu equipo pierde el acceso.": "The other person on your team loses access.",
+  "Si vuelves a registrarte con este correo, ya no tendrás prueba gratis.": "If you sign up again with this email, you won't get a free trial.",
+  "Conservamos solo los registros de pagos que la ley pide guardar.": "We keep only the payment records the law requires us to keep.",
+  "Sales del equipo y se borra tu acceso a Studio.": "You leave the team and your access to Studio is deleted.",
+  "El negocio y su plan siguen igual para los demás.": "The business and its plan stay the same for everyone else.",
+  "Borrar también de este dispositivo mi galería, «Mi marca» y mis claves propias": "Also delete my gallery, “My brand” and my own keys from this device",
+  "Borrando…": "Deleting…",
+  "Tu cuenta se borró": "Your account was deleted",
+  "Ya no se te hará ningún cobro. Gracias por haber usado InnovationTECH Studio.": "You won't be charged again. Thank you for using InnovationTECH Studio.",
+  "Cuenta borrada": "Account deleted",
+  "La cuenta de administrador no se puede borrar desde aquí.": "The administrator account can't be deleted from here.",
+  "No pudimos cancelar tu suscripción, así que no borramos nada. Intenta de nuevo en un momento.": "We couldn't cancel your subscription, so nothing was deleted. Try again in a moment.",
+  "No se pudo borrar la cuenta. Intenta de nuevo.": "The account couldn't be deleted. Try again.",
 };
 
 // Textos con números u otras partes que cambian
@@ -1497,4 +1515,7 @@ export const EN_PATTERNS: [RegExp, string][] = [
   [/^¿Crear (\d+) imágenes\? Usa (\d+) imágenes de tu plan\.$/, "Create $1 images? Uses $2 images from your plan."],
   [/^Cantidad: (\d+) imágenes$/, "Quantity: $1 images"],
   [/^Formato: (.+)$/, "Format: $1"],
+  [/^Las otras (\d+) personas de tu equipo pierden el acceso\.$/, "The other $1 people on your team lose access."],
+  [/^Para confirmar, escribe (\w+)$/, "To confirm, type $1"],
+  [/^Para borrar tu cuenta escribe (\w+)\.$/, "To delete your account type $1."],
 ];

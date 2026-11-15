@@ -617,6 +617,87 @@ export function CerrarSesion({ onCancelar, onSalir }: { onCancelar: () => void; 
   );
 }
 
+/* ---------------- Borrar mi cuenta ---------------- */
+
+const PALABRA_BORRAR = "BORRAR"; // la misma que pide el servidor (lib/borrar-cuenta.ts)
+
+// Dice con claridad qué se pierde y pide escribir BORRAR. No se puede deshacer.
+function BorrarCuenta({
+  cuenta,
+  onCancelar,
+  onBorrada,
+}: {
+  cuenta: CuentaConNegocio;
+  onCancelar: () => void;
+  onBorrada: (limpiarDispositivo: boolean) => void;
+}) {
+  const [palabra, setPalabra] = useState("");
+  const [limpiar, setLimpiar] = useState(true);
+  const [ocupado, setOcupado] = useState(false);
+  const [error, setError] = useState("");
+  const otros = Math.max(0, (cuenta.equipo?.miembros ?? 1) - 1);
+  const conTarjeta = cuenta.negocio.origen === "stripe";
+  async function borrar() {
+    setOcupado(true);
+    setError("");
+    const r = await api("/api/cuenta", "DELETE", { confirmacion: palabra.trim() });
+    if (!r.ok) {
+      setOcupado(false);
+      return setError(String(r.data.error ?? "No se pudo borrar la cuenta. Intenta de nuevo."));
+    }
+    onBorrada(limpiar);
+  }
+  return (
+    <div className="welcome-backdrop acct-capa" role="alertdialog" aria-modal="true" aria-label="Borrar mi cuenta">
+      <div className="acct-caja">
+        <button className="acct-cerrar" onClick={onCancelar} title="Cerrar" disabled={ocupado}>
+          <X size={20} aria-hidden />
+        </button>
+        <h2>¿Borrar tu cuenta?</h2>
+        <p>
+          <strong>Esto no se puede deshacer.</strong>
+        </p>
+        {cuenta.esDueno ? (
+          <ul className="acct-lista">
+            <li>Se borra tu negocio en Studio: tu plan, tu saldo de paquetes y tus tomas de video con IA.</li>
+            {conTarjeta && <li>Tu suscripción se cancela ahora mismo y no se te vuelve a cobrar. El tiempo que ya pagaste se pierde.</li>}
+            {otros > 0 && <li>{otros === 1 ? "La otra persona de tu equipo pierde el acceso." : `Las otras ${otros} personas de tu equipo pierden el acceso.`}</li>}
+            <li>Si vuelves a registrarte con este correo, ya no tendrás prueba gratis.</li>
+            <li>Conservamos solo los registros de pagos que la ley pide guardar.</li>
+          </ul>
+        ) : (
+          <ul className="acct-lista">
+            <li>Sales del equipo y se borra tu acceso a Studio.</li>
+            <li>El negocio y su plan siguen igual para los demás.</li>
+          </ul>
+        )}
+        <label className="check">
+          <input type="checkbox" checked={limpiar} onChange={(e) => setLimpiar(e.target.checked)} disabled={ocupado} />
+          Borrar también de este dispositivo mi galería, «Mi marca» y mis claves propias
+        </label>
+        <label htmlFor="borrar-palabra">{`Para confirmar, escribe ${PALABRA_BORRAR}`}</label>
+        <input
+          id="borrar-palabra"
+          value={palabra}
+          onChange={(e) => setPalabra(e.target.value)}
+          autoComplete="off"
+          autoCapitalize="characters"
+          disabled={ocupado}
+        />
+        {error && <div className="error">{error}</div>}
+        <div className="actions">
+          <button className="btn ghost" onClick={onCancelar} disabled={ocupado}>
+            Cancelar
+          </button>
+          <button className="btn peligro" disabled={ocupado || palabra.trim() !== PALABRA_BORRAR} onClick={() => void borrar()}>
+            {ocupado ? "Borrando…" : "Borrar mi cuenta"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- Mi cuenta ---------------- */
 
 const NOMBRE_PLAN: Record<string, string> = { prueba: "Prueba Pro", basico: "Básico", pro: "Pro" };
@@ -642,13 +723,16 @@ export function MiCuenta({
   onCerrar,
   onRefrescar,
   onPlanes,
+  onBorrada,
 }: {
   cuenta: CuentaConNegocio;
   fb: FB;
   onCerrar: () => void;
   onRefrescar: () => Promise<void>;
   onPlanes: () => void;
+  onBorrada: (limpiarDispositivo: boolean) => void; // la cuenta ya se borró: cerrar sesión (y limpiar el dispositivo)
 }) {
+  const [borrando, setBorrando] = useState(false); // diálogo «Borrar mi cuenta» abierto
   const [manual, setManual] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const [invitado, setInvitado] = useState("");
@@ -934,8 +1018,16 @@ export function MiCuenta({
             </button>
             <EnlacesLegales />
           </div>
+          {!cuenta.esAdmin && (
+            <div className="acct-acciones acct-pie">
+              <button className="acct-link acct-peligro" onClick={() => setBorrando(true)}>
+                Borrar mi cuenta
+              </button>
+            </div>
+          )}
         </div>
       </div>
+      {borrando && <BorrarCuenta cuenta={cuenta} onCancelar={() => setBorrando(false)} onBorrada={onBorrada} />}
       {aTarjeta && pasarATarjeta && (
         <Confirmar
           etiqueta="Pasar a pago con tarjeta"

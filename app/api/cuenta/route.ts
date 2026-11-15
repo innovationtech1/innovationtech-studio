@@ -1,4 +1,5 @@
 import { crearCuenta, obtenerCuenta } from "@/lib/account-api";
+import { borrarCuenta } from "@/lib/borrar-cuenta";
 import { cuerpoJson, errorJson, json, sesionDe, sinSesion } from "@/lib/cuenta-ruta";
 
 export const dynamic = "force-dynamic";
@@ -20,4 +21,14 @@ export async function POST(req: Request) {
   const r = await crearCuenta(s.uid, s.email, s.emailVerified, typeof nombre === "string" ? nombre : "", aceptaTerminos === true);
   if (!r.ok) return errorJson(r);
   return json(await obtenerCuenta(s.uid, s.email, s.emailVerified));
+}
+
+// Borra la cuenta de quien tiene la sesión abierta (hay que mandar la palabra de confirmación).
+// No se puede deshacer: ver lib/borrar-cuenta.ts.
+export async function DELETE(req: Request) {
+  const s = await sesionDe(req);
+  if (!s) return sinSesion();
+  const r = await borrarCuenta({ uid: s.uid, email: s.email, emailVerified: s.emailVerified }, await cuerpoJson(req));
+  if (!r.ok) return errorJson(r);
+  return json({ borrada: true, tipo: r.tipo });
 }

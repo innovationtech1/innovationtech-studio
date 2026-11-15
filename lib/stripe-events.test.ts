@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import Stripe from "stripe";
 import { aplicarEvento, EVENTOS_STRIPE } from "./stripe-events";
 import { obtenerCuenta } from "./account-api";
-import { abrirPortal, comprarPaquete, pagarPlan, pasarAManual, prepararStripe, procesarWebhook, type ClienteStripe } from "./stripe-api";
+import { abrirPortal, cancelarSuscripciones, comprarPaquete, pagarPlan, pasarAManual, prepararStripe, procesarWebhook, type ClienteStripe } from "./stripe-api";
 import type { Usuario } from "./account-store";
 import { memoryStore, type MemoryStore } from "./account-store-memory";
 import { aplicarCambios, estadoEfectivo, mezclarConfig, type CambiosNegocio, type Negocio, type PlanesConfig } from "./plans";
@@ -546,6 +546,7 @@ function stripeFalso(op: {
   suscripciones?: Array<Record<string, unknown>>;
   sesiones?: Record<string, { status: string; subscription?: string; customer?: string }>;
   expirarFalla?: boolean; // simula que la pagaron justo antes de vencerla
+  cancelarFalla?: boolean; // Stripe no deja cancelar
   sinCliente?: string[]; // customers que Stripe no conoce (p. ej. de otro modo)
   registrarSesiones?: boolean; // las sesiones creadas quedan abiertas (cs_nuevo_1, cs_nuevo_2…)
 } = {}) {
@@ -637,6 +638,13 @@ function stripeFalso(op: {
       async update(id: string, p: unknown) {
         anotar("subscriptions.update", id, p);
         return { ...subs.find((x) => x.id === id), id };
+      },
+      async cancel(id: string) {
+        anotar("subscriptions.cancel", id);
+        if (op.cancelarFalla) throw new Error("Stripe caído");
+        const i = subs.findIndex((x) => x.id === id);
+        if (i >= 0) subs[i] = { ...subs[i], status: "canceled" } as (typeof subs)[number];
+        return subs[i];
       },
     },
   };
@@ -1904,4 +1912,69 @@ test("prepararStripe: si el paquete Video ya existe en Stripe lo encuentra y gua
   assert.equal(r.ok, true);
   assert.equal((await store.getConfig()).paquetes.video.stripePriceId, "price_video_viejo");
   assert.equal(f.llamadas.filter((l) => l.metodo === "prices.create").some((l) => (l.args[0] as { lookup_key?: string }).lookup_key === "studio_paquete_video"), false);
+});
+
+
+/* ---------- Cancelar todo al borrar la cuenta ---------- */
+
+const subPorCancelar = (id: string, status = "active"): Record<string, unknown> => ({ id, status, customer: "cus_1" });
+const negocioEnStripe = (extra: Partial<NonNullable<Negocio["stripe"]>> = {}): Negocio =>
+  ({ id: "n1", nombre: "Tortas", duenoUid: "u1", miembros: ["u1"], plan: "pro", estado: "activo", origen: "stripe", creado: 1, actualizado: 1, stripe: { customerId: "cus_1", subscriptionId: "sub_1", status: "active", livemode: false, ...extra } }) as Negocio;
+
+test("cancelarSuscripciones: cancela de inmediato la suscripción viva", async () => {
+  const f = stripeFalso({ suscripciones: [subPorCancelar("sub_1")] });
+  const r = await cancelarSuscripciones(negocioEnStripe(), { stripe: f.cliente, stripeLive: false });
+  assert.deepEqual(r, { ok: true, canceladas: 1 });
+  assert.ok(f.llamadas.some((l) => l.metodo === "subscriptions.cancel" && l.args[0] === "sub_1"));
+});
+
+test("cancelarSuscripciones: si hay dos vivas (caso raro), cancela las dos", async () => {
+  const f = stripeFalso({ suscripciones: [subPorCancelar("sub_1"), subPorCancelar("sub_2", "past_due")] });
+  const r = await cancelarSuscripciones(negocioEnStripe(), { stripe: f.cliente, stripeLive: false });
+  assert.deepEqual(r, { ok: true, canceladas: 2 });
+});
+
+test("cancelarSuscripciones: sin nada en Stripe no llama a Stripe", async () => {
+  const f = stripeFalso();
+  const sinStripe = { ...negocioEnStripe(), stripe: undefined, origen: "manual" } as Negocio;
+  assert.deepEqual(await cancelarSuscripciones(sinStripe, { stripe: f.cliente, stripeLive: false }), { ok: true, canceladas: 0 });
+  assert.equal(f.llamadas.length, 0);
+});
+
+test("cancelarSuscripciones: una suscripción ya cancelada no se toca", async () => {
+  const f = stripeFalso({ suscripciones: [subPorCancelar("sub_1", "canceled")] });
+  assert.deepEqual(await cancelarSuscripciones(negocioEnStripe(), { stripe: f.cliente, stripeLive: false }), { ok: true, canceladas: 0 });
+  assert.ok(!f.metodos().includes("subscriptions.cancel"));
+});
+
+test("cancelarSuscripciones: si Stripe falla al cancelar, lo dice (502) para no borrar la cuenta", async () => {
+  const f = stripeFalso({ suscripciones: [subPorCancelar("sub_1")], cancelarFalla: true });
+  const r = await cancelarSuscripciones(negocioEnStripe(), { stripe: f.cliente, stripeLive: false });
+  assert.ok(!r.ok);
+  if (!r.ok) assert.equal(r.status, 502);
+});
+
+test("cancelarSuscripciones: con suscripción viva guardada pero sin Stripe configurado, falla (503)", async () => {
+  const guardada = process.env.STRIPE_SECRET_KEY;
+  delete process.env.STRIPE_SECRET_KEY;
+  try {
+    const r = await cancelarSuscripciones(negocioEnStripe(), { stripeLive: false });
+    assert.ok(!r.ok);
+    if (!r.ok) assert.equal(r.status, 503);
+  } finally {
+    if (guardada !== undefined) process.env.STRIPE_SECRET_KEY = guardada;
+  }
+});
+
+test("cancelarSuscripciones: los datos de Stripe del otro modo (prueba vs real) se ignoran", async () => {
+  const f = stripeFalso({ suscripciones: [subPorCancelar("sub_1")] });
+  const r = await cancelarSuscripciones(negocioEnStripe({ livemode: true }), { stripe: f.cliente, stripeLive: false });
+  assert.deepEqual(r, { ok: true, canceladas: 0 });
+  assert.equal(f.llamadas.length, 0);
+});
+
+test("cancelarSuscripciones: vence la sesión de pago que quedó abierta", async () => {
+  const f = stripeFalso({ suscripciones: [], sesiones: { cs_1: { status: "open" } } });
+  await cancelarSuscripciones(negocioEnStripe({ checkoutPendiente: "cs_1", subscriptionId: undefined }), { stripe: f.cliente, stripeLive: false });
+  assert.ok(f.llamadas.some((l) => l.metodo === "checkout.sessions.expire" && l.args[0] === "cs_1"));
 });

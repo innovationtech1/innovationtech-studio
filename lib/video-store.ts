@@ -52,6 +52,8 @@ export interface VideoStore {
   trabajosEnviados(): Promise<TrabajoVideo[]>;
   // El trabajo con esa llave que sigue en camino (en fila o enviado), o null. La llave ya incluye al negocio.
   trabajoEnCurso(cacheLlave: string): Promise<TrabajoVideo | null>;
+  // Borra todos los trabajos de un negocio (al borrar la cuenta). Devuelve cuántos eran.
+  borrarTrabajosDeNegocio(negocioId: string): Promise<number>;
   // Los trabajos de un negocio creados desde ese momento (para el límite por día)
   trabajosDeNegocio(negocioId: string, desdeMs: number): Promise<TrabajoVideo[]>;
   // Los actualizados desde `ms`, del más nuevo al más viejo (para el resumen del administrador).
@@ -118,6 +120,16 @@ export function firestoreVideoStore(): VideoStore {
       return (await porEstado("en_fila")).sort(ordenFila).slice(0, limite);
     },
     trabajosEnviados: () => porEstado("enviado"),
+    async borrarTrabajosDeNegocio(negocioId) {
+      const docs = (await trabajos().where("negocioId", "==", negocioId).get()).docs;
+      // Firestore admite 500 cambios por lote
+      for (let i = 0; i < docs.length; i += 400) {
+        const lote = db().batch();
+        for (const d of docs.slice(i, i + 400)) lote.delete(d.ref);
+        await lote.commit();
+      }
+      return docs.length;
+    },
     async trabajosDeNegocio(negocioId, desdeMs) {
       // Un solo campo en la consulta (sin índice compuesto); la fecha se filtra aquí
       return (await trabajos().where("negocioId", "==", negocioId).get()).docs.map(deDoc).filter((t) => t.creado >= desdeMs);

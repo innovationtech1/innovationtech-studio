@@ -28,6 +28,7 @@ export type ClienteStripe = {
     retrieve(id: string): Promise<Stripe.Subscription>;
     list(p: Stripe.SubscriptionListParams): Promise<{ data: Stripe.Subscription[] }>;
     update(id: string, p: Stripe.SubscriptionUpdateParams): Promise<Stripe.Subscription>;
+    cancel(id: string): Promise<Stripe.Subscription>;
   };
 };
 
@@ -218,6 +219,43 @@ async function suscripcionViva(
     }
   }
   return { viva: null, ajeno: subFalta };
+}
+
+// Al borrar la cuenta: cancela DE INMEDIATO todo lo que todavía puede cobrarle a este negocio
+// (la suscripción viva, una segunda si la hubiera, y la sesión de pago que quedó abierta).
+// Si algo no se puede cancelar devuelve una falla: quien llama no debe borrar la cuenta.
+export async function cancelarSuscripciones(
+  negocio: Negocio,
+  deps: DepsStripe = {},
+): Promise<{ ok: true; canceladas: number } | Falla> {
+  const live = deps.stripeLive ?? stripeModoLive();
+  const n = vistaDelModo(negocio, live); // lo del otro modo (prueba vs real) no se toca
+  const s = n.stripe;
+  if (!s?.customerId && !s?.subscriptionId && !s?.checkoutPendiente) return { ok: true, canceladas: 0 };
+  const cliente = clienteDe(deps);
+  if (!cliente) return NO_CONFIGURADO();
+  let canceladas = 0;
+  try {
+    // La sesión pendiente: si sigue abierta se vence; si ya la pagaron, su suscripción se cancela abajo
+    const dePendiente = s.checkoutPendiente ? await revisarPendiente(cliente, s.checkoutPendiente) : null;
+    if (dePendiente && SUSCRIPCION_VIVA.has(dePendiente.status)) {
+      await cliente.subscriptions.cancel(dePendiente.id);
+      canceladas++;
+    }
+    // Hasta 5 vueltas: en el caso raro de dos suscripciones vivas, se cancelan todas
+    for (let k = 0; k < 5; k++) {
+      const { viva } = await suscripcionViva(cliente, n);
+      if (!viva) break;
+      await cliente.subscriptions.cancel(viva.id);
+      canceladas++;
+    }
+    const { viva } = await suscripcionViva(cliente, n);
+    if (viva) return ERROR_STRIPE();
+  } catch (e) {
+    console.error(`Stripe: no se pudo cancelar al borrar la cuenta (${mensaje(e)}).`);
+    return ERROR_STRIPE();
+  }
+  return { ok: true, canceladas };
 }
 
 // La sesión de pago que quedó pendiente (la última que abrimos para este negocio):

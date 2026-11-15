@@ -92,6 +92,8 @@ async function pedir(url: string, init?: RequestInit): Promise<{ ok: boolean; da
 
 function Lista() {
   const [filas, setFilas] = useState<FilaNegocio[] | null>(null);
+  // Cuentas que sus dueños borraron (solo la anotación, sin nombre ni correo)
+  const [borradas, setBorradas] = useState<{ negocioId: string; fecha: number; customerId?: string; personas: number; pendientes: string[] }[]>([]);
   const [error, setError] = useState("");
   const [buscar, setBuscar] = useState("");
 
@@ -99,6 +101,7 @@ function Lista() {
     const r = await pedir("/api/admin/negocios", { cache: "no-store" });
     if (r.ok) {
       setFilas(r.datos.negocios as FilaNegocio[]);
+      setBorradas(Array.isArray(r.datos.borradas) ? (r.datos.borradas as typeof borradas) : []);
       setError("");
     } else {
       setError(String(r.datos.error ?? "No pudimos cargar los negocios."));
@@ -146,6 +149,35 @@ function Lista() {
             <Fila key={f.negocio.id} fila={f} onCambio={cargar} />
           ))}
         </>
+      )}
+
+      {borradas.length > 0 && (
+        <details className="adm-borradas">
+          <summary>{borradas.length === 1 ? "1 cuenta borrada por su dueño" : `${borradas.length} cuentas borradas por sus dueños`}</summary>
+          <ul>
+            {borradas.map((b) => (
+              <li key={`${b.negocioId}-${b.fecha}`}>
+                <span data-no-translate>{new Date(b.fecha).toLocaleString("es-MX", { timeZone: "America/Chicago" })}</span>
+                {" · "}
+                <span data-no-translate>{b.negocioId}</span>
+                {" · "}
+                {b.personas === 1 ? "1 persona" : `${b.personas} personas`}
+                {b.customerId && (
+                  <>
+                    {" · Stripe: "}
+                    <span data-no-translate>{b.customerId}</span>
+                  </>
+                )}
+                {b.pendientes.length > 0 && (
+                  <strong className="adm-error">
+                    {" · Revisar a mano: "}
+                    <span data-no-translate>{b.pendientes.join("; ")}</span>
+                  </strong>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
     </main>
   );

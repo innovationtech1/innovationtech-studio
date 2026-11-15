@@ -8,5 +8,5 @@ export async function GET(req: Request) {
   const s = await sesionDe(req);
   if (!s) return sinSesion();
   const r = await listar(s.email, s.emailVerified);
-  return r.ok ? json({ negocios: r.negocios }) : errorJson(r);
+  return r.ok ? json({ negocios: r.negocios, borradas: r.borradas }) : errorJson(r);
 }

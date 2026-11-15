@@ -32,6 +32,11 @@ export function memoryVideoStore(semilla: { gasto?: Record<string, number> } = {
     async trabajosEnviados() {
       return todos().filter((t) => t.estado === "enviado");
     },
+    async borrarTrabajosDeNegocio(negocioId) {
+      const ids = [...trabajos.values()].filter((t) => t.negocioId === negocioId).map((t) => t.id);
+      for (const id of ids) trabajos.delete(id);
+      return ids.length;
+    },
     async trabajosDeNegocio(negocioId, desdeMs) {
       return todos().filter((t) => t.negocioId === negocioId && t.creado >= desdeMs);
     },
