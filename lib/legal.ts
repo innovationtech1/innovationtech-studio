@@ -1,8 +1,8 @@
 // Textos legales de InnovationTECH Studio (Términos de servicio y Política de privacidad).
-// BORRADOR del 9 de noviembre de 2026: debe revisarlo un abogado o contador antes del lanzamiento.
+// BORRADOR del 13 de noviembre de 2026: debe revisarlo un abogado o contador antes del lanzamiento.
 // Si cambia el contenido de fondo, sube VERSION_LEGAL: las cuentas nuevas guardan qué versión aceptaron.
 
-export const VERSION_LEGAL = "2026-11-10";
+export const VERSION_LEGAL = "2026-11-13";
 export const CONTACTO_LEGAL = "hectordehoyos053@gmail.com";
 
 export type Seccion = { titulo: string; parrafos: string[] };
@@ -11,7 +11,7 @@ export type DocumentoLegal = { titulo: string; actualizado: string; secciones: S
 export const TERMINOS: Record<"es" | "en", DocumentoLegal> = {
   es: {
     titulo: "Términos de servicio",
-    actualizado: "Última actualización: 9 de noviembre de 2026",
+    actualizado: "Última actualización: 13 de noviembre de 2026",
     secciones: [
       {
         titulo: "1. Quiénes somos",
@@ -56,6 +56,8 @@ export const TERMINOS: Record<"es" | "en", DocumentoLegal> = {
           "Los pagos con tarjeta los procesa Stripe y se cobran automáticamente cada mes hasta que canceles. También puedes pagar a mano (efectivo, Zelle o Cash App); en ese caso tu plan queda activo hasta la fecha pagada.",
           "Los precios no incluyen impuestos, salvo que se indique. Podemos cambiar los precios avisándote antes; el nuevo precio aplica desde tu siguiente periodo.",
           "Si un pago con tarjeta falla o vence un pago a mano, tu cuenta se pausa hasta que pagues.",
+          "Todos los precios y cobros de InnovationTECH son en dólares de Estados Unidos (USD). Los pagos a mano por Cash App se envían únicamente a la cuenta de Cash App de InnovationTECH que te damos directamente; no pagues a ninguna otra cuenta.",
+          "Cada cobro lleva su factura: por los pagos con tarjeta (plan mensual y paquetes extra) Stripe te la envía al correo de tu cuenta y la puedes descargar en Mi cuenta → Administrar suscripción. Por un pago a mano, pídenos tu recibo y te lo enviamos.",
         ],
       },
       {
@@ -79,6 +81,7 @@ export const TERMINOS: Record<"es" | "en", DocumentoLegal> = {
           "Lo que creas con Studio es tuyo. Eres responsable de revisarlo antes de publicarlo y de tener los permisos de cualquier material que subas (fotos, logos, música, voces).",
           "La inteligencia artificial puede equivocarse o producir resultados parecidos a los de otras personas. Revisa datos, precios y afirmaciones antes de usarlos.",
           "La música y los sonidos incluidos en Studio tienen sus propias licencias (indicadas en la app). Respétalas al usarlos.",
+          "InnovationTECH no se hace responsable del contenido que crees, subas o publiques con Studio: guiones, textos, imágenes, voces, videos (incluidos los que grabes o subas tú) y música. Tú decides qué se publica y dónde, y respondes por ello ante tus clientes, las redes sociales y terceros.",
         ],
       },
       {
@@ -110,7 +113,7 @@ export const TERMINOS: Record<"es" | "en", DocumentoLegal> = {
   },
   en: {
     titulo: "Terms of Service",
-    actualizado: "Last updated: November 9, 2026",
+    actualizado: "Last updated: November 13, 2026",
     secciones: [
       {
         titulo: "1. Who we are",
@@ -155,6 +158,8 @@ export const TERMINOS: Record<"es" | "en", DocumentoLegal> = {
           "Card payments are processed by Stripe and charged automatically every month until you cancel. You can also pay manually (cash, Zelle or Cash App); in that case your plan stays active until the paid date.",
           "Prices do not include taxes unless stated. We may change prices with advance notice; the new price applies from your next period.",
           "If a card payment fails or a manual payment expires, your account is paused until you pay.",
+          "All InnovationTECH prices and charges are in United States dollars (USD). Manual payments by Cash App are sent only to the InnovationTECH Cash App account that we give you directly; do not pay any other account.",
+          "Every charge comes with an invoice: for card payments (monthly plan and extra packs) Stripe emails it to your account’s address and you can download it from My account → Manage subscription. For a manual payment, ask us for your receipt and we will send it.",
         ],
       },
       {
@@ -178,6 +183,7 @@ export const TERMINOS: Record<"es" | "en", DocumentoLegal> = {
           "What you create with Studio is yours. You are responsible for reviewing it before publishing and for having permission for any material you upload (photos, logos, music, voices).",
           "Artificial intelligence can make mistakes or produce results similar to other people’s. Check facts, prices and claims before using them.",
           "The music and sounds included in Studio have their own licenses (shown in the app). Respect them when you use them.",
+          "InnovationTECH is not responsible for the content you create, upload or publish with Studio: scripts, copy, images, voices, videos (including those you record or upload yourself) and music. You decide what gets published and where, and you answer for it to your customers, social networks and third parties.",
         ],
       },
       {
