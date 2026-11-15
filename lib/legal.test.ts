@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CONTACTO_LEGAL, PRIVACIDAD, TERMINOS, VERSION_LEGAL, type DocumentoLegal } from "./legal";
+import { CREDITOS } from "./creditos";
 
 // El español y el inglés deben decir lo mismo: misma cantidad de secciones y nada vacío.
 function revisar(nombre: string, doc: Record<"es" | "en", DocumentoLegal>) {
@@ -44,5 +45,18 @@ test("TERMINOS: el contenido es responsabilidad del usuario, se cobra en dólare
     assert.match(texto, /USD/, `${lang}: dólares`);
     assert.match(texto, /Cash App de InnovationTECH|InnovationTECH Cash App/, `${lang}: Cash App`);
     assert.match(texto, /(factura|invoice)/, `${lang}: factura`);
+  }
+});
+
+// ---------- Créditos y licencias ----------
+
+test("CREDITOS: es y en con las mismas secciones y sin textos vacíos", () => revisar("CREDITOS", CREDITOS));
+
+test("CREDITOS nombra a los autores que piden reconocimiento y las fuentes de música y sonidos, en es y en", () => {
+  for (const lang of ["es", "en"] as const) {
+    const todo = JSON.stringify(CREDITOS[lang]);
+    for (const nombre of ["Frank Wen", "FluidR3", "FreePD", "Sonic Pi", "Versilian", "BiRefNet", "CC0", "MIT"]) {
+      assert.ok(todo.includes(nombre), `${lang}: falta ${nombre}`);
+    }
   }
 });

@@ -25,7 +25,8 @@ import {
 import { TRANSICIONES, esDuracionTransicion, esTransicion, nombreTransicion, type DuracionTransicion, type Transicion } from "./reel-transicion";
 
 export const MAX_ACCIONES = 20;
-export const MAX_ORDEN = 500; // caracteres de la orden
+export { MAX_ORDEN } from "./orden";
+import { MAX_ORDEN } from "./orden";
 // Al armar un video cada foto dura de 7 a 10 s: pocas imágenes, bien aprovechadas (se gasta menos)
 export const FOTO_DIRECTOR = 8;
 export const MIN_FOTO_DIRECTOR = 7;

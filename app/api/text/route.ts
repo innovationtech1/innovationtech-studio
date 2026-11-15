@@ -1,3 +1,4 @@
+import { MAX_TEXTO_AJUSTE, instruccionesAjuste, instruccionesImagen, validarAjuste, validarImagen } from "@/lib/director-secciones";
 import { jsonError } from "@/lib/replicate";
 import { clavePropiaCF, getCreds, refund } from "@/lib/cf-auth";
 import { jsonAcceso, requireAccess, type Acceso } from "@/lib/account";
@@ -96,9 +97,9 @@ function parseJson(text: string): Record<string, unknown> | null {
 }
 
 export async function POST(req: Request) {
-  const { prompt, platform, brand, model, provider, mode, scenes, dates, previous, estado, catalogo } = await req.json().catch(() => ({}));
+  const { prompt, platform, brand, model, provider, mode, scenes, dates, previous, estado, catalogo, texto, actual } = await req.json().catch(() => ({}));
   if (!prompt || typeof prompt !== "string") return jsonError("Escribe qué quieres crear.");
-  if (mode === "director" && prompt.length > MAX_ORDEN) return jsonError(`La orden es muy larga (máximo ${MAX_ORDEN} caracteres).`);
+  if ((mode === "director" || mode === "ajustar" || mode === "director_imagen") && prompt.length > MAX_ORDEN) return jsonError(`La orden es muy larga (máximo ${MAX_ORDEN} caracteres).`);
   const english = req.headers.get("x-lang") === "en";
   const brandBlock =
     (brand ? `\nContexto de la marca:\n${brand}` : "") +
@@ -188,6 +189,47 @@ export async function POST(req: Request) {
         coverImagePrompt: typeof json?.cover_image_prompt === "string" ? json.cover_image_prompt : "",
         caption: typeof json?.caption === "string" ? json.caption : "",
       });
+    }
+
+    // Modo ajustar: corrige un texto ya creado según una orden («más corto», «en inglés»…). lib/director-secciones.ts
+    if (mode === "ajustar") {
+      const anterior = typeof texto === "string" ? texto.slice(0, MAX_TEXTO_AJUSTE) : "";
+      if (!anterior.trim()) {
+        await acceso.devolver();
+        return jsonError("Primero crea un texto para poder corregirlo.");
+      }
+      const i = instruccionesAjuste({ texto: anterior, ingles: english });
+      const salida = await generate(req, acceso, provider, model, { system: i.system, user: i.user(prompt), maxTokens: 1400, temperatura: 0.5 });
+      const nuevo = validarAjuste(salida, anterior);
+      if (!nuevo) {
+        await acceso.devolver(); // no cambió nada: no se cobra
+        return jsonError("No pude aplicar ese cambio. Dilo de otra forma.", 502);
+      }
+      return Response.json({ text: nuevo });
+    }
+
+    // Modo director de imágenes: la orden se convierte en descripción (en inglés), formato y cantidad.
+    // La app llena los campos y pregunta antes de gastar imágenes.
+    if (mode === "director_imagen") {
+      const a = (actual && typeof actual === "object" ? actual : {}) as Record<string, unknown>;
+      const i = instruccionesImagen({
+        actual: {
+          descripcion: String(a.descripcion ?? "").slice(0, 1000),
+          formato: String(a.formato ?? "1:1").slice(0, 5),
+          cantidad: Math.min(4, Math.max(1, Number(a.cantidad) || 1)),
+          marca: a.marca !== false,
+          fotos: Math.min(4, Math.max(0, Number(a.fotos) || 0)),
+        },
+        marca: typeof brand === "string" ? brand : undefined,
+        ingles: english,
+      });
+      const salida = await generate(req, acceso, provider, model, { system: i.system, user: i.user(prompt), maxTokens: 500, temperatura: 0.4 });
+      const orden = validarImagen(parseJson(salida));
+      if (!orden) {
+        await acceso.devolver(); // no se entendió: no se cobra el texto
+        return jsonError("No entendí la orden. Dila de otra forma.", 502);
+      }
+      return Response.json(orden);
     }
 
     // Modo director: la orden (escrita o dictada) se traduce a acciones del catálogo (lib/director.ts).
