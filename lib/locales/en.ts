@@ -187,6 +187,8 @@ export const EN: Record<string, string> = {
   "Colores (el primero es el principal)": "Colors (the first one is the main one)",
   "Colores en palabras (para la IA, opcional)": "Colors in words (for the AI, optional)",
   "Compartir": "Share",
+  "Preparando…": "Preparing…",
+  "Tu navegador no deja compartir este archivo: lo descargamos. Súbelo desde tu aparato a la red que quieras.": "Your browser can't share this file, so we downloaded it. Upload it from your device to the network you want.",
   "Componiendo música…": "Composing music…",
   "Componiendo una muestra…": "Composing a sample…",
   "Con tu cuenta gratis tienes uso diario de IA sin los límites del modo demo": "With your free account you get daily AI usage without the demo mode limits",

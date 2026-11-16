@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Brand, brandAccent, brandContext, brandVisual } from "@/lib/brand";
 import { friendlyError } from "@/lib/errors";
+import CompartirBotones from "./compartir-botones";
 import { fileToResizedDataUrl } from "@/lib/resize";
 import { ReelFormat, ReelOptions, renderReel, supportedRecording, vistaPrevia } from "@/lib/reel";
 import type { Item, Settings } from "@/lib/types";
@@ -455,15 +456,21 @@ export default function ReelStudio({
   // Al empezar a grabar y al terminar, la pantalla baja a donde se ve el video
   const aLaVista = (el: HTMLElement | null) => el?.scrollIntoView({ behavior: "smooth", block: "center" });
   const [momentoPortada, setMomentoPortada] = useState(0);
-  function descargarPortada() {
+  // La portada es el cuadro del video que se ve ahora (JPG en data URL).
+  function capturarPortada(): string | null {
     const v = videoFinal.current;
-    if (!v || !v.videoWidth) return;
+    if (!v || !v.videoWidth) return null;
     const c = document.createElement("canvas");
     c.width = v.videoWidth;
     c.height = v.videoHeight;
     c.getContext("2d")!.drawImage(v, 0, 0);
+    return c.toDataURL("image/jpeg", 0.92);
+  }
+  function descargarPortada() {
+    const url = capturarPortada();
+    if (!url) return;
     const a = document.createElement("a");
-    a.href = c.toDataURL("image/jpeg", 0.92);
+    a.href = url;
     a.download = "portada-innovationtech.jpg";
     a.click();
   }
@@ -1668,6 +1675,7 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
               <a href={result.url} download={`reel-innovationtech.${result.ext}`}>
                 <Download size={16} aria-hidden /> Descargar video ({result.seconds} s, {result.ext.toUpperCase()})
               </a>
+              <CompartirBotones key={result.url} src={result.url} nombre={`reel-innovationtech.${result.ext}`} />
               <span className="muted">· Guardado en tu galería</span>
             </div>
             <div className="portada">
@@ -1696,6 +1704,7 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
               <button className="btn ghost small" onClick={descargarPortada}>
                 <Download size={15} aria-hidden /> Descargar portada
               </button>
+              <CompartirBotones src={capturarPortada} nombre="portada-innovationtech.jpg" />
             </div>
           </div>
         )}

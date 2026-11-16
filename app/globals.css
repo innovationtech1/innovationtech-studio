@@ -397,6 +397,12 @@ label.check input { width: auto; }
 .checker canvas { max-width: 100%; max-height: 52vh; touch-action: manipulation; }
 .bg-remover .seg button { flex: 1; }
 
+/* Compartir (junto a cada Descargar) */
+.compartir { display: contents; }
+.compartir-aviso { display: block; flex-basis: 100%; width: 100%; margin-top: 8px; font-size: 13.5px; }
+.compartir.compacto { display: inline-flex; }
+.compartir.compacto .compartir-aviso { position: fixed; left: 12px; right: 12px; bottom: 16px; z-index: 120; width: auto; max-width: 420px; margin: 0 auto; box-shadow: 0 8px 24px rgba(0,0,0,0.45); }
+
 /* Galería */
 .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
 .gallery-item { background: var(--navy-900); border: 1px solid var(--navy-700); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }

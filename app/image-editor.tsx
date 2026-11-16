@@ -47,6 +47,7 @@ import type { Item } from "@/lib/types";
 import BgRemover from "./bg-remover";
 import ShapeCrop from "./shape-crop";
 import { toDataUrl } from "@/lib/media-store";
+import { aArchivo, compartirArchivos, descargarArchivo } from "@/lib/compartir";
 
 import { AlignCenter, AlignCenterHorizontal, AlignCenterVertical, AlignLeft, AlignRight, Aperture, BadgeCheck, BringToFront, Check, ChevronDown, ChevronUp, Download, Eraser, Eye, EyeOff, FlipHorizontal2, FlipVertical2, FolderOpen, Frame, ImagePlus, Layers, LayoutTemplate, Lock, LockOpen, Ratio, Redo2, Save, Scissors, SendToBack, Shapes, Share2, SlidersHorizontal, Sparkles, Square, Tag, Trash2, Type, type LucideIcon, Undo2 } from "lucide-react";
 type Tool = "plantillas" | "marca" | "ajustes" | "filtros" | "texto" | "stickers" | "formas" | "imagen" | "marco" | "capas";
@@ -870,11 +871,9 @@ export default function ImageEditor({
   const share = async () => {
     const url = exportImage();
     if (!url) return;
-    const blob = await (await fetch(url)).blob();
-    const file = new File([blob], `innovationtech-diseno.${outFmt}`, { type: blob.type });
-    const nav = navigator as Navigator & { canShare?: (d: unknown) => boolean };
-    if (nav.canShare?.({ files: [file] })) await navigator.share({ files: [file] }).catch(() => {});
-    else download();
+    const file = await aArchivo(url, `innovationtech-diseno.${outFmt}`);
+    if (!file) return download();
+    if ((await compartirArchivos([file])) === "descargar") descargarArchivo(file);
   };
 
   const newDesign = () => {

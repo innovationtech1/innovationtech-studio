@@ -26,6 +26,7 @@ import AssistantChat from "./assistant-chat";
 import { extract, phrases } from "@/lib/phrases";
 import { BotonCuenta, CUENTAS_ON, MejorarPro, ProTag, useCuenta } from "./account-context";
 import Camara from "./camara";
+import CompartirBotones from "./compartir-botones";
 import { dataUrlReducida } from "@/lib/resize";
 
 type Tab = "texto" | "imagen" | "editor" | "video" | "galeria" | "marca" | "config";
@@ -1260,6 +1261,7 @@ function Gallery({
                 <a title="Descargar" href={it.url} download={`innovationtech-${it.kind}.${ext(it)}`}>
                   <Download size={17} aria-hidden />
                 </a>
+                <CompartirBotones compacto src={it.url} nombre={`innovationtech-${it.kind}.${ext(it)}`} />
                 <button
                   title="Eliminar"
                   onClick={() => it.id && confirm("¿Eliminar este elemento de la galería?") && onRemove(it.id)}
@@ -1296,6 +1298,7 @@ function Gallery({
               <a className="btn ghost small" href={open.url} download={`innovationtech-${open.kind}.${ext(open)}`}>
                 <Download size={16} aria-hidden /> Descargar
               </a>
+              <CompartirBotones key={open.url} src={open.url} nombre={`innovationtech-${open.kind}.${ext(open)}`} />
               <button className="btn ghost small" onClick={() => setOpen(null)}>
                 Cerrar
               </button>
