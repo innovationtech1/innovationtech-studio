@@ -274,7 +274,7 @@ Entra a Netlify → proyecto **innovationtech-studio** → *Project configuratio
 | `R2_BUCKET` | Nombre del bucket de R2 (por ejemplo `studio-videos`) |
 | `VIDEO_IA` | Opcional. `off` apaga al instante las tomas con IA (los reels con animación siguen funcionando) |
 | `VIDEO_IA_TOPE_CENTAVOS` | Opcional. Tope de gasto del día en fal.ai para esa publicación, en centavos (`200` = $2); si está, manda sobre el tope del panel. Útil para que la versión de prueba gaste menos |
-| `STUDIO_COLECCION_PREFIJO` | Opcional. Inicio del nombre de las colecciones de Firestore (`studio_` si no la pones). Solo para las versiones de prueba: `prueba_studio_` (ver Paso 4) |
+| `STUDIO_COLECCION_PREFIJO` | Opcional. Inicio del nombre de las colecciones de Firestore (`studio_` si no la pones). Solo para las versiones de prueba: `prueba_studio_` (ver Paso 4). Solo letras, números, `_` y `-`: con otro carácter las cuentas de esa publicación no funcionan (a propósito, para no tocar los datos del sitio principal) |
 
 Netlify bloquea la publicación si encuentra en el código un valor igual a una variable. Como las variables no secretas sí aparecen en el sitio, agrega una variable más:
 
@@ -423,7 +423,7 @@ Protecciones que ya vienen puestas (se pueden cambiar en Firestore, documento `s
 
 5. En el bucket → *Settings → Object lifecycle rules*, agrega una regla: prefijo `demo/`, **borrar a los 30 días**. Ahí van las fotos y clips de las pruebas gratis (también los de la versión de prueba, en `demo/pruebas/`). Studio deja de usar esos clips a los 29 días (el editor avisa que la toma venció) y no acepta fotos de `demo/` de una cuenta que ya pasó a un plan de pago.
 6. Vuelve a publicar el sitio y, en `/admin`, presiona **Preparar Stripe** otra vez para que cree el precio del paquete **Video** ($15).
-7. **Índice de Firestore para la fila** (gratis; una sola vez): en la consola de Firebase → *Firestore Database → Indexes → Composite → Create index*: colección `studio_trabajos_video`, campos `estado` (Ascending), `prioridad` (Ascending) y `creado` (Ascending), alcance *Collection*. Repite con la colección `prueba_studio_trabajos_video` si usas la versión de prueba. Tarda unos minutos en quedar *Enabled*. Es el mismo que está en `firestore.indexes.json` (con la herramienta de Firebase: `firebase deploy --only firestore:indexes`). Sin el índice todo sigue funcionando, pero la fila se ordena en el servidor y en el registro aparece un aviso.
+7. **Índice de Firestore para la fila** (gratis; una sola vez): en la consola de Firebase → *Firestore Database → Indexes → Composite → Create index*: colección `studio_trabajos_video`, campos `estado` (Ascending), `prioridad` (Ascending) y `creado` (Ascending), alcance *Collection*. Repite con la colección `prueba_studio_trabajos_video` si usas la versión de prueba. Tarda unos minutos en quedar *Enabled*. Es el mismo que está en `firestore.indexes.json`, que queda solo como referencia: créalo **en la consola**, como aquí. **Nunca** uses `firebase deploy --only firestore:indexes --force`: el proyecto de Firebase es el mismo de NOVA y con `--force` se borrarían los índices que no están en ese archivo, entre ellos el índice vectorial de NOVA. Sin el índice todo sigue funcionando, pero la fila se ordena en el servidor y en el registro aparece un aviso.
 8. **Prueba:** entra con una cuenta en prueba, sube 2 fotos al Creador de Reels, marca una «Con IA» y toca **Generar con IA**. Debe pasar por «Subiendo…», «En fila», «Toma 1 de 1 · Generando…» y terminar con el video listo (suele tardar de 1 a 3 minutos).
 
 Notas:

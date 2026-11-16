@@ -115,6 +115,10 @@ export const CAMPOS_ENVIO = ["envio", "falRequestId", "statusUrl", "responseUrl"
 const numero = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 const sinUndefined = (o: object) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
 
+// Si el índice de la fila todavía no está publicado se recuerda aquí (para todo el servidor, no por
+// almacén): así no se intenta y falla la consulta con índice en cada pedido.
+let filaSinIndice = false;
+
 export function firestoreVideoStore(): VideoStore {
   const C = colecciones();
   const trabajos = () => db().collection(C.trabajosVideo);
@@ -122,15 +126,14 @@ export function firestoreVideoStore(): VideoStore {
   const contador = (negocioId: string, dia: string) => db().collection(C.tomasDia).doc(`${negocioId}_${dia}`);
   // La fila en orden (prioridad y antigüedad) con tope de lecturas. Usa el índice compuesto de
   // firestore.indexes.json; si todavía no está publicado, lee hasta `limite` por estado y ordena aquí.
-  let sinIndice = false;
   const fila = async (limite: number): Promise<TrabajoVideo[]> => {
     const base = trabajos().where("estado", "==", "en_fila");
-    if (!sinIndice) {
+    if (!filaSinIndice) {
       try {
         return (await base.orderBy("prioridad").orderBy("creado").limit(limite).get()).docs.map(deDoc);
       } catch (e) {
         if ((e as { code?: unknown }).code !== 9) throw e; // 9 = FAILED_PRECONDITION: falta el índice
-        sinIndice = true;
+        filaSinIndice = true;
         console.warn("Video con IA: falta publicar el índice de la fila (firestore.indexes.json); se ordena en el servidor.");
       }
     }
