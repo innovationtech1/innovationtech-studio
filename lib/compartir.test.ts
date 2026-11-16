@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { compartirArchivos, aArchivo } from "./compartir";
+import { compartirArchivos, aArchivo, archivoAlInstante } from "./compartir";
 
 const archivo = () => new File([new Uint8Array([1, 2, 3])], "reel.mp4", { type: "video/mp4" });
 
@@ -71,4 +71,19 @@ test("aArchivo con fetch que falla devuelve null", async () => {
   assert.equal(await aArchivo("https://ejemplo.com/v.mp4", "v.mp4", rechaza), null);
   const noOk = (async () => new Response("x", { status: 403 })) as unknown as typeof fetch;
   assert.equal(await aArchivo("https://ejemplo.com/v.mp4", "v.mp4", noOk), null);
+});
+
+test("archivoAlInstante: Blob y data: se vuelven File sin esperar; blob: y enlaces remotos no", async () => {
+  const b = archivoAlInstante(new Blob([new Uint8Array([1, 2])], { type: "video/mp4" }), "reel.mp4");
+  assert.ok(b instanceof File);
+  assert.equal(b?.name, "reel.mp4");
+  assert.equal(b?.type, "video/mp4");
+  const d = archivoAlInstante("data:image/jpeg;base64,AQID", "portada.jpg");
+  assert.equal(d?.type, "image/jpeg");
+  assert.deepEqual([...new Uint8Array(await d!.arrayBuffer())], [1, 2, 3]);
+  const t = archivoAlInstante("data:text/plain,hola%20mundo", "a.txt");
+  assert.equal(await t!.text(), "hola mundo");
+  assert.equal(archivoAlInstante("data:image/jpeg;base64,@@no", "x.jpg"), null);
+  assert.equal(archivoAlInstante("blob:https://studio/123", "x.mp4"), null);
+  assert.equal(archivoAlInstante("https://ejemplo.com/v.mp4", "x.mp4"), null);
 });

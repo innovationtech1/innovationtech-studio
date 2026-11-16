@@ -407,6 +407,9 @@ label.check input { width: auto; }
 .drive-estado .drive-texto { flex: 1 1 160px; }
 .drive-barra { flex-basis: 100%; height: 6px; border-radius: 99px; background: var(--line-soft); overflow: hidden; order: 3; }
 .drive-barra > span { display: block; height: 100%; background: var(--signal); transition: width 0.3s; }
+.drive-barra.sin-avance > span { width: 35%; animation: drive-sin-avance 1.2s ease-in-out infinite; }
+@keyframes drive-sin-avance { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+@media (prefers-reduced-motion: reduce) { .drive-barra.sin-avance > span { animation: none; width: 100%; opacity: 0.5; } }
 .compartir .drive-estado .btn { margin: 0; padding: 6px 12px; border: 1px solid var(--line); border-radius: var(--radius-ctl); color: var(--paper); background: transparent; font-size: 13px; }
 
 /* Galería */

@@ -285,7 +285,9 @@ export default function CarouselStudio({
       const imgs = await renderAll();
       setBusy("Abriendo compartir…");
       const files = await Promise.all(imgs.map((f, i) => toFile(f.url, fileName(i, f.ext))));
-      const r = await compartirArchivos(files, caption.trim() ? caption : undefined);
+      // El texto va al portapapeles (no al menú de compartir): varias apps descartan las fotos si llega texto.
+      if (caption.trim()) await navigator.clipboard?.writeText(caption).catch(() => {});
+      const r = await compartirArchivos(files);
       if (r === "descargar") throw new Error("share");
       if (r === "compartido") setDone(caption.trim() ? "Se copió el texto para publicar: pégalo en la descripción." : "Listo.");
     } catch (e) {

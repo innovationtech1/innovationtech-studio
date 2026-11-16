@@ -50,6 +50,31 @@ export async function aArchivo(src: Blob | string, nombre: string, f?: typeof fe
   }
 }
 
+/**
+ * El archivo sin esperar nada (Blob o enlace data:), para que el toque llegue directo al menú de compartir:
+ * Safari (iPhone) pierde el permiso si hay una espera entre el toque y `navigator.share`.
+ * Enlaces blob: o remotos → null (hay que leerlos con `aArchivo`).
+ */
+export function archivoAlInstante(src: Blob | string, nombre: string): File | null {
+  if (typeof src !== "string") return new File([src], nombre, { type: src.type });
+  const m = /^data:([^,;]*)((?:;[^,;]*)*?)(;base64)?,(.*)$/s.exec(src);
+  if (!m) return null;
+  const tipo = m[1] || "text/plain";
+  try {
+    let bytes: Uint8Array<ArrayBuffer>;
+    if (m[3]) {
+      const bin = atob(m[4]);
+      bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    } else {
+      bytes = new Uint8Array(new TextEncoder().encode(decodeURIComponent(m[4])));
+    }
+    return new File([bytes], nombre, { type: tipo });
+  } catch {
+    return null;
+  }
+}
+
 export function descargarArchivo(archivo: File): void {
   const url = URL.createObjectURL(archivo);
   const a = document.createElement("a");

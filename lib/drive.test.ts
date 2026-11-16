@@ -504,3 +504,40 @@ test("pedirToken: ventana bloqueada da un mensaje claro; cerrar la ventana es ca
     gis.limpiar();
   }
 });
+
+// ---------- Correcciones de la revisión final ----------
+
+test("errorDrive: 403 accessNotConfigured (API de Drive sin activar) es CONFIG con un mensaje para avisar al equipo", () => {
+  const cuerpo = JSON.stringify({ error: { errors: [{ reason: "accessNotConfigured" }], status: "PERMISSION_DENIED" } });
+  const e = errorDrive(403, cuerpo);
+  assert.equal(e.codigo, "CONFIG");
+  assert.equal(e.message, "Google Drive no está activado para Studio. Avísale al equipo de InnovationTECH.");
+  assert.equal(errorDrive(403, "texto con accessNotConfigured adentro").codigo, "CONFIG");
+});
+
+test("guardarEnDrive: «Cancelar» mientras se espera la ventana de Google termina de inmediato (AbortError) sin tocar Drive", async () => {
+  const ctrl = new AbortController();
+  const { f, peticiones } = fetchFalso([]);
+  const p = guardarEnDrive(new Blob([new Uint8Array(10)]), "reel.mp4", {
+    token: () => new Promise<string>(() => {}), // la persona no responde en la ventana de Google
+    tokenNuevo: async () => "tk",
+    f,
+    senal: ctrl.signal,
+  });
+  ctrl.abort();
+  await assert.rejects(p, { name: "AbortError" });
+  assert.equal(peticiones.length, 0);
+});
+
+test("enNavegadorDeApp también detecta el WebView de Android, Snapchat, LinkedIn y el de ByteDance", () => {
+  for (const ua of [
+    "Mozilla/5.0 (Linux; Android 15; Pixel 9 Build/AP4A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/131.0 Mobile Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Snapchat/13.20.0.39 (like Safari/8618.1.15.10.15)",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 [LinkedInApp]/9.30.1",
+    "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36 BytedanceWebview/d8a21c6",
+  ]) {
+    assert.equal(enNavegadorDeApp(ua), true, ua);
+  }
+  // Chrome normal de Android no lleva «; wv)».
+  assert.equal(enNavegadorDeApp("Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36"), false);
+});

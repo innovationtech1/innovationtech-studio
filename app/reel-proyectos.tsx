@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState, type ComponentProps } from "react";
+import { tr } from "@/lib/i18n";
 import { FolderPlus, Pencil, Trash2 } from "lucide-react";
 import ReelStudio from "./reel-studio";
 import { MAX_PROYECTOS, borrarProyecto, cambiarA, crearProyecto, leerProyectos, renombrarProyecto, videosDeOtros, type Proyecto } from "@/lib/proyectos";
 import { deleteFile } from "@/lib/media-store";
 
-type Props = Omit<ComponentProps<typeof ReelStudio>, "videosDeOtros" | "onOcupado">;
+type Props = Omit<ComponentProps<typeof ReelStudio>, "videosDeOtros" | "onOcupado" | "onSubiendoDrive">;
 // Lo que se escribe se guarda con una pequeña pausa: antes de cambiar de video se espera a que termine
 const ESPERA_GUARDADO = 450;
 
@@ -21,6 +22,7 @@ export default function ReelProyectos(props: Props) {
   const [nombre, setNombre] = useState("");
   const [cambiando, setCambiando] = useState(false);
   const [ocupado, setOcupado] = useState(false);
+  const subiendoDrive = useRef(false); // cambiar de video quita el Creador de Reels y corta la subida a Drive
   const [aviso, setAviso] = useState("");
   // Lo que llegó de otras secciones antes de cambiar de video no se vuelve a aplicar al video nuevo
   const vistos = useRef({ h: -1, s: -1, t: -1 });
@@ -40,6 +42,8 @@ export default function ReelProyectos(props: Props) {
   // Hace un cambio de video: espera el guardado pendiente, aplica el cambio y vuelve a montar
   async function conCambio(fn: () => void) {
     if (cambiando || ocupado) return;
+    const cortaDrive = subiendoDrive.current;
+    if (cortaDrive && !confirm(tr("La subida a Drive sigue en curso. ¿Cancelarla?"))) return;
     setCambiando(true);
     setAviso("");
     setModo("");
@@ -52,6 +56,7 @@ export default function ReelProyectos(props: Props) {
     vistos.current = { h: props.handoff?.n ?? -1, s: props.sceneUpdate?.n ?? -1, t: props.incomingTopic?.n ?? -1 };
     refrescar();
     setVuelta((v) => v + 1);
+    if (cortaDrive) setAviso("Se canceló la subida a Drive.");
     setCambiando(false);
   }
 
@@ -134,6 +139,7 @@ export default function ReelProyectos(props: Props) {
         incomingTopic={props.incomingTopic && props.incomingTopic.n !== vistos.current.t ? props.incomingTopic : null}
         videosDeOtros={otros}
         onOcupado={setOcupado}
+        onSubiendoDrive={(activo) => (subiendoDrive.current = activo)}
       />
     </>
   );

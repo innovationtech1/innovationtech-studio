@@ -10,7 +10,7 @@ const CARPETA = "InnovationTECH Studio";
 const TIPO_CARPETA = "application/vnd.google-apps.folder";
 const ESPERA_REINTENTO = 1500;
 
-export type CodigoDrive = "TOKEN" | "LLENO" | "PERMISO" | "OCUPADO" | "RED" | "OTRO";
+export type CodigoDrive = "TOKEN" | "LLENO" | "PERMISO" | "OCUPADO" | "RED" | "CONFIG" | "OTRO";
 
 const MENSAJES: Record<CodigoDrive, string> = {
   TOKEN: "Tu sesión de Google venció. Vuelve a intentarlo.",
@@ -18,6 +18,7 @@ const MENSAJES: Record<CodigoDrive, string> = {
   PERMISO: "Google no dio permiso para guardar en tu Drive.",
   OCUPADO: "Google Drive está ocupado. Espera un momento y vuelve a intentarlo.",
   RED: "Se perdió la conexión al subir a Drive. Vuelve a intentarlo.",
+  CONFIG: "Google Drive no está activado para Studio. Avísale al equipo de InnovationTECH.",
   OTRO: "No se pudo guardar en Google Drive.",
 };
 
@@ -42,9 +43,11 @@ export function errorDrive(status: number, cuerpo: string): ErrorDrive {
       const datos = JSON.parse(cuerpo) as { error?: { errors?: { reason?: string }[] } };
       razones = (datos.error?.errors ?? []).map((e) => e.reason ?? "");
     } catch {
-      razones = ["storageQuotaExceeded", "userRateLimitExceeded", "rateLimitExceeded"].filter((r) => cuerpo.includes(r));
+      razones = ["storageQuotaExceeded", "userRateLimitExceeded", "rateLimitExceeded", "accessNotConfigured"].filter((r) => cuerpo.includes(r));
     }
     if (razones.includes("storageQuotaExceeded")) return new ErrorDrive("LLENO", status);
+    // La API de Drive no está activada en el proyecto de Google Cloud de Studio.
+    if (razones.includes("accessNotConfigured")) return new ErrorDrive("CONFIG", status);
     if (razones.includes("userRateLimitExceeded") || razones.includes("rateLimitExceeded")) {
       return new ErrorDrive("OCUPADO", status);
     }
@@ -267,6 +270,26 @@ export async function subirTrozos(
 
 export type Token = () => Promise<string>;
 
+// Espera la promesa, pero si se cancela antes (p. ej. la ventana de Google sigue abierta), termina con AbortError.
+function conCancelar<T>(p: Promise<T>, senal?: AbortSignal): Promise<T> {
+  revisarCancelado(senal);
+  if (!senal) return p;
+  return new Promise<T>((res, rej) => {
+    const alCancelar = () => rej(errorCancelado());
+    senal.addEventListener("abort", alCancelar, { once: true });
+    p.then(
+      (v) => {
+        senal.removeEventListener("abort", alCancelar);
+        res(v);
+      },
+      (e) => {
+        senal.removeEventListener("abort", alCancelar);
+        rej(e);
+      },
+    );
+  });
+}
+
 /**
  * Carpeta → sesión de subida → trozos. Si el token venció, pide uno nuevo una sola vez y empieza de nuevo.
  * Si la sesión de subida venció (404), abre otra una sola vez.
@@ -286,7 +309,7 @@ export async function guardarEnDrive(
   },
 ): Promise<Subido> {
   revisarCancelado(op.senal);
-  let token = await op.token();
+  let token = await conCancelar(op.token(), op.senal);
   let guardada = op.carpetaGuardada ?? null;
   let renovado = false;
   let reabierta = false;
@@ -317,7 +340,7 @@ export async function guardarEnDrive(
     } catch (e) {
       if (e instanceof ErrorDrive && e.codigo === "TOKEN" && !renovado) {
         renovado = true;
-        token = await op.tokenNuevo();
+        token = await conCancelar(op.tokenNuevo(), op.senal);
         continue;
       }
       throw e;

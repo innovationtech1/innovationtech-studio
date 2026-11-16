@@ -433,13 +433,11 @@ Mientras no pongas `NEXT_PUBLIC_GOOGLE_CLIENT_ID`, el botón no aparece y todo l
 
 1. Entra a <https://console.cloud.google.com> con la cuenta de Google del negocio y elige arriba el proyecto **`innovationtech-nova`** (el mismo de Firebase).
 2. **Activar la API:** *APIs & Services → Library*, busca **«Google Drive API»** y toca **Enable**.
-3. **Pantalla de permisos** (lo que ve el cliente cuando Google le pregunta): *APIs & Services → OAuth consent screen*.
-   - Tipo de usuario: **External**.
-   - Nombre de la app (por ejemplo «InnovationTECH Studio»), correo de soporte y logo.
-   - Enlaces: Privacidad `https://innovationtech-studio.netlify.app/privacidad` y Términos `https://innovationtech-studio.netlify.app/terminos`.
-   - Permisos (*scopes*): agrega solo `https://www.googleapis.com/auth/drive.file`.
-   - Al terminar, toca **Publish app** (pasar a producción). `drive.file` no es un permiso sensible, así que Google no pide la verificación larga.
-4. **ID de cliente:** *APIs & Services → Credentials → Create credentials → OAuth client ID*.
+3. **Pantalla de permisos** (lo que ve el cliente cuando Google le pregunta): menú → **Google Auth Platform**. Ojo: esta pantalla es **la misma** que ya usa el inicio de sesión con Google de Firebase; lo que cambies aquí también lo ven los clientes al entrar con Google. Si ya está configurada, solo revisa y agrega lo que falte.
+   - **Branding:** nombre de la app (por ejemplo «InnovationTECH Studio») y correo de soporte. Empieza **sin logo**: si subes un logo, Google pide una revisión de la marca que puede tardar días; se puede agregar después. Enlaces: Privacidad `https://innovationtech-studio.netlify.app/privacidad` y Términos `https://innovationtech-studio.netlify.app/terminos`. En *Authorized domains* debe estar `innovationtech-studio.netlify.app`.
+   - **Audience:** tipo de usuario **External**. Toca **Publish app** para pasarla a *In production* (si se queda en *Testing*, solo pueden entrar las cuentas de prueba que agregues).
+   - **Data access:** *Add or remove scopes* → agrega solo `https://www.googleapis.com/auth/drive.file` y guarda. `drive.file` no es un permiso sensible, así que Google no pide la verificación larga.
+4. **ID de cliente:** en **Google Auth Platform → Clients → Create client**.
    - Tipo: **Web application**.
    - *Authorized JavaScript origins* (las direcciones desde donde se puede pedir el permiso), estas tres:
      - `https://innovationtech-studio.netlify.app`
@@ -454,6 +452,8 @@ Notas:
 
 - Dentro de la app de Instagram, Facebook o TikTok, Google no deja iniciar sesión: Studio le pide al cliente abrirlo en Chrome o Safari.
 - Si el navegador bloquea las ventanas emergentes, Studio lo avisa; el cliente debe permitirlas para este sitio.
+- Si sale «Google Drive no está activado para Studio», falta el paso 2 (activar «Google Drive API»).
+- El servicio de Google solo se carga cuando el botón «Guardar en Drive» aparece en pantalla.
 - Los videos grandes se suben por partes de 8 MB; si se corta la conexión, la subida sigue desde donde quedó. El cliente puede cancelarla.
 - El espacio usado es el del Drive del cliente (15 GB gratis en Google).
 

@@ -3,9 +3,12 @@
 // servidor y nunca aparece en mensajes ni registros. Permiso: solo los archivos que Studio crea.
 import { ErrorDrive } from "./drive";
 
-/** Navegadores dentro de otras apps (Instagram, Facebook, TikTok, LINE): Google no deja iniciar sesión ahí. */
+/**
+ * Navegadores dentro de otras apps (Instagram, Facebook, TikTok, LINE, Snapchat, LinkedIn, WebView de Android):
+ * Google no deja iniciar sesión ahí.
+ */
 export function enNavegadorDeApp(ua: string): boolean {
-  return /Instagram|FBAN|FBAV|FB_IAB|TikTok|musical_ly|Line\//.test(ua);
+  return /Instagram|FBAN|FBAV|FB_IAB|TikTok|musical_ly|BytedanceWebview|Line\/|Snapchat|LinkedInApp|; wv\)/.test(ua);
 }
 
 const SCRIPT = "https://accounts.google.com/gsi/client";

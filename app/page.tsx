@@ -11,7 +11,7 @@ import { fileToResizedDataUrl } from "@/lib/resize";
 import { usePersistentState } from "@/lib/persist";
 import { useGallery } from "@/lib/use-gallery";
 import { useDemo } from "@/lib/use-demo";
-import { getLang, installLangHeader, locale, setLang, startDomTranslation } from "@/lib/i18n";
+import { getLang, installLangHeader, locale, setLang, startDomTranslation, tr } from "@/lib/i18n";
 import { Bug, Languages, MessagesSquare } from "lucide-react";
 import MicButton from "./mic-button";
 import Director from "./director";
@@ -1195,7 +1195,7 @@ function Gallery({
   // Cerrar la vista en grande cancela una subida a Drive en curso: se pregunta antes.
   const subiendoDrive = useRef(false);
   const cerrarVista = () => {
-    if (subiendoDrive.current && !confirm("La subida a Drive sigue en curso. ¿Cancelarla?")) return false;
+    if (subiendoDrive.current && !confirm(tr("La subida a Drive sigue en curso. ¿Cancelarla?"))) return false;
     setOpen(null);
     return true;
   };
@@ -1268,7 +1268,7 @@ function Gallery({
                 <a title="Descargar" href={it.url} download={`innovationtech-${it.kind}.${ext(it)}`}>
                   <Download size={17} aria-hidden />
                 </a>
-                <CompartirBotones compacto src={it.url} nombre={`innovationtech-${it.kind}.${ext(it)}`} />
+                <CompartirBotones compacto src={it.blob ?? it.url} nombre={`innovationtech-${it.kind}.${ext(it)}`} />
                 <button
                   title="Eliminar"
                   onClick={() => it.id && confirm("¿Eliminar este elemento de la galería?") && onRemove(it.id)}
@@ -1307,7 +1307,7 @@ function Gallery({
               </a>
               <CompartirBotones
                 key={open.url}
-                src={open.url}
+                src={open.blob ?? open.url}
                 nombre={`innovationtech-${open.kind}.${ext(open)}`}
                 alSubir={(activo) => (subiendoDrive.current = activo)}
               />

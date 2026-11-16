@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CloudUpload, Share2 } from "lucide-react";
-import { aArchivo, compartirArchivos, descargarArchivo } from "@/lib/compartir";
+import { aArchivo, archivoAlInstante, compartirArchivos, descargarArchivo } from "@/lib/compartir";
 import { ErrorDrive, guardarEnDrive } from "@/lib/drive";
 import { AVISO_CARGA, AVISO_VENTANA, enNavegadorDeApp, olvidarToken, pedirToken, precargarGoogle } from "@/lib/google-token";
 
@@ -9,6 +9,7 @@ const AVISO_DESCARGA =
   "Tu navegador no deja compartir este archivo: lo descargamos. Súbelo desde tu aparato a la red que quieras.";
 const AVISO_TEXTO = "Se copió el texto para publicar: pégalo en la descripción.";
 const AVISO_SIN_IMAGEN = "Todavía no hay imagen para compartir.";
+const AVISO_OTRA_VEZ = "Toca otra vez para compartir.";
 const AVISO_APP = "Abre Studio en Chrome o Safari para guardar en Google Drive.";
 const ERROR_DRIVE = "No se pudo guardar en Google Drive.";
 const CLAVE_CARPETA = "drive:carpeta";
@@ -19,11 +20,18 @@ const ID_GOOGLE = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "";
 type Fuente = Blob | string;
 type EstadoDrive =
   | { fase: "listo" }
+  | { fase: "esperando" } // la ventana de Google está abierta
   | { fase: "subiendo"; pct: number }
   | { fase: "hecho"; enlace: string }
   | { fase: "error"; mensaje: string };
 
-const esRemota = (s: Fuente) => typeof s === "string" && /^https?:/i.test(s);
+function puedeCompartir(a: File): boolean {
+  try {
+    return typeof navigator !== "undefined" && !!navigator.canShare?.({ files: [a] });
+  } catch {
+    return false;
+  }
+}
 
 function leerCarpeta(): string | null {
   try {
@@ -54,8 +62,9 @@ function mensajeDe(e: unknown): string {
 // solo «Descargar». `src` puede ser una función cuando el archivo se arma en el momento del toque.
 // `soloDrive`: solo el botón de Drive (donde ya hay un «Compartir» propio, como el editor de imágenes).
 // `alSubir`: avisa si hay una subida a Drive en curso (para preguntar antes de cerrar la vista).
-// El archivo se prepara antes del toque: Safari (iPhone) pierde el permiso de compartir o de abrir
-// la ventana de Google si se espera una descarga entre el toque y esa acción.
+// Safari (iPhone) pierde el permiso de compartir o de abrir la ventana de Google si hay una espera
+// entre el toque y esa acción: los Blob y data: se usan al instante; un enlace que hay que leer se lee
+// en el primer toque y queda listo («Toca otra vez para compartir.» si el navegador perdió el permiso).
 export default function CompartirBotones({
   src,
   nombre,
@@ -74,55 +83,47 @@ export default function CompartirBotones({
   const [preparando, setPreparando] = useState(false);
   const [oculto, setOculto] = useState(false);
   const [aviso, setAviso] = useState("");
-  const [archivo, setArchivo] = useState<File | null>(null);
   const [enApp, setEnApp] = useState(false);
-  const [google, setGoogle] = useState<"cargando" | "listo" | "fallo">("cargando");
+  // «espera»: el botón de Drive aún no se ve en pantalla (el script de Google no se carga todavía).
+  const [google, setGoogle] = useState<"espera" | "cargando" | "listo" | "fallo">("espera");
   const [drive, setDrive] = useState<EstadoDrive>({ fase: "listo" });
   const ocupado = useRef(false);
   const subiendo = useRef(false);
   const cancelar = useRef<AbortController | null>(null);
-  const previo = useRef<Promise<File | null> | null>(null);
+  const preparado = useRef<{ src: Fuente; nombre: string; archivo: File } | null>(null);
+  const botonDrive = useRef<HTMLButtonElement>(null);
   const avisarSubida = useRef(alSubir);
   avisarSubida.current = alSubir;
 
-  const fija = typeof src === "function" ? null : src;
-
-  // Prepara el archivo una sola vez por fuente.
-  const precargar = useCallback((): Promise<File | null> | null => {
-    if (!fija) return null;
-    if (previo.current) return previo.current;
-    const p = aArchivo(fija, nombre);
-    previo.current = p;
-    p.then((a) => {
-      if (previo.current !== p) return;
-      if (a) setArchivo(a);
-      else setOculto(true);
-    });
-    return p;
-  }, [fija, nombre]);
-
-  useEffect(() => {
-    previo.current = null;
-    setArchivo(null);
-    setOculto(false);
-    // En la galería no se descargan todos los enlaces remotos al abrirla: se preparan al acercarse al botón.
-    if (fija && !(compacto && esRemota(fija))) precargar();
-  }, [fija, compacto, precargar]);
-
-  useEffect(() => {
-    if (!ID_GOOGLE) return;
-    const app = enNavegadorDeApp(navigator.userAgent);
-    setEnApp(app);
-    if (app) return;
-    let vivo = true;
+  const cargarGoogle = useCallback(() => {
+    setGoogle("cargando");
     precargarGoogle().then(
-      () => vivo && setGoogle("listo"),
-      () => vivo && setGoogle("fallo"),
+      () => setGoogle("listo"),
+      () => setGoogle("fallo"),
     );
-    return () => {
-      vivo = false;
-    };
   }, []);
+
+  useEffect(() => {
+    if (ID_GOOGLE) setEnApp(enNavegadorDeApp(navigator.userAgent));
+  }, []);
+
+  // El script de Google se carga solo cuando el botón de Drive aparece en pantalla (o recibe el foco).
+  useEffect(() => {
+    if (!ID_GOOGLE || enApp || google !== "espera") return;
+    const b = botonDrive.current;
+    if (!b || typeof IntersectionObserver === "undefined") {
+      cargarGoogle();
+      return;
+    }
+    const io = new IntersectionObserver((vistas) => {
+      if (vistas.some((v) => v.isIntersecting)) {
+        io.disconnect();
+        cargarGoogle();
+      }
+    });
+    io.observe(b);
+    return () => io.disconnect();
+  }, [enApp, google, cargarGoogle]);
 
   useEffect(() => () => cancelar.current?.abort(), []);
 
@@ -134,10 +135,21 @@ export default function CompartirBotones({
 
   if (oculto) return null;
 
-  // Archivo listo si ya se preparó; si no, se espera (para `src` función se arma ahora).
-  async function obtenerArchivo(fuente: Fuente): Promise<File | null> {
-    if (typeof src !== "function") return archivo ?? (await (precargar() ?? aArchivo(fuente, nombre)));
-    return aArchivo(fuente, nombre);
+  // El archivo sin esperar: Blob, data: o uno ya leído antes. Los enlaces blob: o remotos se leen solo al tocar.
+  function alInstante(fuente: Fuente): File | null {
+    const p = preparado.current;
+    if (p && p.src === fuente && p.nombre === nombre) return p.archivo;
+    const a = archivoAlInstante(fuente, nombre);
+    if (a && typeof src !== "function") preparado.current = { src: fuente, nombre, archivo: a };
+    return a;
+  }
+
+  async function leer(fuente: Fuente): Promise<File | null> {
+    const ya = alInstante(fuente);
+    if (ya) return ya;
+    const a = await aArchivo(fuente, nombre);
+    if (a && typeof src !== "function") preparado.current = { src: fuente, nombre, archivo: a }; // listo para el próximo toque
+    return a;
   }
 
   function fuenteDelToque(): Fuente | null {
@@ -151,18 +163,27 @@ export default function CompartirBotones({
     const fuente = fuenteDelToque();
     if (!fuente) return;
     ocupado.current = true;
-    setPreparando(true);
     setAviso("");
     try {
-      const a = await obtenerArchivo(fuente);
+      let a = alInstante(fuente);
+      const recienLeido = !a;
       if (!a) {
-        setOculto(true);
-        return;
+        setPreparando(true);
+        a = await aArchivo(fuente, nombre);
+        if (!a) {
+          setOculto(true);
+          return;
+        }
+        if (typeof src !== "function") preparado.current = { src: fuente, nombre, archivo: a };
       }
       const r = await compartirArchivos([a], texto);
       if (r === "descargar") {
-        descargarArchivo(a);
-        setAviso(AVISO_DESCARGA);
+        // Recién leído: el navegador sí puede compartir, pero perdió el permiso del toque mientras esperaba.
+        if (recienLeido && puedeCompartir(a)) setAviso(AVISO_OTRA_VEZ);
+        else {
+          descargarArchivo(a);
+          setAviso(AVISO_DESCARGA);
+        }
       } else if (r === "compartido" && texto) setAviso(AVISO_TEXTO);
     } finally {
       ocupado.current = false;
@@ -178,11 +199,7 @@ export default function CompartirBotones({
     }
     if (google === "fallo") {
       setDrive({ fase: "error", mensaje: AVISO_CARGA });
-      setGoogle("cargando");
-      precargarGoogle().then(
-        () => setGoogle("listo"),
-        () => setGoogle("fallo"),
-      );
+      cargarGoogle();
       return;
     }
     if (google !== "listo") return;
@@ -195,14 +212,14 @@ export default function CompartirBotones({
     const control = new AbortController();
     cancelar.current = control;
     setAviso("");
-    setDrive({ fase: "subiendo", pct: 0 });
+    setDrive({ fase: "esperando" });
     avisarSubida.current?.(true);
     void subir(fuente, primerToken, control);
   }
 
   async function subir(fuente: Fuente, primerToken: Promise<string>, control: AbortController) {
     try {
-      const a = await obtenerArchivo(fuente);
+      const a = await leer(fuente);
       if (!a) {
         setOculto(true);
         return;
@@ -211,6 +228,7 @@ export default function CompartirBotones({
         token: () => primerToken,
         tokenNuevo: () => {
           olvidarToken();
+          setDrive({ fase: "esperando" });
           return pedirToken(ID_GOOGLE, { prompt: "" });
         },
         f: (url, init) => fetch(url, init),
@@ -233,13 +251,13 @@ export default function CompartirBotones({
 
   const etiqueta = preparando ? "Preparando…" : "Compartir";
   const conDrive = !!ID_GOOGLE;
-  const driveOcupado = drive.fase === "subiendo" || (!enApp && google === "cargando");
-  const etiquetaDrive = !enApp && google === "cargando" ? "Preparando…" : "Guardar en Drive";
-  // En la galería, el ícono prepara el enlace remoto en cuanto el dedo o el ratón se acerca.
-  const acercar = fija && compacto && esRemota(fija) ? () => void precargar() : undefined;
+  const cargando = !enApp && (google === "espera" || google === "cargando");
+  const driveOcupado = drive.fase === "subiendo" || drive.fase === "esperando" || cargando;
+  const etiquetaDrive = cargando ? "Preparando…" : "Guardar en Drive";
+  const alFoco = ID_GOOGLE && !enApp && google === "espera" ? cargarGoogle : undefined;
 
   return (
-    <span className={`compartir${compacto ? " compacto" : ""}`} onPointerEnter={acercar} onFocus={acercar}>
+    <span className={`compartir${compacto ? " compacto" : ""}`} onFocus={alFoco}>
       {soloDrive ? null : compacto ? (
         <button type="button" title={etiqueta} aria-label={etiqueta} disabled={preparando} onClick={compartir}>
           <Share2 size={17} aria-hidden />
@@ -251,11 +269,11 @@ export default function CompartirBotones({
       )}
       {conDrive &&
         (compacto ? (
-          <button type="button" title={etiquetaDrive} aria-label={etiquetaDrive} disabled={driveOcupado} onClick={guardarDrive}>
+          <button ref={botonDrive} type="button" title={etiquetaDrive} aria-label={etiquetaDrive} disabled={driveOcupado} onClick={guardarDrive}>
             <CloudUpload size={17} aria-hidden />
           </button>
         ) : (
-          <button type="button" className="btn ghost small" disabled={driveOcupado} onClick={guardarDrive}>
+          <button ref={botonDrive} type="button" className="btn ghost small" disabled={driveOcupado} onClick={guardarDrive}>
             <CloudUpload size={15} aria-hidden /> {etiquetaDrive}
           </button>
         ))}
@@ -266,11 +284,20 @@ export default function CompartirBotones({
       )}
       {drive.fase !== "listo" && (
         <span className="notice compartir-aviso drive-estado" role="status">
+          {drive.fase === "esperando" && (
+            <>
+              <span className="drive-texto">Esperando a Google…</span>
+              <button type="button" className="btn ghost small" onClick={() => cancelar.current?.abort()}>
+                Cancelar
+              </button>
+            </>
+          )}
           {drive.fase === "subiendo" && (
             <>
-              <span className="drive-texto">{`Subiendo a Drive… ${drive.pct}%`}</span>
-              <span className="drive-barra" aria-hidden>
-                <span style={{ width: `${drive.pct}%` }} />
+              {/* Hasta que Drive confirma el primer trozo no hay avance que mostrar: barra en movimiento. */}
+              <span className="drive-texto">{drive.pct > 0 ? `Subiendo a Drive… ${drive.pct}%` : "Subiendo a Drive…"}</span>
+              <span className={`drive-barra${drive.pct > 0 ? "" : " sin-avance"}`} aria-hidden>
+                <span style={drive.pct > 0 ? { width: `${drive.pct}%` } : undefined} />
               </span>
               <button type="button" className="btn ghost small" onClick={() => cancelar.current?.abort()}>
                 Cancelar

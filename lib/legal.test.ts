@@ -67,11 +67,13 @@ test("PRIVACIDAD explica «Guardar en Drive»: tu propio Drive, permiso limitado
   assert.match(es, /tu propio Google Drive/);
   assert.match(es, /limitado a los archivos que Studio crea/);
   assert.match(es, /no recibe ni guarda el permiso \(token\) de Google ni una copia del archivo/);
+  assert.match(es, /carga el servicio de inicio de sesión de Google/);
   const en = JSON.stringify(PRIVACIDAD.en);
   assert.match(en, /Save to Drive/);
   assert.match(en, /your own Google Drive/);
   assert.match(en, /limited to the files Studio creates/);
   assert.match(en, /does not receive or keep the Google permission \(token\) or a copy of the file/);
+  assert.match(en, /loads Google’s sign-in service/);
 });
 
 test("VERSION_LEGAL subió con el aviso de Google Drive", () => {
