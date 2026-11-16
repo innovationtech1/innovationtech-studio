@@ -5,6 +5,7 @@ import { Camera, Check, SwitchCamera, X } from "lucide-react";
 import { mensajeCamara, tamanoCaptura } from "@/lib/camara";
 import { usarCamara } from "./usar-camara";
 import { CamaraNoAbre, SelectorCamara } from "./camara-ayuda";
+import { CasillaGuardarCelular, guardarEnCelular, usarGuardarCelular } from "./guardar-celular";
 
 const LADO_MAXIMO = 1600;
 
@@ -24,6 +25,7 @@ export default function Camara({
   const frente = cam.espejo;
   const [ultima, setUltima] = useState("");
   const [tomadas, setTomadas] = useState(0);
+  const celular = usarGuardarCelular();
 
   async function tomar() {
     const v = video.current;
@@ -43,6 +45,7 @@ export default function Camara({
     const foto = lienzo.toDataURL("image/jpeg", 0.9);
     setUltima(foto);
     setTomadas((n) => n + 1);
+    if (celular.encendido) guardarEnCelular("foto", foto); // copia en la memoria del celular
     await onFoto(foto);
   }
 
@@ -67,10 +70,12 @@ export default function Camara({
         {tomadas > 0 && (
           <p className="hint">
             {tomadas === 1 ? "1 foto guardada en tu galería." : `${tomadas} fotos guardadas en tu galería.`}
+            {celular.encendido && " También quedó una copia en las descargas de tu celular."}
             {!puedeMas && " Ya llegaste al máximo de fotos de referencia."}
           </p>
         )}
         {!error && <SelectorCamara lista={cam.lista} activa={cam.activa} onElegir={cam.elegir} />}
+        {!error && <CasillaGuardarCelular encendido={celular.encendido} onCambiar={celular.cambiar} />}
         <div className="actions camara-botones">
           <button className="btn ghost" disabled={!!error} onClick={cam.cambiar} title="Cambiar de cámara">
             <SwitchCamera size={18} aria-hidden /> Cambiar

@@ -89,3 +89,21 @@ export function esFrontal(facingMode: string | undefined, nombre: string): boole
   if (facingMode) return facingMode === "user";
   return /front|frontal|delantera|selfie/i.test(nombre);
 }
+
+// ---------- Guardar copia en el celular ----------
+
+// Nombre del archivo que queda en la memoria del celular: studio-foto-20261116-162501.jpg
+// La extensión sale del formato real (MP4 o WebM en video; JPG en foto).
+export function nombreArchivoCamara(tipo: "foto" | "video", mime: string, fecha: Date): string {
+  const dos = (n: number) => String(n).padStart(2, "0");
+  const dia = `${fecha.getFullYear()}${dos(fecha.getMonth() + 1)}${dos(fecha.getDate())}`;
+  const hora = `${dos(fecha.getHours())}${dos(fecha.getMinutes())}${dos(fecha.getSeconds())}`;
+  const ext = tipo === "foto" ? (/png/i.test(mime) ? "png" : "jpg") : /webm/i.test(mime) ? "webm" : "mp4";
+  return `studio-${tipo}-${dia}-${hora}.${ext}`;
+}
+
+// ¿Guardar también en el celular? Encendido mientras la persona no lo apague ("0" = apagado).
+export const CLAVE_GUARDAR_CELULAR = "its-camara-guardar-celular";
+export function guardarCelularEncendido(valor: string | null): boolean {
+  return valor !== "0";
+}

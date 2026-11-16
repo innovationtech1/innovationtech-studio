@@ -1211,6 +1211,8 @@ export const EN: Record<string, string> = {
   "Dar vida": "Bring to life",
   "Video": "Video",
   "Grabar video": "Record video",
+  "Guardar también en la memoria del celular": "Also save to the phone's storage",
+  "También quedó una copia en las descargas de tu celular.": "A copy was also saved to your phone's downloads.",
   "Subir video": "Upload video",
   "Video de mi galería": "Video from my gallery",
   "No tienes videos en tu galería.": "You have no videos in your gallery.",

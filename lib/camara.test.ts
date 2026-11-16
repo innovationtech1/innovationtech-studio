@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mensajeCamara, tamanoCaptura, MAX_GRABACION, formatoGrabacion, relojGrabacion, camarasDe, esFrontal, pedidoDeCamara, siguienteCamara } from "./camara";
+import { mensajeCamara, tamanoCaptura, MAX_GRABACION, formatoGrabacion, relojGrabacion, camarasDe, esFrontal, pedidoDeCamara, siguienteCamara, nombreArchivoCamara, guardarCelularEncendido } from "./camara";
 
 test("mensajeCamara: cada problema de la cámara se explica en palabras claras", () => {
   assert.match(mensajeCamara("NotAllowedError"), /Permite el uso de la cámara/);
@@ -81,4 +81,17 @@ test("esFrontal: por lo que dice el navegador o por el nombre", () => {
 
 test("mensajeCamara: sin ninguna cámara detectada", () => {
   assert.match(mensajeCamara("SinCamaras"), /No detectamos ninguna cámara/);
+});
+
+test("nombreArchivoCamara: fecha, hora y la extensión del formato real", () => {
+  const f = new Date(2026, 10, 16, 16, 25, 1);
+  assert.equal(nombreArchivoCamara("foto", "image/jpeg", f), "studio-foto-20261116-162501.jpg");
+  assert.equal(nombreArchivoCamara("video", "video/mp4", f), "studio-video-20261116-162501.mp4");
+  assert.equal(nombreArchivoCamara("video", "video/webm", f), "studio-video-20261116-162501.webm");
+});
+
+test("guardarCelularEncendido: encendido hasta que la persona lo apaga", () => {
+  assert.equal(guardarCelularEncendido(null), true);
+  assert.equal(guardarCelularEncendido("1"), true);
+  assert.equal(guardarCelularEncendido("0"), false);
 });
