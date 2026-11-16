@@ -24,6 +24,11 @@ export function siguienteEspera(trabajos: readonly TrabajoVisto[], topeHoy: bool
   return generando && transcurridoMs < 20 * MIN ? 10_000 : 30_000;
 }
 
+// ¿Soltar el editor y seguir esperando en segundo plano? Sí cuando hoy ya no hay cupo y ninguna se está
+// generando: salen hasta mañana y no tiene caso dejar el editor ocupado.
+export const esperarEnFondo = (trabajos: readonly TrabajoVisto[], topeHoy: boolean) =>
+  topeHoy && trabajos.length > 0 && !terminado(trabajos) && !trabajos.some((t) => t.estado === "enviado");
+
 export function textoEstado(f: FaseVideo): string {
   if (f.tipo === "subiendo") return `Subiendo… ${Math.max(0, Math.min(100, Math.round(f.pct)))}%`;
   if (f.tipo === "previa") return "Vista previa lista";

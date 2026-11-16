@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { firmaTomas, siguienteEspera, terminado, textoEstado } from "./estados-video";
+import { esperarEnFondo, firmaTomas, siguienteEspera, terminado, textoEstado } from "./estados-video";
 
 test("subida y vista previa", () => {
   assert.equal(textoEstado({ tipo: "subiendo", pct: 42.4 }), "Subiendo… 42%");
@@ -58,4 +58,12 @@ test("siguienteEspera: se sigue consultando hasta el límite duro de 45 min, y c
   assert.equal(siguienteEspera(fila, true, 20 * 60 * MIN), 10 * MIN);
   // Con tope pero una toma generándose: como siempre
   assert.equal(siguienteEspera([...gen, ...fila], true, 5 * MIN), 10_000);
+});
+
+test("esperarEnFondo: con el tope de hoy y nada generándose, el editor se suelta y se espera en segundo plano", () => {
+  assert.equal(esperarEnFondo([{ id: "a", estado: "en_fila", lugar: 1 }], true), true);
+  assert.equal(esperarEnFondo([{ id: "a", estado: "en_fila", lugar: 1 }], false), false);
+  assert.equal(esperarEnFondo([{ id: "a", estado: "enviado" }, { id: "b", estado: "en_fila", lugar: 1 }], true), false);
+  assert.equal(esperarEnFondo([{ id: "a", estado: "listo" }], true), false);
+  assert.equal(esperarEnFondo([], true), false);
 });

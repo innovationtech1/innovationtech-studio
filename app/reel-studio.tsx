@@ -74,7 +74,7 @@ import {
   type Pendiente,
   type Resultado,
 } from "@/lib/director";
-import { siguienteEspera, terminado, textoEstado, type TrabajoVisto } from "@/lib/estados-video";
+import { esperarEnFondo, siguienteEspera, terminado, textoEstado, type TrabajoVisto } from "@/lib/estados-video";
 import { consultarTomas, pedirTomas, prepararFoto, subirFoto } from "@/lib/video-ia-cliente";
 
 import { Clapperboard, Dices, Download, Eye, Mic, Play, Redo2, Sparkles, Square, Undo2, Video } from "lucide-react";
@@ -762,8 +762,13 @@ export default function ReelStudio({
     return id;
   }
 
-  // Espera a que terminen las tomas. enProceso = se acabó la espera (o el cupo del día) y siguen en camino.
-  async function esperarTomas(ids: string[], pinta: (t: string) => void): Promise<{ vistos: TrabajoVisto[]; enProceso: boolean; texto: string }> {
+  // Espera a que terminen las tomas. enProceso = se acabó la espera y siguen en camino.
+  // soltarAlTope: si hoy ya no hay cupo (y nada se genera), vuelve al momento con alTope (sigue en segundo plano).
+  async function esperarTomas(
+    ids: string[],
+    pinta: (t: string) => void,
+    opciones: { soltarAlTope?: boolean } = {},
+  ): Promise<{ vistos: TrabajoVisto[]; enProceso: boolean; texto: string; alTope?: boolean }> {
     const inicio = Date.now();
     for (;;) {
       const r = await verTomas(ids);
@@ -771,11 +776,55 @@ export default function ReelStudio({
       const texto = textoEstado({ tipo: "trabajos", trabajos: r.vistos, topeHoy: r.topeHoy });
       pinta(texto);
       if (terminado(r.vistos)) return { vistos: r.vistos, enProceso: false, texto };
+      if (opciones.soltarAlTope && esperarEnFondo(r.vistos, r.topeHoy)) return { vistos: r.vistos, enProceso: true, texto, alTope: true };
       // Sin cupo hoy se deja el aviso de «mañana» a la vista y se consulta cada 10 min (sale al día siguiente);
       // si no, se espera hasta el límite duro del servidor (45 min) para que resuelva una toma atorada.
       const espera = siguienteEspera(r.vistos, r.topeHoy, Date.now() - inicio);
       if (espera === null) return { vistos: r.vistos, enProceso: true, texto: "" };
       await new Promise((res) => setTimeout(res, espera));
+    }
+  }
+
+  // Sin cupo hoy: el editor queda libre y aquí se sigue consultando en segundo plano (cada 10 min mientras
+  // dure el tope). Las tomas quedan en cada clip; al terminar se avisa para grabar el video.
+  const enFondo = useRef(false);
+  const montado = useRef(true);
+  useEffect(() => {
+    montado.current = true;
+    return () => {
+      montado.current = false;
+    };
+  }, []);
+  async function seguirEnFondo(ids: string[]) {
+    if (enFondo.current) return;
+    enFondo.current = true;
+    try {
+      let inicio = Date.now();
+      let espera: number | null = 10 * 60 * 1000;
+      while (espera !== null && montado.current) {
+        await new Promise((res) => setTimeout(res, espera!));
+        if (!montado.current) return;
+        try {
+          const r = await verTomas(ids);
+          if (r.vistos.length === 0) return;
+          if (terminado(r.vistos)) {
+            setEstadoIa(
+              r.vistos.some((t) => t.estado === "fallo")
+                ? textoEstado({ tipo: "trabajos", trabajos: r.vistos, topeHoy: false })
+                : "Tus tomas con IA ya están listas. Toca «Generar con IA» para grabar tu video.",
+            );
+            void refrescarCuenta();
+            return;
+          }
+          if (r.topeHoy) inicio = Date.now(); // el límite de 45 min cuenta desde que hay cupo
+          setEstadoIa(textoEstado({ tipo: "trabajos", trabajos: r.vistos, topeHoy: r.topeHoy }));
+          espera = siguienteEspera(r.vistos, r.topeHoy, Date.now() - inicio);
+        } catch {
+          espera = 10 * 60 * 1000; // sin conexión: se intenta más tarde
+        }
+      }
+    } finally {
+      enFondo.current = false;
     }
   }
 
@@ -917,7 +966,13 @@ export default function ReelStudio({
       }
       if (pedidas.size) void refrescarCuenta();
       const ids = [...new Set(clipsRef.current.flatMap((c) => (c.tipo === "toma" && c.image && c.trabajoId ? [c.trabajoId] : [])))];
-      const r = await esperarTomas(ids, setBusy);
+      const r = await esperarTomas(ids, setBusy, { soltarAlTope: true });
+      if (r.alTope) {
+        // Hoy ya no hay cupo: el editor queda libre con el aviso de «mañana»; se sigue esperando en segundo plano
+        setEstadoIa(r.texto);
+        void seguirEnFondo(ids);
+        return;
+      }
       if (r.enProceso) {
         // Quedan guardadas en cada clip: al volver y tocar «Generar con IA» se retoman sin costo
         setEstadoIa(r.texto || "Tus tomas siguen en proceso. Vuelve en unos minutos y toca «Generar con IA» para terminar tu video.");
