@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Brand, brandAccent, brandContext, brandVisual } from "@/lib/brand";
 import { friendlyError } from "@/lib/errors";
+import CompartirBotones from "./compartir-botones";
 import { fileToResizedDataUrl } from "@/lib/resize";
 import { ReelFormat, ReelOptions, renderReel, supportedRecording, vistaPrevia } from "@/lib/reel";
 import type { Item, Settings } from "@/lib/types";
@@ -22,7 +23,7 @@ import MusicPicker from "./music-picker";
 import LibraryPicker from "./library-picker";
 import { loadSong } from "@/lib/library";
 import { DEFAULT_VOICE, VOICES, findVoice } from "@/lib/voices";
-import { getLang } from "@/lib/i18n";
+import { getLang, tr } from "@/lib/i18n";
 import VoicePicker from "./voice-picker";
 import { marcarDemoALaVista, ProTag, refrescarCuenta, useCuenta, usePuede } from "./account-context";
 import {
@@ -103,9 +104,11 @@ export default function ReelStudio({
   onOpenBrand,
   videosDeOtros = [],
   onOcupado,
+  onSubiendoDrive,
 }: {
   videosDeOtros?: string[]; // videos subidos que usan otros proyectos guardados: no se borran al limpiar
   onOcupado?: (ocupado: boolean) => void; // avisa cuando está grabando o generando (para no cambiar de proyecto a medias)
+  onSubiendoDrive?: (activo: boolean) => void; // hay una subida a Drive en curso (para preguntar antes de cambiar de proyecto)
   sceneUpdate: { scene: number; url: string; n: number } | null;
   incomingTopic?: { text: string; n: number } | null;
   onEditScene: (i: number, src: string) => void;
@@ -443,7 +446,29 @@ export default function ReelStudio({
   const [picking, setPicking] = useState<number | null>(null);
   const [busy, setBusy] = useState("");
   const [progress, setProgress] = useState(0);
-  const [result, setResult] = useState<{ url: string; ext: string; seconds: number } | null>(null);
+  const [result, setResult] = useState<{ url: string; blob: Blob; ext: string; seconds: number } | null>(null);
+  // Subidas a Drive del video o la portada: quitar el resultado las cancela, así que se pregunta antes.
+  const subidasDrive = useRef(0);
+  const [avisoDrive, setAvisoDrive] = useState("");
+  const alSubirDrive = useCallback(
+    (activo: boolean) => {
+      subidasDrive.current = Math.max(0, subidasDrive.current + (activo ? 1 : -1));
+      onSubiendoDrive?.(subidasDrive.current > 0);
+    },
+    [onSubiendoDrive],
+  );
+  // true = se puede quitar el resultado (no hay subida, o la persona aceptó cancelarla)
+  function soltarResultado(): boolean {
+    if (subidasDrive.current <= 0) return true;
+    if (!confirm(tr("La subida a Drive sigue en curso. ¿Cancelarla?"))) return false;
+    setAvisoDrive("Se canceló la subida a Drive.");
+    return true;
+  }
+  useEffect(() => {
+    if (!avisoDrive) return;
+    const t = setTimeout(() => setAvisoDrive(""), 7000);
+    return () => clearTimeout(t);
+  }, [avisoDrive]);
   const [error, setError] = useState("");
   const preview = useRef<HTMLCanvasElement>(null);
 
@@ -453,15 +478,21 @@ export default function ReelStudio({
   // Al empezar a grabar y al terminar, la pantalla baja a donde se ve el video
   const aLaVista = (el: HTMLElement | null) => el?.scrollIntoView({ behavior: "smooth", block: "center" });
   const [momentoPortada, setMomentoPortada] = useState(0);
-  function descargarPortada() {
+  // La portada es el cuadro del video que se ve ahora (JPG en data URL).
+  function capturarPortada(): string | null {
     const v = videoFinal.current;
-    if (!v || !v.videoWidth) return;
+    if (!v || !v.videoWidth) return null;
     const c = document.createElement("canvas");
     c.width = v.videoWidth;
     c.height = v.videoHeight;
     c.getContext("2d")!.drawImage(v, 0, 0);
+    return c.toDataURL("image/jpeg", 0.92);
+  }
+  function descargarPortada() {
+    const url = capturarPortada();
+    if (!url) return;
     const a = document.createElement("a");
-    a.href = c.toDataURL("image/jpeg", 0.92);
+    a.href = url;
     a.download = "portada-innovationtech.jpg";
     a.click();
   }
@@ -713,6 +744,10 @@ export default function ReelStudio({
   const animandoYa = useRef(new Set<string>());
   // Mientras se graba o se anima una toma no se cambia de proyecto ni se empieza otro
   useEffect(() => onOcupado?.(!!busy || animando.length > 0), [busy, animando, onOcupado]);
+  // Al ocultarse el resultado mientras se trabaja, el video terminado deja de sonar.
+  useEffect(() => {
+    if (busy) videoFinal.current?.pause();
+  }, [busy]);
 
   // Consulta tomas y guarda el enlace de las que ya están listas
   async function verTomas(ids: string[]): Promise<{ vistos: TrabajoVisto[]; topeHoy: boolean }> {
@@ -955,6 +990,7 @@ export default function ReelStudio({
   async function grabar(lista: Clip[]) {
     const problema = validar(lista);
     if (problema) throw new Error(problema);
+    if (!soltarResultado()) throw new Error("Espera a que termine la subida a Drive y vuelve a intentarlo.");
     detenerPrevia();
     setResult(null);
     setAvisosVideo([]);
@@ -987,7 +1023,7 @@ export default function ReelStudio({
       onProgress: setProgress,
       previewCanvas: preview.current || undefined,
     });
-    setResult({ url: r.url, ext: r.ext, seconds: r.seconds });
+    setResult({ url: r.url, blob: r.blob, ext: r.ext, seconds: r.seconds });
     setAvisosVideo([...avisos, ...r.avisos]);
     setVozCambio(false);
     setTimeout(() => aLaVista(salida.current), 100);
@@ -1479,6 +1515,7 @@ export default function ReelStudio({
           disabled={!!busy || animando.length > 0}
           onClick={() => {
             if (!confirm("¿Empezar un reel nuevo? Se borrarán el tema, las escenas y el guion actuales.")) return;
+            if (!soltarResultado()) return;
             clearDrafts("reel:");
             setTopic("");
             detenerPrevia();
@@ -1805,13 +1842,15 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
           className="reel-canvas"
           style={{ aspectRatio: ratioStyle, display: busy.startsWith("Grabando") ? "block" : "none" }}
         />
-        {result && !busy && (
-          <div className="media" style={{ maxWidth: format === "16:9" ? 640 : 360 }}>
+        {/* Mientras se trabaja, el resultado solo se oculta: si se quitara, se cortaría una subida a Drive */}
+        {result && (
+          <div className="media" style={{ maxWidth: format === "16:9" ? 640 : 360, display: busy ? "none" : undefined }}>
             <video ref={videoFinal} src={result.url} controls playsInline onTimeUpdate={(e) => setMomentoPortada(e.currentTarget.currentTime)} />
             <div className="meta actions">
               <a href={result.url} download={`reel-innovationtech.${result.ext}`}>
                 <Download size={16} aria-hidden /> Descargar video ({result.seconds} s, {result.ext.toUpperCase()})
               </a>
+              <CompartirBotones key={result.url} src={result.blob} nombre={`reel-innovationtech.${result.ext}`} alSubir={alSubirDrive} />
               <span className="muted">· Guardado en tu galería</span>
             </div>
             <div className="portada">
@@ -1840,6 +1879,7 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
               <button className="btn ghost small" onClick={descargarPortada}>
                 <Download size={15} aria-hidden /> Descargar portada
               </button>
+              <CompartirBotones key={result.url} src={capturarPortada} nombre="portada-innovationtech.jpg" alSubir={alSubirDrive} />
             </div>
           </div>
         )}
@@ -1852,6 +1892,7 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
       )}
       {/* Crear: barra fija abajo, siempre a la vista */}
       <div className="reel-barra">
+        {avisoDrive && <div className="notice">{avisoDrive}</div>}
         {!busy && vozCambio && (
           <div className="acct-upsell">
             <span>Cambiaste la voz. Actualiza el video para escucharla: no gasta tomas con IA.</span>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { Brand, brandAccent, brandContext, brandVisual, emptyBrand, normalizeBrand, textOn } from "@/lib/brand";
 import { FONTS } from "@/lib/editor-model";
@@ -11,7 +11,7 @@ import { fileToResizedDataUrl } from "@/lib/resize";
 import { usePersistentState } from "@/lib/persist";
 import { useGallery } from "@/lib/use-gallery";
 import { useDemo } from "@/lib/use-demo";
-import { getLang, installLangHeader, locale, setLang, startDomTranslation } from "@/lib/i18n";
+import { getLang, installLangHeader, locale, setLang, startDomTranslation, tr } from "@/lib/i18n";
 import { Bug, Languages, MessagesSquare } from "lucide-react";
 import MicButton from "./mic-button";
 import Director from "./director";
@@ -26,6 +26,7 @@ import AssistantChat from "./assistant-chat";
 import { extract, phrases } from "@/lib/phrases";
 import { BotonCuenta, CUENTAS_ON, MejorarPro, ProTag, useCuenta } from "./account-context";
 import Camara from "./camara";
+import CompartirBotones from "./compartir-botones";
 import { dataUrlReducida } from "@/lib/resize";
 
 type Tab = "texto" | "imagen" | "editor" | "video" | "galeria" | "marca" | "config";
@@ -1191,6 +1192,13 @@ function Gallery({
   const [filter, setFilter] = useState<"todo" | "imagen" | "video">("todo");
   const [usage, setUsage] = useState<{ used: number; quota: number } | null>(null);
   const [open, setOpen] = useState<Item | null>(null);
+  // Cerrar la vista en grande cancela una subida a Drive en curso: se pregunta antes.
+  const subiendoDrive = useRef(false);
+  const cerrarVista = () => {
+    if (subiendoDrive.current && !confirm(tr("La subida a Drive sigue en curso. ¿Cancelarla?"))) return false;
+    setOpen(null);
+    return true;
+  };
 
   useEffect(() => {
     if (visible) storageUsage().then(setUsage);
@@ -1260,6 +1268,7 @@ function Gallery({
                 <a title="Descargar" href={it.url} download={`innovationtech-${it.kind}.${ext(it)}`}>
                   <Download size={17} aria-hidden />
                 </a>
+                <CompartirBotones compacto src={it.blob ?? it.url} nombre={`innovationtech-${it.kind}.${ext(it)}`} />
                 <button
                   title="Eliminar"
                   onClick={() => it.id && confirm("¿Eliminar este elemento de la galería?") && onRemove(it.id)}
@@ -1283,20 +1292,26 @@ function Gallery({
       )}
 
       {open && (
-        <div className="lightbox" onClick={() => setOpen(null)}>
+        <div className="lightbox" onClick={cerrarVista}>
           <div className="lightbox-inner" onClick={(e) => e.stopPropagation()}>
             {open.kind === "imagen" ? <img src={open.url} alt={open.prompt} /> : <video src={open.url} controls autoPlay playsInline />}
             <p className="muted">{open.prompt}</p>
             <div className="actions">
               {open.kind === "imagen" && (
-                <button className="btn small" onClick={() => (onEdit(open.url), setOpen(null))}>
+                <button className="btn small" onClick={() => cerrarVista() && onEdit(open.url)}>
                   <Pencil size={16} aria-hidden /> Editar
                 </button>
               )}
               <a className="btn ghost small" href={open.url} download={`innovationtech-${open.kind}.${ext(open)}`}>
                 <Download size={16} aria-hidden /> Descargar
               </a>
-              <button className="btn ghost small" onClick={() => setOpen(null)}>
+              <CompartirBotones
+                key={open.url}
+                src={open.blob ?? open.url}
+                nombre={`innovationtech-${open.kind}.${ext(open)}`}
+                alSubir={(activo) => (subiendoDrive.current = activo)}
+              />
+              <button className="btn ghost small" onClick={cerrarVista}>
                 Cerrar
               </button>
             </div>

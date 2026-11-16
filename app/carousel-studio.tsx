@@ -6,6 +6,7 @@ import { Brand, brandContext } from "@/lib/brand";
 import { buildSlideDoc, CAROUSEL_FORMATS, CAROUSEL_STYLES, CarouselFormat, CarouselStyle, SIZES, Slide } from "@/lib/carousel";
 import type { Doc } from "@/lib/editor-model";
 import { friendlyError } from "@/lib/errors";
+import { compartirArchivos } from "@/lib/compartir";
 import { usePersistentState } from "@/lib/persist";
 import { fileToResizedDataUrl } from "@/lib/resize";
 import { loadTemplateFonts } from "@/lib/templates";
@@ -280,14 +281,23 @@ export default function CarouselStudio({
   async function share() {
     setDone("");
     setError("");
+    // El texto va al portapapeles (no al menú de compartir): varias apps descartan las fotos si llega texto.
+    // Se copia en el mismo toque, antes de armar las imágenes, porque el navegador puede negarlo después de esperar.
+    const copiado: Promise<boolean> = caption.trim()
+      ? Promise.resolve()
+          .then(() => navigator.clipboard?.writeText(caption))
+          .then(
+            () => !!navigator.clipboard,
+            () => false,
+          )
+      : Promise.resolve(false);
     try {
       const imgs = await renderAll();
       setBusy("Abriendo compartir…");
       const files = await Promise.all(imgs.map((f, i) => toFile(f.url, fileName(i, f.ext))));
-      if (!navigator.canShare?.({ files })) throw new Error("share");
-      if (caption.trim()) await navigator.clipboard?.writeText(caption).catch(() => {});
-      await navigator.share({ files });
-      setDone(caption.trim() ? "Se copió el texto para publicar: pégalo en la descripción." : "Listo.");
+      const r = await compartirArchivos(files);
+      if (r === "descargar") throw new Error("share");
+      if (r === "compartido") setDone((await copiado) ? "Se copió el texto para publicar: pégalo en la descripción." : "Listo.");
     } catch (e) {
       if ((e as Error).name !== "AbortError")
         setError("Este navegador no permite compartir varias imágenes juntas. Usa «Descargar (.zip)».");
