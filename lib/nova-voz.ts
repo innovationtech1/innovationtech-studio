@@ -122,10 +122,37 @@ export function crearLimitador(ms: number, maxClaves = 5000) {
   return Object.assign(permitir, { tamano: () => ultimo.size });
 }
 
+// Tope diario por persona cuando paga la plataforma (sin clave propia): máximo de pedidos Y de letras por día
+// de Chicago. Cada servidor (instancia de Netlify) lleva su propia cuenta en memoria: es un freno contra el
+// abuso, no una cuota exacta. Un pedido que no cabe no se cuenta. Guarda como máximo `maxClaves` personas.
+export const TOPE_VOZ_DIA = { pedidos: 150, letras: 30_000 } as const;
+const diaChicago = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit" });
+
+export function crearTopeDiario(o: { pedidos: number; letras: number; maxClaves?: number }) {
+  const maxClaves = o.maxClaves ?? 5000;
+  const uso = new Map<string, { dia: string; pedidos: number; letras: number }>();
+  const permitir = (clave: string, letras: number, ahora: number = Date.now()): boolean => {
+    const dia = diaChicago.format(ahora);
+    let u = uso.get(clave);
+    if (u && u.dia !== dia) u = undefined;
+    const pedidos = (u?.pedidos ?? 0) + 1;
+    const total = (u?.letras ?? 0) + Math.max(0, letras);
+    if (pedidos > o.pedidos || total > o.letras) return false;
+    uso.delete(clave);
+    if (uso.size >= maxClaves) {
+      for (const [k, v] of uso) if (v.dia !== dia) uso.delete(k);
+      while (uso.size >= maxClaves) uso.delete(uso.keys().next().value as string);
+    }
+    uso.set(clave, { dia, pedidos, letras: total });
+    return true;
+  };
+  return Object.assign(permitir, { tamano: () => uso.size });
+}
+
 // ---------- Reproductor del navegador ----------
 
 export type OpcionesVozNova = {
-  pedir: (t: string) => Promise<Blob>; // pide el audio de un trozo a /api/nova/voz
+  pedir: (t: string, signal?: AbortSignal) => Promise<Blob>; // pide el audio de un trozo a /api/nova/voz
   reproducir: (b: Blob) => Promise<void>; // lo suena y termina cuando acaba
   respaldo: (t: string) => Promise<void>; // voz del aparato (speechSynthesis) si el audio no llega
   detener?: () => void; // corta lo que esté sonando (audio y voz del aparato)
@@ -143,6 +170,7 @@ export function crearVozNova(o: OpcionesVozNova): { decir(texto: string): void; 
   let turno = 0;
   let activo = false;
   let ultimoPedido = -Infinity;
+  let cancelar: AbortController | null = null; // corta los pedidos en camino del turno actual
 
   const poner = (h: boolean) => {
     if (activo === h) return;
@@ -150,16 +178,23 @@ export function crearVozNova(o: OpcionesVozNova): { decir(texto: string): void; 
     o.alCambiar?.(h);
   };
 
-  async function pedirEspaciado(t: string, mio: number): Promise<Blob> {
+  async function pedirEspaciado(t: string, mio: number, signal: AbortSignal): Promise<Blob> {
     const falta = ultimoPedido + espacio - Date.now();
     if (falta > 0) await dormir(falta);
     if (mio !== turno) throw new Cancelado();
     ultimoPedido = Date.now();
-    return o.pedir(t);
+    return o.pedir(t, signal);
   }
 
-  async function correr(trozos: string[], mio: number) {
-    let siguiente: Promise<Blob> | null = pedirEspaciado(trozos[0], mio);
+  // Un turno nuevo (o callar): cancela lo que estaba en camino y detiene lo que suena
+  function cortar() {
+    cancelar?.abort();
+    cancelar = null;
+    o.detener?.();
+  }
+
+  async function correr(trozos: string[], mio: number, signal: AbortSignal) {
+    let siguiente: Promise<Blob> | null = pedirEspaciado(trozos[0], mio, signal);
     for (let i = 0; i < trozos.length; i++) {
       let audio: Blob | null = null;
       try {
@@ -168,7 +203,7 @@ export function crearVozNova(o: OpcionesVozNova): { decir(texto: string): void; 
         audio = null;
       }
       if (mio !== turno) return;
-      siguiente = i + 1 < trozos.length ? pedirEspaciado(trozos[i + 1], mio) : null;
+      siguiente = i + 1 < trozos.length ? pedirEspaciado(trozos[i + 1], mio, signal) : null;
       siguiente?.catch(() => {}); // se revisa en la siguiente vuelta
       try {
         if (audio) await o.reproducir(audio);
@@ -185,15 +220,16 @@ export function crearVozNova(o: OpcionesVozNova): { decir(texto: string): void; 
   return {
     decir(texto: string) {
       const mio = ++turno;
-      o.detener?.();
+      cortar();
       const trozos = trozosDeVoz(texto);
       if (!trozos.length) return poner(false);
+      cancelar = new AbortController();
       poner(true);
-      void correr(trozos, mio);
+      void correr(trozos, mio, cancelar.signal);
     },
     callar() {
       turno++;
-      o.detener?.();
+      cortar();
       poner(false);
     },
     hablando: () => activo,

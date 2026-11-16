@@ -4,6 +4,7 @@ import {
   MAX_VOZ_NOVA,
   VOZ_NOVA_DEFECTO,
   crearLimitador,
+  crearTopeDiario,
   crearVozNova,
   trozosDeVoz,
   validarVoz,
@@ -252,4 +253,59 @@ test("crearVozNova: texto sin nada que leer no hace nada", async () => {
   assert.equal(voz.hablando(), false);
   await espera(10);
   assert.deepEqual(log, []);
+});
+
+// ---------- crearTopeDiario ----------
+
+const DIA = Date.UTC(2026, 10, 17, 18); // martes 17 nov, mediodía en Chicago
+
+test("crearTopeDiario: máximo de pedidos por persona al día", () => {
+  const permitir = crearTopeDiario({ pedidos: 3, letras: 10_000 });
+  assert.equal(permitir("ana", 10, DIA), true);
+  assert.equal(permitir("ana", 10, DIA), true);
+  assert.equal(permitir("ana", 10, DIA), true);
+  assert.equal(permitir("ana", 10, DIA), false);
+  assert.equal(permitir("beto", 10, DIA), true);
+});
+
+test("crearTopeDiario: máximo de letras al día (un pedido que no cabe no se cuenta)", () => {
+  const permitir = crearTopeDiario({ pedidos: 100, letras: 1000 });
+  assert.equal(permitir("ana", 400, DIA), true);
+  assert.equal(permitir("ana", 400, DIA), true);
+  assert.equal(permitir("ana", 400, DIA), false);
+  assert.equal(permitir("ana", 200, DIA), true); // 1000 justos
+  assert.equal(permitir("ana", 1, DIA), false);
+});
+
+test("crearTopeDiario: se reinicia con el día de Chicago (no el de UTC)", () => {
+  const permitir = crearTopeDiario({ pedidos: 1, letras: 1000 });
+  const nocheChicago = Date.UTC(2026, 10, 18, 3); // 17 nov 9 p. m. en Chicago (ya 18 en UTC)
+  const mananaChicago = Date.UTC(2026, 10, 18, 7); // 18 nov 1 a. m. en Chicago
+  assert.equal(permitir("ana", 10, DIA), true);
+  assert.equal(permitir("ana", 10, nocheChicago), false); // sigue siendo el 17 en Chicago
+  assert.equal(permitir("ana", 10, mananaChicago), true);
+});
+
+test("crearTopeDiario: no crece sin fin", () => {
+  const permitir = crearTopeDiario({ pedidos: 5, letras: 1000, maxClaves: 10 });
+  for (let i = 0; i < 50; i++) permitir(`p${i}`, 1, DIA);
+  assert.ok(permitir.tamano() <= 10);
+});
+
+test("crearVozNova: callar cancela el pedido que estaba en camino", async () => {
+  const señales: AbortSignal[] = [];
+  const voz = crearVozNova({
+    pedir: (t, signal) => {
+      if (signal) señales.push(signal);
+      return new Promise<Blob>(() => {}); // nunca llega
+    },
+    reproducir: async () => {},
+    respaldo: async () => {},
+    espacioMs: 0,
+  });
+  voz.decir("Hola.");
+  await hasta(() => señales.length === 1);
+  assert.equal(señales[0].aborted, false);
+  voz.callar();
+  assert.equal(señales[0].aborted, true);
 });

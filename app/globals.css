@@ -808,7 +808,7 @@ h3.step { font-size: 18px; margin: 28px 0 8px; }
 .nova-idea button { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--paper); font: 500 13px var(--body); cursor: pointer; }
 .nova-idea button:hover { border-color: var(--signal); background: var(--console); }
 /* Ajustes de NOVA: voz, «NOVA habla» y sugerencias */
-.nova-engrane { min-width: 40px; min-height: 40px; justify-content: center; }
+.nova-engrane { min-width: 44px; min-height: 44px; justify-content: center; }
 .nova-ajustes { display: flex; flex-direction: column; gap: 10px; margin: 10px 0 4px; padding: 12px; border-radius: var(--radius-inner); background: var(--deck); border: 1px solid var(--line-soft); }
 .nova-ajustes h3 { margin: 0; font-size: 15px; }
 .nova-interruptor { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; min-height: 40px; }

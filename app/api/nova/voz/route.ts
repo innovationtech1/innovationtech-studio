@@ -1,7 +1,7 @@
 import { jsonError } from "@/lib/replicate";
 import { clavePropiaCF, getCreds } from "@/lib/cf-auth";
 import { jsonAcceso, requireAccess } from "@/lib/account";
-import { ESPACIO_VOZ_MS, crearLimitador, validarVoz } from "@/lib/nova-voz";
+import { ESPACIO_VOZ_MS, TOPE_VOZ_DIA, crearLimitador, crearTopeDiario, validarVoz } from "@/lib/nova-voz";
 
 export const maxDuration = 30;
 const TIEMPO_MAXIMO_MS = 20_000;
@@ -10,14 +10,19 @@ const TIEMPO_MAXIMO_MS = 20_000;
 // No gasta el contador «voces» del plan (ni el del modo demo): lo cuida un tope de 1 pedido cada 3 s
 // por persona en la memoria del servidor y el tope de letras.
 const permitir = crearLimitador(ESPACIO_VOZ_MS);
+// Y cuando paga la plataforma (sin clave propia): 150 pedidos y 30 000 letras por persona al día de Chicago.
+// Cada instancia del servidor lleva su propio conteo: es un freno, no una cuota exacta.
+const topeDiario = crearTopeDiario(TOPE_VOZ_DIA);
+
+const ipDe = (req: Request) =>
+  (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || req.headers.get("x-real-ip") || "anon";
 
 // Quién pide: su sesión (los últimos caracteres del token, que son su firma) o su dirección IP.
 // Se revisa ANTES del guardián, para que los pedidos seguidos no lleguen ni a leer la cuenta.
 function quien(req: Request): string {
   const m = /^Bearer\s+(\S+)\s*$/i.exec(req.headers.get("authorization") ?? "");
   if (m) return `t:${m[1].slice(-48)}`;
-  const ip = (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || req.headers.get("x-real-ip") || "anon";
-  return `ip:${ip}`;
+  return `ip:${ipDe(req)}`;
 }
 
 export async function POST(req: Request) {
@@ -28,6 +33,11 @@ export async function POST(req: Request) {
   // Guardián: sesión y plan (sin contador), antes de llamar a Cloudflare.
   const acceso = await requireAccess(req, { herramienta: "asistente", clavePropia: clavePropiaCF(req), cloudflare: true });
   if (!acceso.ok) return jsonAcceso(acceso);
+  // Tope diario solo si paga la plataforma; la persona = su uid (cuentas activas) o su IP
+  const pagaPlataforma = !clavePropiaCF(req) && !acceso.cfGuardada;
+  if (pagaPlataforma && !topeDiario(acceso.uid ? `u:${acceso.uid}` : `ip:${ipDe(req)}`, pedido.text.length)) {
+    return jsonError("NOVA ya habló mucho hoy: sigue leyendo sus respuestas o vuelve mañana.", 429);
+  }
   // 0 unidades: en el modo demo no se gastan las voces del día de la persona
   const c = getCreds(req, "voice", 0, acceso.cfGuardada);
   if ("error" in c) return jsonError(c.error, c.status);

@@ -1487,6 +1487,7 @@ export const EN: Record<string, string> = {
   "El texto es demasiado largo para leerlo de una vez.": "The text is too long to read in one go.",
   "NOVA está hablando muy seguido. Espera un momento.": "NOVA is speaking too often. Wait a moment.",
   "La voz de NOVA tardó demasiado. Intenta de nuevo.": "NOVA's voice took too long. Try again.",
+  "NOVA ya habló mucho hoy: sigue leyendo sus respuestas o vuelve mañana.": "NOVA has talked a lot today: keep reading her replies or come back tomorrow.",
 };
 
 // Textos con números u otras partes que cambian

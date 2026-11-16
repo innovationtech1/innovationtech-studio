@@ -168,16 +168,18 @@ export default function AssistantChat({
   useEffect(() => {
     vozActual.current = { cfHeaders, voz: vozElegida.id, habla };
   });
+  const leyendoSugerencia = useRef(false); // lo que suena es una sugerencia (se calla si apagan Sugerencias)
   const vozPrueba = useRef<string | null>(null); // la voz de «Probar» (si no, la elegida)
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const terminar = useRef<(() => void) | null>(null); // termina el audio o la voz del aparato que suena
   const vozRef = useRef<ReturnType<typeof crearVozNova> | null>(null);
   const voz = () =>
     (vozRef.current ??= crearVozNova({
-      pedir: async (text) => {
+      pedir: async (text, signal) => {
         const { cfHeaders: h, voz: elegida } = vozActual.current;
         const res = await fetch("/api/nova/voz", {
           method: "POST",
+          signal,
           headers: { "content-type": "application/json", ...h },
           body: JSON.stringify({ text, lang: getLang(), voice: vozPrueba.current ?? elegida }),
         });
@@ -192,8 +194,11 @@ export default function AssistantChat({
           const fin = (e?: unknown) => {
             a.onended = a.onerror = null;
             URL.revokeObjectURL(url);
-            if (audioRef.current === a) audioRef.current = null;
-            terminar.current = null;
+            // solo se limpia si sigue siendo el audio actual (no borra el «terminar» de uno nuevo)
+            if (audioRef.current === a) {
+              audioRef.current = null;
+              terminar.current = null;
+            }
             if (e) reject(e);
             else resolve();
           };
@@ -209,7 +214,10 @@ export default function AssistantChat({
           if (!synth) return resolve();
           const u = new SpeechSynthesisUtterance(t);
           u.lang = getLang() === "en" ? "en-US" : "es-MX";
-          const fin = () => ((terminar.current = null), resolve());
+          const fin = () => {
+            if (terminar.current === fin) terminar.current = null;
+            resolve();
+          };
           terminar.current = fin;
           u.onend = fin;
           u.onerror = fin;
@@ -223,6 +231,7 @@ export default function AssistantChat({
       alCambiar: (h) => {
         setVozSonando(h);
         if (!h) {
+          leyendoSugerencia.current = false;
           setSpeaking(null);
           setProbando(null);
           vozPrueba.current = null;
@@ -234,6 +243,7 @@ export default function AssistantChat({
     setSpeaking(null);
     setProbando(null);
     vozPrueba.current = prueba;
+    leyendoSugerencia.current = false;
     voz().decir(texto);
   };
   const callar = () => vozRef.current?.callar();
@@ -285,7 +295,11 @@ export default function AssistantChat({
       ultimaSugerencia.current = t;
       setSugerencia(s);
       // Con «NOVA habla», la lee en voz alta (nunca antes de que el cliente haya tocado algo en esta visita)
-      if (vozActual.current.habla && interactuo.current) hablar(tr(s.texto));
+      // y nunca interrumpe una respuesta que esté sonando
+      if (vozActual.current.habla && interactuo.current && !vozRef.current?.hablando()) {
+        hablar(tr(s.texto));
+        leyendoSugerencia.current = true;
+      }
     }, 5000);
     return () => {
       window.clearInterval(reloj);
@@ -350,7 +364,7 @@ export default function AssistantChat({
         saveMessages(id, [...history, { role: "assistant", content: out }]);
       }
       if (!out.trim()) throw new Error("La IA no respondió. Intenta de nuevo.");
-      if (vozActual.current.habla) hablar(out);
+      if (vozActual.current.habla && !document.hidden) hablar(out);
     } catch (e) {
       if ((e as Error).name === "AbortError") {
         if (!out.trim()) saveMessages(id, history);
@@ -459,7 +473,10 @@ export default function AssistantChat({
               checked={sugerenciasOn}
               onChange={(e) => {
                 setSugerenciasOn(e.target.checked);
-                if (!e.target.checked) setSugerencia(null);
+                if (!e.target.checked) {
+                  setSugerencia(null);
+                  if (leyendoSugerencia.current) callar();
+                }
               }}
             />
             <span>
