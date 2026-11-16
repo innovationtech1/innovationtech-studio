@@ -815,6 +815,9 @@ h3.step { font-size: 18px; margin: 28px 0 8px; }
 .nova-interruptor input { width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--signal); flex: none; }
 .nova-interruptor > span { display: flex; flex-direction: column; gap: 2px; }
 .nova-ajustes-voz { margin: 4px 0 0; }
+.nova-estilo { display: flex; flex-direction: column; gap: 4px; }
+.nova-estilo select { width: 100%; min-height: 44px; }
+.nova-estilo > span:last-child { font-size: 13px; }
 .nova-voces { display: grid; grid-template-columns: 1fr; gap: 6px; }
 .nova-voz { display: flex; align-items: stretch; gap: 6px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--ink); }
 .nova-voz.on { border-color: var(--signal); box-shadow: inset 0 0 0 1px var(--signal); }

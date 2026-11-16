@@ -22,9 +22,10 @@ import { describeVersion, MUSIC_STYLES, MusicStyleId, renderMusic } from "@/lib/
 import MusicPicker from "./music-picker";
 import LibraryPicker from "./library-picker";
 import { loadSong } from "@/lib/library";
-import { DEFAULT_VOICE, VOICES, findVoice } from "@/lib/voices";
+import { DEFAULT_VOICE, SAMPLE, VOICES, findVoice } from "@/lib/voices";
+import { ESTILOS_VOZ, aplicarEstilo, estiloVoz, type EstiloVoz } from "@/lib/estilos-voz";
 import { getLang, tr } from "@/lib/i18n";
-import VoicePicker from "./voice-picker";
+import VoicePicker, { muestrasVoz } from "./voice-picker";
 import { marcarDemoALaVista, ProTag, refrescarCuenta, useCuenta, usePuede } from "./account-context";
 import {
   MAX_VIDEO,
@@ -78,7 +79,7 @@ import {
 import { esperarEnFondo, siguienteEspera, terminado, textoEstado, type TrabajoVisto } from "@/lib/estados-video";
 import { consultarTomas, pedirTomas, prepararFoto, subirFoto } from "@/lib/video-ia-cliente";
 
-import { Clapperboard, Dices, Download, Eye, Mic, Play, Redo2, Sparkles, Square, Undo2, Video } from "lucide-react";
+import { Clapperboard, Dices, Download, Eye, Loader2, Mic, Play, Redo2, Sparkles, Square, Undo2, Video } from "lucide-react";
 // Cada clip guarda su foto en el dispositivo (IndexedDB) con imageId, para que no se pierda
 // al cambiar de sección, editar, cerrar o recargar la app. El modelo está en lib/linea-tiempo.ts.
 
@@ -313,8 +314,10 @@ export default function ReelStudio({
   const [estadoIa, setEstadoIa] = useState("");
   const [invitarPlan, setInvitarPlan] = useState(false);
   const subidas = useRef(new Map<string, string>()); // sha256 → llave de la foto ya subida
-  // Voces ya generadas en esta sesión (voz + guion → audio): cambiar entre ellas es al instante y no gasta
+  // Voces ya generadas en esta sesión (voz + guion → audio sin estilo): cambiar entre ellas es al instante y no gasta
   const vocesHechas = useRef(new Map<string, string>());
+  // La misma voz ya con un estilo aplicado (voz + estilo + guion → audio): cambiar de estilo no vuelve a pedirla
+  const vocesConEstilo = useRef(new Map<string, string>());
   // Los clips de IA del último video: para volver a grabarlo (otra voz, música o texto) sin pedirlos de nuevo
   const ultimosClips = useRef<{ firma: string; clips: (string | null)[]; cuando: number } | null>(null);
   const [vozCambio, setVozCambio] = useState(false);
@@ -443,6 +446,8 @@ export default function ReelStudio({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voice]);
   const [voiceId, setVoiceId] = usePersistentState<string>("reel:voz", DEFAULT_VOICE[getLang()]);
+  const [estiloGuardado, setEstiloGuardado] = usePersistentState<string>("reel:estilo-voz", "natural");
+  const estiloActual = estiloVoz(estiloGuardado);
   const [picking, setPicking] = useState<number | null>(null);
   const [busy, setBusy] = useState("");
   const [progress, setProgress] = useState(0);
@@ -616,11 +621,19 @@ export default function ReelStudio({
       if (failed) throw failed;
     });
 
-  // Genera la voz (o la recupera al instante si esa voz ya se generó con ese mismo guion)
-  async function generarVoz(id: string, texto: string) {
+  // Aplica un estilo de voz (en el aparato) a un audio en data URL; «Natural» lo deja igual
+  async function conEstilo(audio: string, estilo: EstiloVoz): Promise<string> {
+    if (estilo === "natural") return audio;
+    const bytes = await (await fetch(audio)).arrayBuffer();
+    return blobToDataUrl(await aplicarEstilo(bytes, estilo));
+  }
+
+  // Genera la voz (o la recupera al instante si esa voz ya se generó con ese mismo guion) y le aplica el estilo
+  async function generarVoz(id: string, texto: string, estilo: EstiloVoz = estiloActual) {
     if (!texto.trim()) throw new Error("Escribe el guion de la voz en off.");
     const voz = findVoice(id)?.lang === getLang() ? id : DEFAULT_VOICE[getLang()];
     const llave = `${voz}|${texto}`;
+    const llaveEstilo = `${voz}|${estilo}|${texto}`;
     let audio = vocesHechas.current.get(llave);
     if (!audio) {
       const res = await fetch("/api/voice", {
@@ -634,7 +647,12 @@ export default function ReelStudio({
       audio = data.audio as string;
       vocesHechas.current.set(llave, audio);
     }
-    setVoice(audio);
+    let final = vocesConEstilo.current.get(llaveEstilo);
+    if (!final) {
+      final = await conEstilo(audio, estilo);
+      vocesConEstilo.current.set(llaveEstilo, final);
+    }
+    setVoice(final);
     if (result) setVozCambio(true);
   }
   const makeVoice = (id: string = voiceId) => run("Generando voz…", () => generarVoz(id, script));
@@ -646,6 +664,61 @@ export default function ReelStudio({
     if (!voice) return;
     if (busy) return setVoice(""); // ocupado (grabando): se genera después con «Generar voz»
     void makeVoice(id);
+  }
+
+  // Elegir otro estilo: si ya había voz, se vuelve a hacer con el audio guardado (sin pedirlo otra vez)
+  function elegirEstilo(valor: string) {
+    const estilo = estiloVoz(valor);
+    setEstiloGuardado(estilo);
+    if (!voice) return;
+    if (busy) return setVoice("");
+    void run("Aplicando el estilo…", () => generarVoz(voiceId, script, estilo));
+  }
+
+  // «Probar» del estilo: la frase de muestra de la voz elegida, con ese estilo (tocar otra vez la detiene)
+  const [probandoEstilo, setProbandoEstilo] = useState<"" | "cargando" | "sonando">("");
+  const audioPrueba = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => () => audioPrueba.current?.pause(), []); // al salir, se calla
+  async function probarEstilo() {
+    if (probandoEstilo) {
+      audioPrueba.current?.pause();
+      audioPrueba.current = null;
+      return setProbandoEstilo("");
+    }
+    setError("");
+    setProbandoEstilo("cargando");
+    try {
+      const lang = getLang();
+      const voz = findVoice(voiceId)?.lang === lang ? voiceId : DEFAULT_VOICE[lang];
+      let muestra = muestrasVoz.get(voz); // la misma que usa ▶ del selector de voz
+      if (!muestra) {
+        const res = await fetch("/api/voice", {
+          method: "POST",
+          headers: { "content-type": "application/json", ...cfHeaders },
+          body: JSON.stringify({ text: SAMPLE[lang], lang, voice: voz }),
+        });
+        const data = await res.json().catch(() => ({ error: "La voz no se pudo generar. Intenta de nuevo." }));
+        if (!res.ok || !data.audio) throw new Error(data.error || "La voz no se pudo generar. Intenta de nuevo.");
+        muestra = data.audio as string;
+        muestrasVoz.set(voz, muestra);
+      }
+      const llave = `muestra|${voz}|${estiloActual}`;
+      let src = vocesConEstilo.current.get(llave);
+      if (!src) {
+        src = await conEstilo(muestra, estiloActual);
+        vocesConEstilo.current.set(llave, src);
+      }
+      const a = new Audio(src);
+      audioPrueba.current = a;
+      a.onended = a.onerror = () => {
+        if (audioPrueba.current === a) setProbandoEstilo("");
+      };
+      setProbandoEstilo("sonando");
+      await a.play();
+    } catch (e) {
+      setProbandoEstilo("");
+      setError(friendlyError((e as Error).message));
+    }
   }
 
   // Lo que comparten grabar y la vista previa: las escenas con su duración, la marca, la voz y la música.
@@ -1698,6 +1771,21 @@ export default function ReelStudio({
       />
       <label>Elige la voz (toca ▶ para escucharla)</label>
       <VoicePicker value={voiceId} onChange={elegirVoz} headers={cfHeaders} />
+      <label htmlFor="reel-estilo-voz">Estilo</label>
+      <div className="actions" style={{ alignItems: "center", flexWrap: "nowrap" }}>
+        <select id="reel-estilo-voz" value={estiloActual} onChange={(e) => elegirEstilo(e.target.value)} disabled={!!busy} style={{ flex: 1, minWidth: 0 }}>
+          {ESTILOS_VOZ.map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.nombre}
+            </option>
+          ))}
+        </select>
+        <button className="btn ghost small" onClick={probarEstilo} disabled={probandoEstilo === "cargando"} aria-label={probandoEstilo === "sonando" ? "Detener" : "Probar el estilo"}>
+          {probandoEstilo === "cargando" ? <Loader2 size={16} className="spin" aria-hidden /> : probandoEstilo === "sonando" ? <Square size={14} aria-hidden /> : <Play size={16} aria-hidden />}
+          {probandoEstilo === "sonando" ? "Detener" : "Probar"}
+        </button>
+      </div>
+      <p className="hint" style={{ marginTop: 6 }}>{ESTILOS_VOZ.find((x) => x.id === estiloActual)!.descripcion}</p>
       <p className="hint" style={{ marginTop: 6 }}>
         Para que suene más natural, escribe como hablas: usa comas para las pausas, puntos para respirar y signos de ¡exclamación! o ¿pregunta? para dar emoción.
       </p>

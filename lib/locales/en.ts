@@ -1488,6 +1488,15 @@ export const EN: Record<string, string> = {
   "NOVA está hablando muy seguido. Espera un momento.": "NOVA is speaking too often. Wait a moment.",
   "La voz de NOVA tardó demasiado. Intenta de nuevo.": "NOVA's voice took too long. Try again.",
   "NOVA ya habló mucho hoy: sigue leyendo sus respuestas o vuelve mañana.": "NOVA has talked a lot today: keep reading her replies or come back tomorrow.",
+  // Estilos de voz (NOVA y voz en off del reel)
+  "Estilo de voz": "Voice style",
+  "Natural": "Natural",
+  "Voz grave de presentador de comerciales": "Deep commercial announcer voice",
+  "La voz tal como sale, sin efectos.": "The voice as it comes, no effects.",
+  "Más grave, más lenta y con más cuerpo, como un anuncio de radio.": "Deeper, slower and fuller, like a radio ad.",
+  "Más cálida y tranquila, con un poco de ambiente.": "Warmer and calmer, with a little room ambience.",
+  "Aplicando el estilo…": "Applying the style…",
+  "Probar el estilo": "Try the style",
 };
 
 // Textos con números u otras partes que cambian

@@ -36,6 +36,7 @@ import {
   type Sugerencia,
 } from "@/lib/nova-sugerencias";
 import { FRASE_PRUEBA, crearVozNova, vocesNova, vozNova } from "@/lib/nova-voz";
+import { ESTILOS_VOZ, aplicarEstilo, estiloVoz } from "@/lib/estilos-voz";
 import type { Settings } from "@/lib/types";
 import { useCuenta, type ValorCuenta } from "./account-context";
 import MicButton from "./mic-button";
@@ -136,8 +137,9 @@ export default function AssistantChat({
   const [picker, setPicker] = useState<number | null>(null);
   const [sugerencia, setSugerencia] = useState<Sugerencia | null>(null);
   const [micActivo, setMicActivo] = useState(false); // dictando: escuchando, grabando o transcribiendo
-  // Ajustes de NOVA (recordados en el aparato): voz, «NOVA habla» (apagado al inicio) y sugerencias
+  // Ajustes de NOVA (recordados en el aparato): voz, estilo de voz, «NOVA habla» (apagado al inicio) y sugerencias
   const [vozId, setVozId] = usePersistentState("nova:voz", "");
+  const [estiloGuardado, setEstilo] = usePersistentState<string>("nova:estilo", "natural");
   const [habla, setHabla] = usePersistentState("nova:habla", false);
   const [sugerenciasOn, setSugerenciasOn] = usePersistentState("nova:sugerencias", true);
   const [ajustes, setAjustes] = useState(false);
@@ -164,9 +166,10 @@ export default function AssistantChat({
   // ---------- La voz de NOVA ----------
   const lang = getLang();
   const vozElegida = vozNova(vozId, lang);
-  const vozActual = useRef({ cfHeaders, voz: vozElegida.id, habla });
+  const estilo = estiloVoz(estiloGuardado);
+  const vozActual = useRef({ cfHeaders, voz: vozElegida.id, habla, estilo });
   useEffect(() => {
-    vozActual.current = { cfHeaders, voz: vozElegida.id, habla };
+    vozActual.current = { cfHeaders, voz: vozElegida.id, habla, estilo };
   });
   const leyendoSugerencia = useRef(false); // lo que suena es una sugerencia (se calla si apagan Sugerencias)
   const vozPrueba = useRef<string | null>(null); // la voz de «Probar» (si no, la elegida)
@@ -176,7 +179,7 @@ export default function AssistantChat({
   const voz = () =>
     (vozRef.current ??= crearVozNova({
       pedir: async (text, signal) => {
-        const { cfHeaders: h, voz: elegida } = vozActual.current;
+        const { cfHeaders: h, voz: elegida, estilo: e } = vozActual.current;
         const res = await fetch("/api/nova/voz", {
           method: "POST",
           signal,
@@ -184,7 +187,9 @@ export default function AssistantChat({
           body: JSON.stringify({ text, lang: getLang(), voice: vozPrueba.current ?? elegida }),
         });
         if (!res.ok) throw new Error(`Error ${res.status}`);
-        return res.blob();
+        // El estilo se hace en el aparato, mientras suena el trozo anterior (si falla, suena sin estilo)
+        const bruto = await res.blob();
+        return e === "natural" ? bruto : aplicarEstilo(await bruto.arrayBuffer(), e);
       },
       reproducir: (b) =>
         new Promise<void>((resolve, reject) => {
@@ -483,6 +488,17 @@ export default function AssistantChat({
               <strong>Sugerencias</strong>
               <span className="muted">Ideas cuando llevas un rato sin escribir.</span>
             </span>
+          </label>
+          <label className="nova-estilo">
+            <span className="muted">Estilo de voz</span>
+            <select value={estilo} onChange={(e) => setEstilo(estiloVoz(e.target.value))}>
+              {ESTILOS_VOZ.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.nombre}
+                </option>
+              ))}
+            </select>
+            <span className="muted">{ESTILOS_VOZ.find((x) => x.id === estilo)!.descripcion}</span>
           </label>
           <p className="muted nova-ajustes-voz">Voz de NOVA</p>
           <div className="nova-voces">
