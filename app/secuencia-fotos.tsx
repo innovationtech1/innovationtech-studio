@@ -15,6 +15,7 @@ import { usePersistentState } from "@/lib/persist";
 import type { ReelFormat } from "@/lib/reel";
 import { ESTILOS_FOTO, MAX_FOTOS, MIN_FOTOS, MAX_MOMENTO, type IdeaFoto } from "@/lib/secuencia";
 import {
+  AVISO_SIN_GUARDAR,
   MIN_FOTOS_VIDEO,
   agregarIdea,
   fotosParaVideo,
@@ -90,6 +91,10 @@ export default function SecuenciaFotos({
     });
   };
 
+  // La foto guardada ya no está (o no se puede leer): la idea queda con «Rehacer» y «Crear las fotos» la vuelve a crear
+  const sinFoto = (id: string) =>
+    setActual((a) => ({ ...a, ideas: a.ideas.map((x) => (x.foto === id ? { ...x, foto: undefined, fallo: true } : x)) }));
+
   // Al volver (o recargar), las fotos guardadas en el aparato se cargan otra vez
   useEffect(() => {
     for (const idea of ideas) {
@@ -101,12 +106,13 @@ export default function SecuenciaFotos({
           if (blob) {
             const url = await blobToDataUrl(blob);
             setUrls((u) => ({ ...u, [id]: url }));
-          } else {
-            // Se borró del aparato: la idea queda sin foto (se puede crear otra vez)
-            setActual((a) => ({ ...a, ideas: a.ideas.map((x) => (x.foto === id ? { ...x, foto: undefined } : x)) }));
-          }
+          } else sinFoto(id); // se borró del aparato
         })
-        .catch(() => {});
+        .catch(() => {
+          // No se pudo leer: se quita (si no, se quedaría «cargando» para siempre)
+          void deleteFile(id).catch(() => {});
+          sinFoto(id);
+        });
     }
   }, [ideas, urls, setActual]);
 
@@ -186,14 +192,20 @@ export default function SecuenciaFotos({
       cambiarIdea(idea.id, { foto: fotoId, fallo: false });
       olvidar(idea.foto); // la de antes (con «Rehacer»)
       onImages([{ kind: "imagen", url, prompt: idea.momento.trim() || prompt, date: new Date().toISOString() }]);
-      void toBlob(url).then((b) => (b ? putFile(fotoId, b) : undefined)).catch(() => {});
+      void toBlob(url)
+        .then((b) => {
+          if (!b) throw new Error("sin_leer");
+          return putFile(fotoId, b);
+        })
+        .catch(() => setAviso(AVISO_SIN_GUARDAR));
       void refrescarCuenta();
       return "ok";
     } catch (e) {
       cambiarIdea(idea.id, { fallo: true });
       setError(friendlyError((e as Error).message));
       const status = (e as { status?: number }).status;
-      return status === 401 || status === 402 || status === 403 || status === 429 ? "parar" : "fallo";
+      // Un 4xx (sin sesión, sin plan, sin límite, pedido rechazado) fallaría igual en las que siguen
+      return typeof status === "number" && status >= 400 && status < 500 ? "parar" : "fallo";
     } finally {
       setCargando(null);
     }

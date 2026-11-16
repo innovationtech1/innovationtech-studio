@@ -46,6 +46,10 @@ export function textoConfirmarFotos(n: number, quedan?: number): string {
   return `Esto usa ${uso} de tu límite${resto}. ${n === 1 ? "¿La creo?" : "¿Las creo?"}`;
 }
 
+// Una foto ya cobrada que no entró en el almacenamiento del aparato
+export const AVISO_SIN_GUARDAR =
+  "La foto se creó, pero no se pudo guardar en este dispositivo: si recargas la página se perderá. Descárgala o libera espacio.";
+
 export const textoProgreso = (i: number, total: number) => `Foto ${i} de ${total}…`;
 
 // Cuánto le queda de un contador (lo del mes + saldo de paquetes); undefined sin cuenta o si su plan no lo tiene.

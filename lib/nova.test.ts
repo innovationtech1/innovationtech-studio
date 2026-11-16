@@ -216,7 +216,9 @@ test("instruccionesNova: actúa primero, ajustes sobre la pieza e imágenes solo
   const rapida = instruccionesNova({ english: false, cuenta: null, velocidad: "rapida" });
   const creativa = instruccionesNova({ english: false, cuenta: null, velocidad: "creativa" });
   assert.match(rapida, /Nunca hagas listas de preguntas/);
-  assert.match(rapida, /no generes variantes de preguntas/);
+  assert.match(rapida, /no conviertas tu respuesta en preguntas para el usuario/);
+  assert.match(rapida, /escribe igual con lo que sabes y al final haz una sola pregunta breve/);
+  assert.doesNotMatch(rapida, /antes de escribir/);
   assert.match(rapida, /no propongas imágenes/);
   assert.match(creativa, /Solo cuando escribas una pieza de marketing/);
 });

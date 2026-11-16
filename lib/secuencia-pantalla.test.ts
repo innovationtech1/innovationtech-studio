@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ESTILOS_FOTO, MAX_FOTOS } from "./secuencia";
+import { DURACIONES_SECUENCIA, ESTILOS_FOTO, MAX_FOTOS, MAX_MOMENTO, MIN_FOTOS } from "./secuencia";
+import { MAX_ORDEN } from "./director";
 import {
+  AVISO_SIN_GUARDAR,
   MIN_FOTOS_VIDEO,
   agregarIdea,
   fotosParaVideo,
@@ -124,6 +126,14 @@ test("los textos de la pantalla «Secuencia de fotos» tienen su traducción al 
     "Esto usa 1 imagen de tu límite. ¿La creo?",
     "Foto 2 de 5…",
     ...ESTILOS_FOTO.map((e) => e.nombre),
+    AVISO_SIN_GUARDAR,
+    // Errores de /api/text (modos secuencia y guion_secuencia) y de lib/secuencia.ts
+    `La historia es muy larga (máximo ${MAX_ORDEN} caracteres).`,
+    `Elige de ${MIN_FOTOS} a ${MAX_FOTOS} fotos.`,
+    "Elige un estilo de fotos.",
+    `Elige una duración de ${DURACIONES_SECUENCIA.join(", ")} segundos.`,
+    `Faltan los momentos de las fotos (de 1 a ${MAX_FOTOS}, cada uno de máximo ${MAX_MOMENTO} caracteres).`,
+    "La IA no pudo armar la secuencia. Intenta de nuevo.",
   ];
   const faltan = textos.filter((t) => !traducir(t));
   assert.deepEqual(faltan, []);

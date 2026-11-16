@@ -84,6 +84,7 @@ import { quedanDe } from "@/lib/secuencia-pantalla";
 import {
   clipsDeSecuencia,
   duracionParaFotos,
+  tieneContenido,
   limpiarEntrante,
   repartirEnFotos,
   textoConfirmarVoz,
@@ -358,7 +359,7 @@ export default function ReelStudio({
   // Los clips de IA del último video: para volver a grabarlo (otra voz, música o texto) sin pedirlos de nuevo
   const ultimosClips = useRef<{ firma: string; clips: (string | null)[]; cuando: number } | null>(null);
   const [vozCambio, setVozCambio] = useState(false);
-  const { activo: cuentasOn, cuenta, abrirPlanes } = useCuenta();
+  const { activo: cuentasOn, cuenta, abrirPlanes, abrirMiCuenta } = useCuenta();
   const conCuenta = cuentasOn && !!cuenta?.usuario;
   const esDemo = !!cuenta?.usuario && cuenta.efectivo.plan === "prueba";
   const tomasMarcadas = clips.filter((s) => s.image && s.tipo === "toma").length;
@@ -1416,6 +1417,10 @@ export default function ReelStudio({
   const [errorNova, setErrorNova] = useState("");
   const tarjetaNova = useRef<HTMLDivElement>(null);
   const tituloClips = useRef<HTMLHeadingElement>(null);
+  // Cómo estaba el video antes de «Reemplazar»: «Volver al video anterior» lo devuelve todo (clips, tema,
+  // formato, guion, voz y música), no solo los clips
+  const antesDeSecuencia = useRef<{ clips: Clip[]; ajustes: Ajustes; voice: string } | null>(null);
+  const [hayVolverSecuencia, setHayVolverSecuencia] = useState(false);
   const quedanVoces = cuentasOn && cuenta && "limites" in cuenta ? quedanDe(cuenta, "voces") : undefined;
 
   const pedidoGuion = useRef(0); // un guion que llega tarde (tras «Empezar nuevo» u otro pedido) no se usa
@@ -1460,6 +1465,8 @@ export default function ReelStudio({
     detenerPrevia();
     stopListen();
     const viejos = clipsRef.current;
+    antesDeSecuencia.current = tieneContenido(viejos, script) ? { clips: viejos, ajustes: ajustesActuales(), voice } : null;
+    setHayVolverSecuencia(!!antesDeSecuencia.current);
     const total = duracionParaFotos(s.fotos.length);
     editar(() => clipsDeSecuencia(s.fotos, s.momentos, total)); // se puede deshacer
     // Las fotos del video anterior se quitan del aparato (si se deshace, se vuelven a guardar solas)
@@ -1494,6 +1501,20 @@ export default function ReelStudio({
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incomingSecuencia]);
+
+  function volverAntesDeSecuencia() {
+    const a = antesDeSecuencia.current;
+    if (!a || busy) return;
+    antesDeSecuencia.current = null;
+    setHayVolverSecuencia(false);
+    pedidoGuion.current++; // un guion que siga en camino ya no se usa
+    ajustarTrasVoz.current = false;
+    editar(() => reconciliar(a.clips)); // las fotos de antes se vuelven a guardar solas
+    ponerAjustes(a.ajustes);
+    setVoice(a.voice);
+    setElegido(-1);
+    setSecNova(null);
+  }
 
   // Otra duración: las fotos se reparten al momento; el guion se puede escribir otra vez
   function cambiarDuracionNova(d: DuracionSecuencia) {
@@ -1561,7 +1582,15 @@ export default function ReelStudio({
           </button>
         </div>
       )}
-      {faseNova === "guion" && puedeVoz && (
+      {faseNova === "guion" && puedeVoz && quedanVoces === 0 && (
+        <div className="acct-upsell">
+          <span>Ya no te quedan voces en off este mes.</span>
+          <button className="btn small" onClick={abrirMiCuenta}>
+            Mi cuenta
+          </button>
+        </div>
+      )}
+      {faseNova === "guion" && puedeVoz && quedanVoces !== 0 && (
         <>
           <span>{textoConfirmarVoz(quedanVoces)}</span>
           <div className="actions">
@@ -1603,6 +1632,13 @@ export default function ReelStudio({
             </button>
           </div>
         </>
+      )}
+      {hayVolverSecuencia && (
+        <div className="actions">
+          <button className="btn ghost small" disabled={!!busy} onClick={volverAntesDeSecuencia}>
+            <Undo2 size={15} aria-hidden /> Volver al video anterior
+          </button>
+        </div>
       )}
     </div>
   );
@@ -1862,6 +1898,8 @@ export default function ReelStudio({
             setHayDeshacerOrden(false);
             setSecNova(null);
             pedidoGuion.current++;
+            antesDeSecuencia.current = null;
+            setHayVolverSecuencia(false);
           }}
         >
           Empezar nuevo

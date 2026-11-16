@@ -66,11 +66,11 @@ export default function ReelProyectos(props: Props) {
   }, [props.incomingSecuencia]);
 
   // Hace un cambio de video: espera el guardado pendiente, aplica el cambio y vuelve a montar
-  // Con `secuencia`, el video que se abre la recibe (si fn no devuelve false)
-  async function conCambio(fn: () => void | boolean, secuencia?: SecuenciaEntrante) {
-    if (cambiando || ocupado) return;
+  // Con `secuencia`, el video que se abre la recibe (si fn no devuelve false). Devuelve false si no se hizo.
+  async function conCambio(fn: () => void | boolean, secuencia?: SecuenciaEntrante): Promise<boolean> {
+    if (cambiando || ocupado) return false;
     const cortaDrive = subiendoDrive.current;
-    if (cortaDrive && !confirm(tr("La subida a Drive sigue en curso. ¿Cancelarla?"))) return;
+    if (cortaDrive && !confirm(tr("La subida a Drive sigue en curso. ¿Cancelarla?"))) return false;
     setCambiando(true);
     setAviso("");
     setModo("");
@@ -88,6 +88,7 @@ export default function ReelProyectos(props: Props) {
     setVuelta((v) => v + 1);
     if (cortaDrive) setAviso("Se canceló la subida a Drive.");
     setCambiando(false);
+    return true;
   }
 
   const abrir = (id: string) => conCambio(() => void cambiarA(localStorage, id));
@@ -114,15 +115,17 @@ export default function ReelProyectos(props: Props) {
   // Respuesta a «¿Reemplazo el video abierto o creo uno nuevo?»
   function nuevoConSecuencia() {
     if (!pregunta) return;
-    const { s } = pregunta;
+    const p = pregunta;
     setPregunta(null);
     void conCambio(() => {
-      const r = crearProyecto(localStorage, s.tema);
+      const r = crearProyecto(localStorage, p.s.tema);
       if (!r.ok) {
         setAviso(r.error);
         return false;
       }
-    }, s);
+    }, p.s).then((hecho) => {
+      if (!hecho) setPregunta(p); // se canceló (subida a Drive en curso): la secuencia sigue esperando
+    });
   }
   function reemplazarConSecuencia() {
     if (!pregunta) return;

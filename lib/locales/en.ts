@@ -1544,6 +1544,12 @@ export const EN: Record<string, string> = {
   "Ir a los clips": "Go to the clips",
   "La voz está lista.": "The voice is ready.",
   "NOVA no pudo escribir el guion. Intenta de nuevo.": "NOVA couldn't write the script. Try again.",
+  "Elige un estilo de fotos.": "Choose a photo style.",
+  "La IA no pudo armar la secuencia. Intenta de nuevo.": "The AI couldn't put the sequence together. Try again.",
+  "Espera a que termine la subida a Drive y vuelve a tocar «Hacer el video con NOVA».": "Wait for the Drive upload to finish and tap \"Make the video with NOVA\" again.",
+  "Ya no te quedan voces en off este mes.": "You have no voice-overs left this month.",
+  "Volver al video anterior": "Go back to the previous video",
+  "La foto se creó, pero no se pudo guardar en este dispositivo: si recargas la página se perderá. Descárgala o libera espacio.": "The photo was created, but it couldn't be saved on this device: if you reload the page it will be lost. Download it or free up space.",
 };
 
 // Textos con números u otras partes que cambian
@@ -1677,6 +1683,10 @@ export const EN_PATTERNS: [RegExp, string][] = [
   [/^Esto usa (\d+) imágenes de tu límite \(te quedan (\d+)\)\. ¿Las creo\?$/, "This uses $1 images from your limit ($2 left). Create them?"],
   [/^Esto usa (\d+) imágenes de tu límite\. ¿Las creo\?$/, "This uses $1 images from your limit. Create them?"],
   [/^Foto (\d+) de (\d+)…$/, "Photo $1 of $2…"],
+  [/^La historia es muy larga \(máximo (\d+) caracteres\)\.$/, "The story is too long (maximum $1 characters)."],
+  [/^Elige de (\d+) a (\d+) fotos\.$/, "Choose $1 to $2 photos."],
+  [/^Elige una duración de ([\d, ]+) segundos\.$/, "Choose a length of $1 seconds."],
+  [/^Faltan los momentos de las fotos \(de (\d+) a (\d+), cada uno de máximo (\d+) caracteres\)\.$/, "The photo moments are missing ($1 to $2, each up to $3 characters)."],
   // Hacer el video con NOVA
   [/^Generar la voz usa 1 voz en off de tu plan \(te queda 1\)\. ¿La genero\?$/, "Generating the voice uses 1 voice-over from your plan (1 left). Generate it?"],
   [/^Generar la voz usa 1 voz en off de tu plan \(te quedan (\d+)\)\. ¿La genero\?$/, "Generating the voice uses 1 voice-over from your plan ($1 left). Generate it?"],
