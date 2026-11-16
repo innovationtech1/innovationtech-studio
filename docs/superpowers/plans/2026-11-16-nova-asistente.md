@@ -83,3 +83,18 @@
 ### Task 3 addendum (owner request 2026-11-16): «Ajustes de NOVA»
 - Gear button in NOVA's header opens a small panel «Ajustes de NOVA» with: voice choice among the Aura-2 voices of `lib/voices.ts` for the current language (no «Básica»), each with «Probar» (speaks «Hola, soy NOVA. ¿Qué creamos hoy?»); toggle «NOVA habla»; toggle «Sugerencias» (off = no idle bubbles). All persisted with `usePersistentState` keys `nova:voz`, `nova:habla`, `nova:sugerencias`. Default voice: es «es-estrella», en «en-luna».
 - `/api/nova/voz` accepts `voice` but only ids of Aura-2 voices from `lib/voices.ts` (`findVoice`, not `basic`); anything else → the default for the language.
+
+### Task 4 (owner request 2026-11-16): Estilos de voz — «Voz grave de presentador de comerciales» y «Suave»
+Free, on-device audio styles applied to any Aura voice, for NOVA's voice AND the reel voice-over. Only these 2 styles now (+ «Natural» = no effect); more later after the owner tests.
+
+**Files:** Create `lib/estilos-voz.ts`, `lib/estilos-voz.test.ts`. Modify `app/reel-studio.tsx` (voice-over picker), NOVA settings panel + voice player (Task 3 files), `lib/locales/en.ts`.
+
+**Interfaces — Produces:**
+- `type EstiloVoz = "natural" | "presentador" | "suave"`; `ESTILOS_VOZ: { id: EstiloVoz; nombre: string; descripcion: string }[]` — names exactly «Natural», «Voz grave de presentador de comerciales», «Suave».
+- `parametrosEstilo(id: EstiloVoz): { velocidad: number; graves: { hz: number; db: number } | null; presencia: { hz: number; db: number } | null; agudos: { hz: number; db: number } | null; pasaBajos: number | null; compresor: boolean; ambiente: number }` — presentador: velocidad 0.92 (lowers pitch and slows), graves 200 Hz +6 dB, presencia 2500 Hz +3 dB, compresor true, ambiente 0; suave: velocidad 0.97, agudos 4000 Hz −6 dB, pasaBajos 7000, compresor false, ambiente 0.18; natural: velocidad 1, all null/false/0.
+- `aplicarEstilo(audio: ArrayBuffer, id: EstiloVoz, crearContexto?: (canales, largo, frecuencia) => OfflineAudioContext): Promise<Blob>` — natural → returns the original bytes as-is (Blob of the same type); otherwise decode, render through OfflineAudioContext (playbackRate, BiquadFilters lowshelf/peaking/highshelf/lowpass, DynamicsCompressor, ConvolverNode with a generated decaying-noise impulse 1.2 s mixed at `ambiente`), output length = duration / velocidad, encode WAV (16-bit PCM mono). Never throws for a valid audio: on any processing error returns the original.
+- `wavDesdeCanal(datos: Float32Array, frecuencia: number): Blob` — exported and unit-tested (RIFF header, sizes, clipping).
+- [ ] Step 1: failing tests for `parametrosEstilo` (exact values above), `ESTILOS_VOZ` names, `wavDesdeCanal` header/length/clipping, `aplicarEstilo("natural")` returns the original bytes. Run → FAIL; implement; → PASS.
+- [ ] Step 2: Reel voice-over: an «Estilo» select next to the voice picker (persisted with the project's voice settings) + «Probar» (plays the style on the sample phrase of that voice). `generarVoz` applies the style to the generated audio before `setVoice` (data URL of the WAV); the in-session cache key includes the style; switching style re-applies on the cached raw audio without calling `/api/voice` again (keep raw audio cached).
+- [ ] Step 3: NOVA: «Estilo de voz» select in «Ajustes de NOVA» (persisted `nova:estilo`, default natural); NOVA's player applies it to each chunk before playing (browser-voice fallback plays without style).
+- [ ] Step 4: en.ts; `npm test` # fail 0, tsc, build. Commit «Estilos de voz: presentador de comerciales y suave, en NOVA y en la voz en off».
