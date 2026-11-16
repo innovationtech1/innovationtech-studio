@@ -27,6 +27,7 @@ test("colecciones: sin prefijo, los nombres de siempre", () => {
     cacheVideo: "studio_cache_video",
     gastoVideo: "studio_gasto_video",
     candados: "studio_candados",
+    tomasDia: "studio_tomas_dia",
   });
 });
 
@@ -40,15 +41,13 @@ test("colecciones: con prefijo de pruebas, todas cambian", () => {
   for (const nombre of Object.values(c)) assert.ok(nombre.startsWith("prueba_studio_"));
 });
 
-test("colecciones: prefijo vacío o inválido usa studio_", () => {
+test("colecciones: prefijo vacío usa studio_", () => {
   process.env.STUDIO_COLECCION_PREFIJO = "  ";
   assert.equal(prefijoColecciones(), "studio_");
+});
+
+test("colecciones: prefijo inválido falla en voz alta (nunca usa en silencio los datos del sitio principal)", () => {
   process.env.STUDIO_COLECCION_PREFIJO = "a/b";
-  const original = console.warn;
-  console.warn = () => {};
-  try {
-    assert.equal(prefijoColecciones(), "studio_");
-  } finally {
-    console.warn = original;
-  }
+  assert.throws(() => prefijoColecciones(), /STUDIO_COLECCION_PREFIJO/);
+  assert.throws(() => colecciones(), /STUDIO_COLECCION_PREFIJO/);
 });

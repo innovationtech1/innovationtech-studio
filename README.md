@@ -273,7 +273,8 @@ Entra a Netlify → proyecto **innovationtech-studio** → *Project configuratio
 | `R2_ACCOUNT_ID` | Account ID de Cloudflare donde está el bucket de R2 |
 | `R2_BUCKET` | Nombre del bucket de R2 (por ejemplo `studio-videos`) |
 | `VIDEO_IA` | Opcional. `off` apaga al instante las tomas con IA (los reels con animación siguen funcionando) |
-| `STUDIO_COLECCION_PREFIJO` | Opcional. Inicio del nombre de las colecciones de Firestore (`studio_` si no la pones). Solo para las versiones de prueba: `prueba_studio_` (ver Paso 4) |
+| `VIDEO_IA_TOPE_CENTAVOS` | Opcional. Tope de gasto del día en fal.ai para esa publicación, en centavos (`200` = $2); si está, manda sobre el tope del panel. Útil para que la versión de prueba gaste menos |
+| `STUDIO_COLECCION_PREFIJO` | Opcional. Inicio del nombre de las colecciones de Firestore (`studio_` si no la pones). Solo para las versiones de prueba: `prueba_studio_` (ver Paso 4). Solo letras, números, `_` y `-`: con otro carácter las cuentas de esa publicación no funcionan (a propósito, para no tocar los datos del sitio principal) |
 
 Netlify bloquea la publicación si encuentra en el código un valor igual a una variable. Como las variables no secretas sí aparecen en el sitio, agrega una variable más:
 
@@ -331,8 +332,16 @@ La versión de prueba es una copia del sitio con otra dirección. Usa **claves d
 | `STRIPE_WEBHOOK_SECRET` | el del webhook real (Paso 5) | el del webhook de prueba |
 | `STUDIO_COLECCION_PREFIJO` | (vacía) | `prueba_studio_` |
 | `STUDIO_CUENTAS` / `NEXT_PUBLIC_STUDIO_CUENTAS` | `off` hasta el Paso 5 | `on` |
+| `VIDEO_IA_TOPE_CENTAVOS` | (vacía: manda el tope del panel) | opcional, por ejemplo `200` ($2 al día) |
+| `STUDIO_URL` | opcional | **nunca** (déjala vacía) |
 
-Las demás variables (Firebase, Cloudflare, administrador) pueden tener el mismo valor en todos los contextos. Después de cambiar variables, vuelve a construir la versión de prueba (sube un cambio a la rama `pruebas` o usa *Deploys → Trigger deploy*).
+Las demás variables (Firebase, Cloudflare, administrador) pueden tener el mismo valor en todos los contextos.
+
+**Ojo con el video con IA en la versión de prueba:** usa la misma cuenta de fal.ai (el mismo dinero) y el mismo bucket de R2 que el sitio principal.
+- `STUDIO_URL` **no** debe estar puesta en *Branch deploys* ni en *Deploy Previews*: si lo está, fal avisa al sitio principal, que no conoce esas tomas, y los avisos se pierden. Sin ella, cada versión recibe sus propios avisos.
+- Cada versión lleva su **propio gasto del día y su propio tope** (el tope del panel de `/admin` de esa versión). Para que la versión de prueba gaste menos, pon `VIDEO_IA_TOPE_CENTAVOS` solo en su contexto (en centavos: `200` = $2 al día); si está puesta, manda sobre el tope del panel.
+- Sus archivos van aparte en R2: `pruebas/negocios/...` (y `demo/pruebas/negocios/...` los de la prueba gratis, que la regla de `demo/` también borra a los 30 días). Borrar una cuenta en la versión de prueba nunca borra archivos del sitio principal.
+- La tarea de respaldo de cada 5 minutos solo corre en el sitio principal. En la versión de prueba, la fila la empujan las consultas (como mucho una vez por minuto): las tomas que se quedan sin aviso y las que esperan turno con cupo se resuelven mientras alguien las está esperando, o cuando alguien crea una toma. Después de cambiar variables, vuelve a construir la versión de prueba (sube un cambio a la rama `pruebas` o usa *Deploys → Trigger deploy*).
 
 **c) Probar.** En la versión de prueba entra a `/admin` y presiona **Preparar Stripe**. Luego prueba: registrarte con Google y con correo, la prueba de 10 minutos, pagar Básico, mejorar a Pro, invitar a un miembro, una tarjeta rechazada (se pausa), pagar para reactivar, cancelar (se pausa) y activar a mano con Cash App.
 
@@ -387,9 +396,10 @@ En el **Creador de Reels**, el cliente puede marcar de 1 a 4 fotos «Con IA»: c
 
 Protecciones que ya vienen puestas (se pueden cambiar en Firestore, documento `studio_config/planes`, campo `videoIa`):
 
-- **Tope de gasto de $5 al día** para todo Studio (hora de Texas). Al llegar, las tomas esperan en fila y salen al día siguiente. El demo se detiene antes, al 80% ($4), para dejar lugar a los clientes que pagan.
+- **Tope de gasto de $5 al día** para todo Studio (hora de Texas). Se cambia en `/admin`; la variable opcional `VIDEO_IA_TOPE_CENTAVOS` lo fija para una publicación (cada versión, principal y de prueba, lleva su propio tope y su propio gasto). Al llegar, las tomas esperan en fila y salen al día siguiente. El demo se detiene antes, al 80% ($4), para dejar lugar a los clientes que pagan.
 - Máximo **3 tomas al mismo tiempo** en fal.ai; los de Pro pasan primero, luego los de paquete y al final el demo.
 - Si una toma falla, se reintenta **una vez**; si vuelve a fallar, se **devuelve la toma** al cliente y esa foto queda con animación normal.
+- **Nunca se paga dos veces la misma toma:** solo se vuelve a mandar a fal cuando fal rechazó el pedido o confirmó que la quitó de su fila sin correrla. Si fal la está generando, no contesta o no se sabe si la recibió, Studio espera; a los 45 minutos (3 × 15) la da por perdida, le devuelve la toma al cliente y su costo **sigue contando** en el gasto del día (por si fal sí la cobró).
 - La misma foto con el mismo movimiento no se cobra dos veces (se guarda el clip).
 - **Interruptor:** pon `VIDEO_IA` en `off` en Netlify y vuelve a publicar para apagar la IA de video al instante.
 
@@ -411,15 +421,17 @@ Protecciones que ya vienen puestas (se pueden cambiar en Firestore, documento `s
    ]
    ```
 
-5. En el bucket → *Settings → Object lifecycle rules*, agrega una regla: prefijo `demo/`, **borrar a los 30 días**. Ahí van las fotos y clips de las pruebas gratis.
+5. En el bucket → *Settings → Object lifecycle rules*, agrega una regla: prefijo `demo/`, **borrar a los 30 días**. Ahí van las fotos y clips de las pruebas gratis (también los de la versión de prueba, en `demo/pruebas/`). Studio deja de usar esos clips a los 29 días (el editor avisa que la toma venció) y no acepta fotos de `demo/` de una cuenta que ya pasó a un plan de pago.
 6. Vuelve a publicar el sitio y, en `/admin`, presiona **Preparar Stripe** otra vez para que cree el precio del paquete **Video** ($15).
-7. **Prueba:** entra con una cuenta en prueba, sube 2 fotos al Creador de Reels, marca una «Con IA» y toca **Generar con IA**. Debe pasar por «Subiendo…», «En fila», «Toma 1 de 1 · Generando…» y terminar con el video listo (suele tardar de 1 a 3 minutos).
+7. **Índice de Firestore para la fila** (gratis; una sola vez): en la consola de Firebase → *Firestore Database → Indexes → Composite → Create index*: colección `studio_trabajos_video`, campos `estado` (Ascending), `prioridad` (Ascending) y `creado` (Ascending), alcance *Collection*. Repite con la colección `prueba_studio_trabajos_video` si usas la versión de prueba. Tarda unos minutos en quedar *Enabled*. Es el mismo que está en `firestore.indexes.json`, que queda solo como referencia: créalo **en la consola**, como aquí. **Nunca** uses `firebase deploy --only firestore:indexes --force`: el proyecto de Firebase es el mismo de NOVA y con `--force` se borrarían los índices que no están en ese archivo, entre ellos el índice vectorial de NOVA. Sin el índice todo sigue funcionando, pero la fila se ordena en el servidor y en el registro aparece un aviso.
+8. **Prueba:** entra con una cuenta en prueba, sube 2 fotos al Creador de Reels, marca una «Con IA» y toca **Generar con IA**. Debe pasar por «Subiendo…», «En fila», «Toma 1 de 1 · Generando…» y terminar con el video listo (suele tardar de 1 a 3 minutos).
 
 Notas:
 
 - fal.ai avisa a Studio cuando termina cada toma en `/api/video-ia/aviso` (no hay que configurar nada en fal: la dirección va en cada pedido). Studio revisa la firma de fal en cada aviso.
 - Una tarea programada de Netlify (`netlify/functions/video-ia-respaldo.mts`, cada 5 minutos, solo en el sitio principal) empuja la fila por si se pierde un aviso.
 - Los archivos de R2 son privados: el navegador solo recibe enlaces temporales de una hora.
+- Lecturas de Firestore: mientras se espera, el navegador consulta cada 10 s si alguna toma se está generando (los primeros 20 minutos; luego cada 30 s, hasta 45 minutos) y cada 30 s si solo espera en fila. Si hoy ya no hay cupo, el editor queda libre con el aviso de «mañana» y se consulta en segundo plano cada 30 minutos, hasta 24 horas (luego «Vuelve a revisar mañana.» con el botón «Revisar otra vez»); esa consulta no lee la fila ni empuja nada. Una consulta lee el usuario, la configuración y las tomas (más la fila y el gasto si alguna espera turno). Solo empuja la fila si una toma lleva más de 15 minutos sin aviso o espera turno hace más de un minuto y hoy hay cupo, y como mucho una vez por minuto. El límite por cliente al día usa un contador por negocio y por día (colección `studio_tomas_dia`).
 - Mientras falten `FAL_KEY` o las variables de R2, «Generar con IA» responde que los videos con IA están en pausa y el resto de Studio no cambia.
 
 ### Cómo usar `/admin`

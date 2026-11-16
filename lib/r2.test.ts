@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { borrarCarpeta, configR2, firmarUrl, pedirSubida, prefirmar, subirDesdeUrl } from "./r2";
+import { borrarCarpeta, carpetaFotos, carpetasNegocio, configR2, firmarUrl, llaveClip, pedirSubida, prefirmar, subirDesdeUrl } from "./r2";
 import type { Usuario } from "./account-store";
 import { memoryStore } from "./account-store-memory";
 import type { Negocio } from "./plans";
@@ -207,4 +207,53 @@ test("borrarCarpeta: si no se puede listar o borrar, falla (para que quede anota
   await assert.rejects(borrarCarpeta("negocios/n1/", { cfg: R2P, traer: r2Falso([["negocios/n1/a"]], { listarFalla: true }).traer }));
   await assert.rejects(borrarCarpeta("negocios/n1/", { cfg: R2P, traer: r2Falso([["negocios/n1/a"]], { borrarFalla: true }).traer }));
   await assert.rejects(borrarCarpeta("negocios/n1/", { cfg: null }), /R2/);
+});
+
+// ---------- Pruebas y producción comparten el bucket: cada una en su carpeta ----------
+
+async function conPrefijo<T>(prefijo: string | undefined, f: () => Promise<T> | T): Promise<T> {
+  const antes = process.env.STUDIO_COLECCION_PREFIJO;
+  if (prefijo === undefined) delete process.env.STUDIO_COLECCION_PREFIJO;
+  else process.env.STUDIO_COLECCION_PREFIJO = prefijo;
+  try {
+    return await f();
+  } finally {
+    if (antes === undefined) delete process.env.STUDIO_COLECCION_PREFIJO;
+    else process.env.STUDIO_COLECCION_PREFIJO = antes;
+  }
+}
+
+test("llaves de R2 en producción: las de siempre", async () => {
+  await conPrefijo(undefined, () => {
+    assert.equal(carpetaFotos("n1", "pro"), "negocios/n1/fotos/");
+    assert.equal(carpetaFotos("n1", "prueba"), "demo/negocios/n1/fotos/");
+    assert.equal(llaveClip("n1", "pro", "t1"), "negocios/n1/clips/t1.mp4");
+    assert.equal(llaveClip("n1", "prueba", "t1"), "demo/negocios/n1/clips/t1.mp4");
+    assert.deepEqual(carpetasNegocio("n1"), ["negocios/n1/", "demo/negocios/n1/"]);
+  });
+});
+
+test("llaves de R2 en la versión de prueba: bajo pruebas/ (y demo/pruebas/ para la prueba gratis)", async () => {
+  await conPrefijo("prueba_studio_", async () => {
+    assert.equal(carpetaFotos("n1", "pro"), "pruebas/negocios/n1/fotos/");
+    assert.equal(carpetaFotos("n1", "prueba"), "demo/pruebas/negocios/n1/fotos/");
+    assert.equal(llaveClip("n1", "basico", "t1"), "pruebas/negocios/n1/clips/t1.mp4");
+    assert.equal(llaveClip("n1", "prueba", "t1"), "demo/pruebas/negocios/n1/clips/t1.mp4");
+    assert.deepEqual(carpetasNegocio("n1"), ["pruebas/negocios/n1/", "demo/pruebas/negocios/n1/"]);
+    const r = await pedirSubida("u1", { tipo: "image/jpeg", bytes: 1000, sha256: SHA }, { store: tienda(), now: AHORA, cfg: CFG, stripeLive: false });
+    assert.ok(r.ok && r.imagenKey === `pruebas/negocios/n1/fotos/${SHA}.jpg`);
+  });
+});
+
+test("borrarCarpeta: cada versión solo borra sus propias carpetas (pruebas nunca borra producción)", async () => {
+  const R2P = { ...CFG, bucket: "studio" };
+  const vacio = () => r2Falso([[]]).traer;
+  await conPrefijo("prueba_studio_", async () => {
+    for (const ajena of ["negocios/n1/", "demo/negocios/n1/"]) await assert.rejects(borrarCarpeta(ajena, { cfg: R2P, traer: vacio() }), /no permitida/, ajena);
+    assert.equal(await borrarCarpeta("pruebas/negocios/n1/", { cfg: R2P, traer: vacio() }), 0);
+    assert.equal(await borrarCarpeta("demo/pruebas/negocios/n1/", { cfg: R2P, traer: vacio() }), 0);
+  });
+  await conPrefijo(undefined, async () => {
+    for (const ajena of ["pruebas/negocios/n1/", "demo/pruebas/negocios/n1/"]) await assert.rejects(borrarCarpeta(ajena, { cfg: R2P, traer: vacio() }), /no permitida/, ajena);
+  });
 });

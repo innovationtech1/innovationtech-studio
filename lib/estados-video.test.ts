@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { firmaTomas, terminado, textoEstado } from "./estados-video";
+import { esperarEnFondo, firmaTomas, siguienteEspera, terminado, textoEstado } from "./estados-video";
 
 test("subida y vista previa", () => {
   assert.equal(textoEstado({ tipo: "subiendo", pct: 42.4 }), "Subiendo… 42%");
@@ -41,4 +41,30 @@ test("terminado: todas listas o fallidas", () => {
 test("firmaTomas: misma foto y movimiento dan la misma firma (para retomar sin cobrar de nuevo)", () => {
   assert.equal(firmaTomas([{ sha256: "aa", movimiento: " Zoom  lento" }]), firmaTomas([{ sha256: "aa", movimiento: "zoom lento " }]));
   assert.notEqual(firmaTomas([{ sha256: "aa", movimiento: "zoom" }]), firmaTomas([{ sha256: "ab", movimiento: "zoom" }]));
+});
+
+test("siguienteEspera: se sigue consultando hasta el límite duro de 45 min, y con el tope de hoy cada 30 min hasta 24 h", () => {
+  const MIN = 60_000;
+  const gen = [{ id: "a", estado: "enviado" }] as const;
+  const fila = [{ id: "a", estado: "en_fila", lugar: 1 }] as const;
+  assert.equal(siguienteEspera(gen, false, 5 * MIN), 10_000);
+  assert.equal(siguienteEspera(gen, false, 25 * MIN), 30_000); // pasados 20 min, más despacio
+  assert.equal(siguienteEspera(gen, false, 44 * MIN), 30_000);
+  assert.equal(siguienteEspera(gen, false, 47 * MIN), null); // ya se resolvió por atorada o sigue sin aviso: se deja
+  assert.equal(siguienteEspera(fila, false, 5 * MIN), 30_000);
+  assert.equal(siguienteEspera(fila, false, 47 * MIN), null);
+  // Sin cupo hoy y nada generándose: cada 30 min (cada consulta lee Firestore), y se deja a las 24 h
+  assert.equal(siguienteEspera(fila, true, 5 * MIN), 30 * MIN);
+  assert.equal(siguienteEspera(fila, true, 20 * 60 * MIN), 30 * MIN);
+  assert.equal(siguienteEspera(fila, true, 24 * 60 * MIN + 1), null);
+  // Con tope pero una toma generándose: como siempre
+  assert.equal(siguienteEspera([...gen, ...fila], true, 5 * MIN), 10_000);
+});
+
+test("esperarEnFondo: con el tope de hoy y nada generándose, el editor se suelta y se espera en segundo plano", () => {
+  assert.equal(esperarEnFondo([{ id: "a", estado: "en_fila", lugar: 1 }], true), true);
+  assert.equal(esperarEnFondo([{ id: "a", estado: "en_fila", lugar: 1 }], false), false);
+  assert.equal(esperarEnFondo([{ id: "a", estado: "enviado" }, { id: "b", estado: "en_fila", lugar: 1 }], true), false);
+  assert.equal(esperarEnFondo([{ id: "a", estado: "listo" }], true), false);
+  assert.equal(esperarEnFondo([], true), false);
 });

@@ -74,7 +74,7 @@ import {
   type Pendiente,
   type Resultado,
 } from "@/lib/director";
-import { terminado, textoEstado, type TrabajoVisto } from "@/lib/estados-video";
+import { esperarEnFondo, siguienteEspera, terminado, textoEstado, type TrabajoVisto } from "@/lib/estados-video";
 import { consultarTomas, pedirTomas, prepararFoto, subirFoto } from "@/lib/video-ia-cliente";
 
 import { Clapperboard, Dices, Download, Eye, Mic, Play, Redo2, Sparkles, Square, Undo2, Video } from "lucide-react";
@@ -83,8 +83,6 @@ import { Clapperboard, Dices, Download, Eye, Mic, Play, Redo2, Sparkles, Square,
 
 // Tomas con IA que siguen en proceso (se guardan para retomarlas sin pedirlas ni descontarlas otra vez)
 type TomasPendientes = { ids: string[]; firma: string } | null;
-const ESPERA_TOMAS = 5000; // cada cuánto se consulta
-const MAX_ESPERA = 20 * 60 * 1000;
 
 // Los 4 clips vacíos con los que se empieza (ids fijos: igual en el servidor y en el navegador)
 const clipsIniciales = (): Clip[] => Array.from({ length: 4 }, (_, i) => nuevoClip({ id: `inicial-${i}` }));
@@ -707,6 +705,8 @@ export default function ReelStudio({
   // Cada clip animado guarda el id de su toma (trabajoId): así se puede retomar, duplicar y volver a
   // grabar sin pedirla ni cobrarla de nuevo. Los enlaces de los clips caducan en 1 hora: se piden frescos.
   const enlacesToma = useRef(new Map<string, { url: string; cuando: number }>());
+  // Tomas cuyo clip ya se borró (las de la prueba gratis duran 30 días) o que el servidor ya no tiene
+  const tomasVencidas = useRef(new Set<string>());
   const [estadoToma, setEstadoToma] = useState<Record<string, string>>({}); // id del clip → qué está pasando
   const [animando, setAnimando] = useState<string[]>([]); // clips con una toma en camino
   // El mismo dato, pero al instante: dos toques seguidos no deben pedir (ni cobrar) dos tomas
@@ -725,6 +725,14 @@ export default function ReelStudio({
       topeHoy = topeHoy || r.topeHoy;
     }
     for (const t of vistos) if (t.estado === "listo" && t.clipUrl) enlacesToma.current.set(t.id, { url: t.clipUrl, cuando: Date.now() });
+    const vistosIds = new Set(vistos.map((t) => t.id));
+    for (const id of ids) {
+      const t = vistos.find((x) => x.id === id);
+      if (!vistosIds.has(id) || t?.vencido) {
+        tomasVencidas.current.add(id);
+        enlacesToma.current.delete(id);
+      } else tomasVencidas.current.delete(id);
+    }
     return { vistos, topeHoy };
   }
 
@@ -744,6 +752,8 @@ export default function ReelStudio({
   async function pedirTomaDe(c: Clip): Promise<string> {
     const f = await prepararFoto(c.image);
     let llave = subidas.current.get(f.sha256);
+    // Una foto subida durante la prueba gratis (demo/) ya no sirve si la cuenta cambió de plan: se sube otra vez
+    if (llave && llave.startsWith("demo/") !== esDemo) llave = undefined;
     if (!llave) {
       llave = await subirFoto(f, () => {});
       subidas.current.set(f.sha256, llave);
@@ -752,18 +762,135 @@ export default function ReelStudio({
     return id;
   }
 
-  // Espera a que terminen las tomas. enProceso = se acabó la espera (o el cupo del día) y siguen en camino.
-  async function esperarTomas(ids: string[], pinta: (t: string) => void): Promise<{ vistos: TrabajoVisto[]; enProceso: boolean; texto: string }> {
+  // Espera a que terminen las tomas. enProceso = se acabó la espera y siguen en camino.
+  // soltarAlTope: si hoy ya no hay cupo (y nada se genera), vuelve al momento con alTope (sigue en segundo plano).
+  async function esperarTomas(
+    ids: string[],
+    pinta: (t: string) => void,
+    opciones: { soltarAlTope?: boolean } = {},
+  ): Promise<{ vistos: TrabajoVisto[]; enProceso: boolean; texto: string; alTope?: boolean }> {
     const inicio = Date.now();
-    for (;;) {
-      const r = await verTomas(ids);
-      if (r.vistos.length === 0) return { vistos: [], enProceso: false, texto: "" };
-      const texto = textoEstado({ tipo: "trabajos", trabajos: r.vistos, topeHoy: r.topeHoy });
-      pinta(texto);
-      if (terminado(r.vistos)) return { vistos: r.vistos, enProceso: false, texto };
-      const hayCupo = !(r.topeHoy && !r.vistos.some((t) => t.estado === "enviado"));
-      if (!hayCupo || Date.now() - inicio > MAX_ESPERA) return { vistos: r.vistos, enProceso: true, texto: hayCupo ? "" : texto };
-      await new Promise((res) => setTimeout(res, ESPERA_TOMAS));
+    // Mientras aquí se consultan estas tomas, la espera de fondo no las consulta (no se lee dos veces)
+    for (const id of ids) primerPlano.current.set(id, (primerPlano.current.get(id) ?? 0) + 1);
+    try {
+      for (;;) {
+        const r = await verTomas(ids);
+        if (r.vistos.length === 0) return { vistos: [], enProceso: false, texto: "" };
+        const texto = textoEstado({ tipo: "trabajos", trabajos: r.vistos, topeHoy: r.topeHoy });
+        pinta(texto);
+        if (terminado(r.vistos)) return { vistos: r.vistos, enProceso: false, texto };
+        if (opciones.soltarAlTope && esperarEnFondo(r.vistos, r.topeHoy)) return { vistos: r.vistos, enProceso: true, texto, alTope: true };
+        // Se espera hasta el límite duro del servidor (45 min) para que resuelva una toma atorada.
+        const espera = siguienteEspera(r.vistos, r.topeHoy, Date.now() - inicio);
+        if (espera === null) return { vistos: r.vistos, enProceso: true, texto: "" };
+        await new Promise((res) => setTimeout(res, espera));
+        if (!montado.current) return { vistos: r.vistos, enProceso: true, texto: "" }; // se cerró el editor
+      }
+    } finally {
+      for (const id of ids) {
+        const n = (primerPlano.current.get(id) ?? 1) - 1;
+        if (n > 0) primerPlano.current.set(id, n);
+        else primerPlano.current.delete(id);
+      }
+    }
+  }
+
+  // Sin cupo hoy: el editor (y «Animar») quedan libres y aquí se sigue consultando en segundo plano, cada
+  // 30 min mientras dure el tope (hasta 24 h). Una sola espera para todas las tomas: las nuevas se suman.
+  // clips: toma → clip que la pidió con «Animar» (para pintar su estado al terminar).
+  const fondo = useRef({ ids: new Set<string>(), clips: new Map<string, string>(), corriendo: false });
+  const primerPlano = useRef(new Map<string, number>()); // tomas que una espera del editor consulta ahora
+  const montado = useRef(true);
+  const [revisar, setRevisar] = useState<string[] | null>(null); // se dejó de esperar a las 24 h
+  useEffect(() => {
+    montado.current = true;
+    return () => {
+      montado.current = false;
+    };
+  }, []);
+  const pintaClip = (clipId: string, t: string) => setEstadoToma((e) => ({ ...e, [clipId]: t }));
+  function aFondo(ids: string[], clipId?: string, ahora = false) {
+    for (const id of ids) {
+      fondo.current.ids.add(id);
+      if (clipId) fondo.current.clips.set(id, clipId);
+    }
+    setRevisar(null);
+    void seguirEnFondo(ahora);
+  }
+  async function seguirEnFondo(ahora = false) {
+    const f = fondo.current;
+    if (f.corriendo) return;
+    f.corriendo = true;
+    const desde = Date.now(); // desde cuándo se espera el cupo (para las 24 h)
+    let desdeCupo = Date.now(); // desde cuándo hay cupo (para el límite de 45 min)
+    let espera: number | null = ahora ? 0 : 30 * 60 * 1000;
+    let hayFallo = false;
+    try {
+      while (montado.current && f.ids.size > 0 && espera !== null) {
+        await new Promise((res) => setTimeout(res, espera!));
+        if (!montado.current) return;
+        const ids = [...f.ids].filter((id) => !primerPlano.current.has(id));
+        if (ids.length === 0) {
+          espera = 30_000; // el editor las está consultando: se revisa después
+          continue;
+        }
+        let r: Awaited<ReturnType<typeof verTomas>>;
+        try {
+          r = await verTomas(ids);
+        } catch {
+          espera = 30 * 60 * 1000; // sin conexión: más tarde
+          continue;
+        }
+        const porId = new Map(r.vistos.map((t) => [t.id, t]));
+        for (const id of ids) {
+          const t = porId.get(id);
+          if (t && t.estado !== "listo" && t.estado !== "fallo") continue;
+          // Terminó (o el servidor ya no la tiene)
+          const clipId = f.clips.get(id);
+          if (clipId) {
+            if (t?.estado === "listo") pintaClip(clipId, t.desdeCache ? "Listo al instante" : "Listo");
+            else {
+              interno((l) => quitarToma(l, id));
+              pintaClip(clipId, "");
+              if (t) setError("No se pudo generar la toma, te devolvimos tu crédito");
+            }
+          } else if (t?.estado === "fallo") hayFallo = true;
+          f.ids.delete(id);
+          f.clips.delete(id);
+        }
+        const siguen = r.vistos.filter((t) => f.ids.has(t.id));
+        if (f.ids.size === 0) {
+          setEstadoIa(hayFallo ? "No se pudo generar la toma, te devolvimos tu crédito" : "Tus tomas con IA ya están listas. Toca «Generar con IA» para grabar tu video.");
+          void refrescarCuenta();
+          return;
+        }
+        if (siguen.length === 0) {
+          espera = 30_000; // las que faltan las consulta el editor ahora
+          continue;
+        }
+        if (r.topeHoy) desdeCupo = Date.now();
+        espera = siguienteEspera(siguen, r.topeHoy, r.topeHoy ? Date.now() - desde : Date.now() - desdeCupo);
+        const texto = textoEstado({ tipo: "trabajos", trabajos: siguen, topeHoy: r.topeHoy });
+        if (espera === null) {
+          // Se acabó el tiempo: nada de «Generando…» viejo a la vista
+          const pendientes = [...f.ids];
+          for (const clipId of f.clips.values()) pintaClip(clipId, "");
+          f.ids.clear();
+          f.clips.clear();
+          if (r.topeHoy) {
+            setEstadoIa("Vuelve a revisar mañana.");
+            setRevisar(pendientes);
+          } else setEstadoIa("");
+          return;
+        }
+        setEstadoIa(texto);
+        for (const t of siguen) {
+          const clipId = f.clips.get(t.id);
+          if (clipId) pintaClip(clipId, textoEstado({ tipo: "trabajos", trabajos: [t], topeHoy: r.topeHoy }));
+        }
+      }
+    } finally {
+      f.corriendo = false;
     }
   }
 
@@ -794,7 +921,13 @@ export default function ReelStudio({
         interno((l) => ponerToma(l, lugar(), pedida));
         void refrescarCuenta(); // actualiza «te quedan X tomas»
       }
-      const r = await esperarTomas([id], pinta);
+      const r = await esperarTomas([id], pinta, { soltarAlTope: true });
+      if (r.alTope) {
+        // Hoy ya no hay cupo: el clip deja de estar «animando» y se sigue esperando en segundo plano
+        pinta(r.texto);
+        aFondo([id], clipId);
+        return;
+      }
       if (r.enProceso) return pinta(r.texto || "Sigue en proceso. Vuelve en unos minutos y toca «Animar» otra vez: no se cobra de nuevo.");
       const t = r.vistos[0];
       if (!t || t.estado === "fallo") {
@@ -833,13 +966,18 @@ export default function ReelStudio({
     // Si los videos del proyecto aún se están abriendo (recién cargada la app), se espera un momento
     const idsVideo = lista.flatMap((c) => (c.tipo === "video" && c.archivoId ? [c.archivoId] : []));
     for (let k = 0; k < 50 && idsVideo.some((id) => !(id in urlsRef.current)); k++) await new Promise((r) => setTimeout(r, 100));
-    const faltan = sinFuente(lista, { tomas, videos: urlsRef.current });
+    const faltan = sinFuente(lista, { tomas, videos: urlsRef.current, vencidas: tomasVencidas.current });
     if (faltan.videos.length) {
       throw new Error(`El video del clip ${faltan.videos.join(", ")} no está en este dispositivo. Vuelve a subirlo o quita ese clip.`);
     }
-    const avisos = faltan.tomas.length
-      ? [`No se pudo traer la toma con IA del clip ${faltan.tomas.join(", ")} (revisa tu conexión): ahí la foto se ve con zoom. Vuelve a crear el video cuando tengas señal; no se cobra de nuevo.`]
-      : [];
+    const avisos = [
+      ...(faltan.tomas.length
+        ? [`No se pudo traer la toma con IA del clip ${faltan.tomas.join(", ")} (revisa tu conexión): ahí la foto se ve con zoom. Vuelve a crear el video cuando tengas señal; no se cobra de nuevo.`]
+        : []),
+      ...(faltan.vencidas.length
+        ? [`La toma con IA del clip ${faltan.vencidas.join(", ")} ya venció y se borró: ahí la foto se ve con zoom. Toca «Rehacer» en ese clip para animarla otra vez.`]
+        : []),
+    ];
     aLaVista(salida.current);
     const r = await renderReel({
       // Las opciones se leen AHORA (no las de cuando se tocó el botón): tras esperar las tomas con IA,
@@ -900,7 +1038,13 @@ export default function ReelStudio({
       }
       if (pedidas.size) void refrescarCuenta();
       const ids = [...new Set(clipsRef.current.flatMap((c) => (c.tipo === "toma" && c.image && c.trabajoId ? [c.trabajoId] : [])))];
-      const r = await esperarTomas(ids, setBusy);
+      const r = await esperarTomas(ids, setBusy, { soltarAlTope: true });
+      if (r.alTope) {
+        // Hoy ya no hay cupo: el editor queda libre con el aviso de «mañana»; se sigue esperando en segundo plano
+        setEstadoIa(r.texto);
+        aFondo(ids);
+        return;
+      }
       if (r.enProceso) {
         // Quedan guardadas en cada clip: al volver y tocar «Generar con IA» se retoman sin costo
         setEstadoIa(r.texto || "Tus tomas siguen en proceso. Vuelve en unos minutos y toca «Generar con IA» para terminar tu video.");
@@ -1716,7 +1860,19 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
             </button>
           </div>
         )}
-        {!busy && estadoIa && tomasMarcadas > 0 && <div className="notice">{estadoIa}</div>}
+        {!busy && estadoIa && tomasMarcadas > 0 && (
+          <div className="notice">
+            {estadoIa}
+            {revisar && revisar.length > 0 && (
+              <>
+                {" "}
+                <button type="button" className="btn ghost small" onClick={() => aFondo(revisar, undefined, true)}>
+                  Revisar otra vez
+                </button>
+              </>
+            )}
+          </div>
+        )}
         {!busy && invitarPlan && (
           <div className="acct-upsell">
             <span>Elige un plan para seguir creando videos con IA</span>

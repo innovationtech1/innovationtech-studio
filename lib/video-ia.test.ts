@@ -1,9 +1,10 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { ajustarVideo, baseDePedido, consultar, crearVideo, despachar, procesarAviso, resumenVideo, type DepsVideo } from "./video-ia";
+import { ajustarVideo, baseDePedido, consultar, crearVideo, despachar, procesarAviso, resumenVideo, topeDiario, type DepsVideo } from "./video-ia";
 import type { Usuario } from "./account-store";
 import { memoryStore } from "./account-store-memory";
 import { memoryVideoStore } from "./video-store-memory";
+import { RechazoFal } from "./fal";
 import { DEFAULT_CONFIG, type Negocio } from "./plans";
 
 const AHORA = Date.parse("2026-11-10T18:00:00Z");
@@ -39,7 +40,17 @@ function mundo(n1: Partial<Negocio> = {}, opciones: { gasto?: Record<string, num
   void store.guardarConfig({ videoIa: { ...DEFAULT_CONFIG.videoIa, topeDiarioCentavos: 500, tomasPorNegocioDia: 500 } });
   const enviados: { modelo: string; input: Record<string, unknown>; webhook: string; requestId: string }[] = [];
   const subidas: { origen: string; llave: string; tipo: string }[] = [];
-  const estado = { falFalla: false, subirFalla: false, estadoFal: "IN_PROGRESS", firmaValida: true, now: AHORA };
+  const estado = {
+    falFalla: false,
+    falDudoso: false,
+    subirFalla: false,
+    estadoFal: "IN_PROGRESS" as string | Error, // un Error = fal no responde
+    cancelar: "cancelado" as "cancelado" | "pedido" | "terminado" | "error",
+    resultado: { videoUrl: "https://v3.fal.media/atorado.mp4" } as { videoUrl: string } | null | Error,
+    firmaValida: true,
+    now: AHORA,
+  };
+  const cancelados: string[] = [];
   let n = 0;
   const deps: DepsVideo = {
     store,
@@ -52,13 +63,23 @@ function mundo(n1: Partial<Negocio> = {}, opciones: { gasto?: Record<string, num
     },
     fal: {
       async enviar(modelo, input, webhook) {
-        if (estado.falFalla) throw new Error("fal.ai no aceptó el trabajo (500)");
+        // falFalla: fal dijo que no con certeza (4xx); no lo corre ni lo cobra
+        if (estado.falFalla) throw new RechazoFal("fal.ai no aceptó el trabajo (422): fal.ai no aceptó la foto o los parámetros del modelo");
         const requestId = `req-${++n}`;
         enviados.push({ modelo, input, webhook, requestId });
+        // falDudoso: fal lo recibió, pero la respuesta no llegó (tiempo agotado, 5xx…)
+        if (estado.falDudoso) throw new Error("fal.ai no aceptó el trabajo (504)");
         return { requestId, statusUrl: `https://queue.fal.run/m/requests/${requestId}/status`, responseUrl: `https://queue.fal.run/m/requests/${requestId}` };
       },
-      estado: async () => estado.estadoFal,
-      resultado: async () => ({ videoUrl: "https://v3.fal.media/atorado.mp4" }),
+      estado: async () => {
+        if (estado.estadoFal instanceof Error) throw estado.estadoFal;
+        return estado.estadoFal;
+      },
+      resultado: async () => {
+        if (estado.resultado instanceof Error) throw estado.resultado;
+        return estado.resultado;
+      },
+      cancelar: async (statusUrl) => (cancelados.push(statusUrl), estado.cancelar),
       verificar: async () => estado.firmaValida,
     },
     r2: {
@@ -76,7 +97,7 @@ function mundo(n1: Partial<Negocio> = {}, opciones: { gasto?: Record<string, num
   };
   const OK = { status: "OK", payload: { video: { url: "https://v3.fal.media/clip.mp4" } } };
   const ERROR = { status: "ERROR", error: "Invalid status code: 500", payload: null };
-  return { store, videos, enviados, subidas, estado, deps, aviso, OK, ERROR };
+  return { store, videos, enviados, subidas, cancelados, estado, deps, aviso, OK, ERROR };
 }
 
 let antes: string | undefined;
@@ -100,10 +121,11 @@ test("crear: 2 tomas en Pro se descuentan, se despachan al momento y suman al ga
   assert.equal(m.enviados.length, 2);
   assert.equal(m.enviados[0].modelo, MODELO);
   assert.deepEqual(m.enviados[0].input, {
-    image_url: `https://r2.example/${foto("a")}?m=GET&s=3600`, prompt: "zoom lento", duration: 5, resolution: "768P", prompt_expansion_mode: "balanced",
+    image_url: `https://r2.example/${foto("a")}?m=GET&s=21600`, prompt: "zoom lento", duration: 5, resolution: "768P", prompt_expansion_mode: "balanced",
   });
   const t = (await m.videos.getTrabajo(r.trabajos[0].id))!;
-  assert.equal(m.enviados[0].webhook, `https://studio.example/api/video-ia/aviso?t=${t.id}&s=${t.secreto}`);
+  assert.equal(m.enviados[0].webhook, `https://studio.example/api/video-ia/aviso?t=${t.id}&s=${t.secreto}&e=${t.envio}`);
+  assert.match(t.envio ?? "", /^[0-9a-f-]{36}$/);
   assert.equal(t.prioridad, 1);
   assert.equal(t.falRequestId, "req-1");
   assert.deepEqual(t.reserva, { mes: MES, delMes: 1, delSaldo: 0 });
@@ -194,7 +216,7 @@ test("aviso OK: copia el clip a R2, queda listo, guarda caché y despacha el sig
   assert.equal(t.estado, "listo");
   assert.equal(t.clipKey, `negocios/n1/clips/${id}.mp4`);
   assert.deepEqual(m.subidas, [{ origen: "https://v3.fal.media/clip.mp4", llave: `negocios/n1/clips/${id}.mp4`, tipo: "video/mp4" }]);
-  assert.equal(await m.videos.getCache(t.cacheLlave), t.clipKey);
+  assert.equal((await m.videos.getCache(t.cacheLlave, AHORA))?.clipKey, t.clipKey);
   assert.equal(await m.videos.getGasto(HOY), COSTO);
   // fal reenvía el mismo aviso
   assert.deepEqual(await m.aviso(0, m.OK), { status: 200 });
@@ -219,6 +241,108 @@ test("aviso falso: sin firma válida 401; con otro secreto o trabajo desconocido
   assert.deepEqual(await procesarAviso(new URL("https://studio.example/api/video-ia/aviso"), new Headers(), cuerpo, m.deps), { status: 404 });
   assert.equal((await m.videos.getTrabajo(t.id))?.estado, "enviado");
   assert.equal(m.subidas.length, 0);
+});
+
+test("aviso: la firma de fal se revisa ANTES de leer Firestore; ids mal formados ni se buscan", async () => {
+  const m = mundo();
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  const t = m.videos.todos()[0];
+  const v = contar(m.videos);
+  let firmas = 0;
+  const deps: DepsVideo = { ...m.deps, videos: v.vigilado, fal: { ...m.deps.fal!, verificar: async () => (firmas++, m.estado.firmaValida) } };
+  const cuerpo = JSON.stringify({ request_id: "req-1", ...m.OK });
+  const aviso = (q: string) => procesarAviso(new URL(`https://studio.example/api/video-ia/aviso?${q}`), new Headers(), cuerpo, deps);
+  // Firma falsa con un trabajo real: 401 sin leer nada
+  m.estado.firmaValida = false;
+  assert.deepEqual(await aviso(`t=${t.id}&s=${t.secreto}`), { status: 401 });
+  assert.deepEqual(v.veces, {});
+  m.estado.firmaValida = true;
+  // Ids o secretos que no tienen la forma de los nuestros: 404 sin revisar firma ni leer Firestore
+  firmas = 0;
+  for (const q of [`t=no-existe&s=${t.secreto}`, `t=${t.id}x&s=${t.secreto}`, `t=../${t.id.slice(3)}&s=${t.secreto}`, `t=${t.id}&s=corto`, `t=${t.id}`, ""]) {
+    assert.deepEqual(await aviso(q), { status: 404 }, q);
+  }
+  assert.equal(firmas, 0);
+  assert.deepEqual(v.veces, {});
+});
+
+test("consultar: ids que no son de Studio se ignoran sin tocar Firestore", async () => {
+  const m = mundo();
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  assert.ok(r.ok);
+  const v = contar(m.videos);
+  const st = contar(m.store);
+  const deps = { ...m.deps, videos: v.vigilado, store: st.vigilado };
+  const nada = await consultar("u1", ["no-existe", "../x", "A".repeat(36)], deps);
+  assert.deepEqual(nada, { ok: true, trabajos: [], topeHoy: false });
+  assert.deepEqual(v.veces, {});
+  assert.deepEqual(st.veces, {});
+  const id = r.ok ? r.trabajos[0].id : "";
+  const mezcla = await consultar("u1", ["no-existe", id], deps);
+  assert.ok(mezcla.ok && mezcla.trabajos.length === 1 && mezcla.trabajos[0].id === id);
+  assert.deepEqual(v.veces.listarTrabajos, 1);
+});
+
+test("aviso tardío de un envío anterior mientras el vigente aún no guarda su id: se ignora", async () => {
+  const m = mundo();
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  const id = m.videos.todos()[0].id;
+  const secretoA = m.videos.todos()[0].secreto;
+  // El envío B no logra guardar su id de fal (falRequestId queda vacío)
+  m.videos.guardarEnvio = async () => {
+    throw new Error("Firestore caído");
+  };
+  assert.deepEqual(await m.aviso(0, m.ERROR), { status: 200 }); // A falla → vuelve a la fila → sale B
+  const b = (await m.videos.getTrabajo(id))!;
+  assert.equal(b.estado, "enviado");
+  assert.equal(b.falRequestId, undefined);
+  assert.equal(m.enviados.length, 2);
+  // Al volver a la fila cambió el secreto
+  assert.notEqual(b.secreto, secretoA);
+  // fal reenvía tarde el aviso de A con un video: no cierra B
+  assert.equal((await m.aviso(0, m.OK)).status, 404);
+  // Ni aunque el secreto siguiera siendo el mismo: la ficha del envío no coincide
+  const conSecretoB = new URL(m.enviados[0].webhook);
+  conSecretoB.searchParams.set("s", b.secreto);
+  await procesarAviso(conSecretoB, new Headers(), JSON.stringify({ request_id: "req-1", ...m.OK }), m.deps);
+  const t = (await m.videos.getTrabajo(id))!;
+  assert.equal(t.estado, "enviado");
+  assert.equal(m.subidas.length, 0);
+  // El aviso de B sí lo termina
+  assert.deepEqual(await m.aviso(1, m.OK), { status: 200 });
+  assert.equal((await m.videos.getTrabajo(id))?.estado, "listo");
+});
+
+test("aviso de error que gana la carrera al guardar el envío: no borra los datos del envío siguiente", async () => {
+  const m = mundo();
+  // El primer guardarEnvio (del envío A) se queda colgado hasta que lo soltemos
+  let soltar = () => {};
+  const guardarEnvio = m.videos.guardarEnvio.bind(m.videos);
+  let primero = true;
+  m.videos.guardarEnvio = async (...a) => {
+    if (primero) {
+      primero = false;
+      await new Promise<void>((r) => (soltar = r));
+    }
+    return guardarEnvio(...a);
+  };
+  const creando = crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  while (m.enviados.length < 1) await new Promise((r) => setTimeout(r, 1));
+  const id = m.videos.todos()[0].id;
+  // Llega el aviso de error de A antes de guardar: vuelve a la fila (el despacho sigue tomado por A)
+  assert.deepEqual(await m.aviso(0, m.ERROR), { status: 200 });
+  assert.equal((await m.videos.getTrabajo(id))?.estado, "en_fila");
+  // Pasa el candado del despacho: sale B y guarda sus datos
+  m.estado.now = AHORA + 31_000;
+  assert.deepEqual(await despachar(m.deps), { enviados: 1 });
+  assert.equal((await m.videos.getTrabajo(id))?.falRequestId, "req-2");
+  // Por fin se guarda lo de A: no pisa a B
+  soltar();
+  await creando;
+  const t = (await m.videos.getTrabajo(id))!;
+  assert.equal(t.estado, "enviado");
+  assert.equal(t.falRequestId, "req-2");
+  assert.equal(t.statusUrl, "https://queue.fal.run/m/requests/req-2/status");
 });
 
 test("aviso de un envío viejo (otro request_id) se ignora", async () => {
@@ -290,6 +414,92 @@ test("fal no acepta el trabajo al despachar: reintenta una vez y luego falla dev
   assert.equal(m.store.uso("n1", MES).tomas_ia, 0);
 });
 
+// ---------- Envío aceptado por fal pero sin saber el resultado ----------
+
+test("fal recibió el envío pero la respuesta se perdió: NO se reenvía; queda enviado y lo resuelve el aviso", async () => {
+  const m = mundo();
+  m.estado.falDudoso = true;
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  assert.ok(r.ok && r.trabajos[0].estado === "enviado");
+  const id = m.videos.todos()[0].id;
+  m.estado.falDudoso = false;
+  // Más despachos (y más tarde): nada se vuelve a mandar
+  for (const min of [1, 10, 20]) {
+    m.estado.now = AHORA + min * MIN;
+    await despachar(m.deps);
+  }
+  let t = (await m.videos.getTrabajo(id))!;
+  assert.equal(t.estado, "enviado");
+  assert.equal(t.falRequestId, undefined);
+  assert.equal(t.intentos, 0);
+  assert.equal(m.enviados.length, 1);
+  assert.equal(await m.videos.getGasto(HOY), COSTO);
+  // El aviso de fal llega y se acepta aunque no se guardó el id del envío
+  assert.deepEqual(await m.aviso(0, m.OK), { status: 200 });
+  t = (await m.videos.getTrabajo(id))!;
+  assert.equal(t.estado, "listo");
+  assert.equal(m.enviados.length, 1);
+});
+
+test("fal recibió el envío, la respuesta se perdió y nunca avisa: al límite duro falla SIN bajar el gasto", async () => {
+  const m = mundo();
+  m.estado.falDudoso = true;
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  m.estado.falDudoso = false;
+  m.estado.now = AHORA + 46 * MIN;
+  await despachar(m.deps);
+  const t = m.videos.todos()[0];
+  assert.equal(t.estado, "fallo");
+  assert.equal(m.enviados.length, 1);
+  assert.equal(await m.videos.getGasto(HOY), COSTO);
+  assert.equal(m.store.uso("n1", MES).tomas_ia, 0); // el cliente recupera su toma
+});
+
+test("fal aceptó pero guardar el envío falla una vez: se reintenta y queda guardado", async () => {
+  const m = mundo();
+  let fallas = 1;
+  const guardarEnvio = m.videos.guardarEnvio.bind(m.videos);
+  m.videos.guardarEnvio = async (...a) => {
+    if (fallas-- > 0) throw new Error("Firestore ocupado");
+    return guardarEnvio(...a);
+  };
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  const t = m.videos.todos()[0];
+  assert.equal(t.estado, "enviado");
+  assert.equal(t.falRequestId, "req-1");
+  assert.equal(m.enviados.length, 1);
+});
+
+test("fal aceptó pero guardar el envío falla dos veces: nunca se vuelve a la fila ni se reenvía", async () => {
+  const m = mundo();
+  m.videos.guardarEnvio = async () => {
+    throw new Error("Firestore caído");
+  };
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  for (const min of [1, 10, 20, 40]) {
+    m.estado.now = AHORA + min * MIN;
+    await despachar(m.deps);
+  }
+  const t = m.videos.todos()[0];
+  assert.equal(t.estado, "enviado");
+  assert.equal(t.intentos, 0);
+  assert.equal(m.enviados.length, 1);
+  assert.equal(await m.videos.getGasto(HOY), COSTO);
+  // El aviso de fal sí lo termina
+  assert.deepEqual(await m.aviso(0, m.OK), { status: 200 });
+  assert.equal(m.videos.todos()[0].estado, "listo");
+});
+
+test("fal rechaza con 429 o 5xx sin recibirlo: también es dudoso (no se reenvía)", async () => {
+  const m = mundo();
+  m.deps.fal = { ...m.deps.fal!, enviar: async () => { throw new Error("fal.ai no aceptó el trabajo (429): demasiados pedidos a la vez en fal.ai"); } };
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  await despachar(m.deps);
+  const t = m.videos.todos()[0];
+  assert.equal(t.estado, "enviado");
+  assert.equal(t.intentos, 0);
+});
+
 test("tope del día: el trabajo se queda en fila y sale al día siguiente", async () => {
   const m = mundo({}, { gasto: { [HOY]: 490 } });
   const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
@@ -297,7 +507,7 @@ test("tope del día: el trabajo se queda en fila y sale al día siguiente", asyn
   assert.equal(m.enviados.length, 0);
   const c = await consultar("u1", [r.ok ? r.trabajos[0].id : ""], m.deps);
   assert.ok(c.ok && c.topeHoy === true);
-  assert.deepEqual(c.ok && c.trabajos, [{ id: r.ok ? r.trabajos[0].id : "", estado: "en_fila", lugar: 1 }]);
+  assert.deepEqual(c.ok && c.trabajos, [{ id: r.ok ? r.trabajos[0].id : "", estado: "en_fila" }]); // al tope no se calcula el lugar
   m.estado.now = AHORA + 24 * 60 * MIN;
   assert.deepEqual(await despachar(m.deps), { enviados: 1 });
   assert.equal(await m.videos.getGasto("2026-11-11"), COSTO);
@@ -345,7 +555,7 @@ test("caché: la llave incluye el negocio (misma foto y movimiento en otro negoc
   assert.notEqual(a.cacheLlave, b.cacheLlave);
 });
 
-test("atorado más de 15 min: si fal ya terminó se procesa; si no, se reintenta", async () => {
+test("atorado más de 15 min y fal ya terminó: se procesa (sin reenviar)", async () => {
   const m = mundo();
   await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }, { imagenKey: foto("b"), movimiento: "" }] }, m.deps);
   const [a, b] = m.videos.todos();
@@ -358,20 +568,185 @@ test("atorado más de 15 min: si fal ya terminó se procesa; si no, se reintenta
   assert.equal((await m.videos.getTrabajo(a.id))?.estado, "listo");
   assert.equal((await m.videos.getTrabajo(b.id))?.estado, "listo");
   assert.equal(m.subidas[0].origen, "https://v3.fal.media/atorado.mp4");
-  // Otro que no termina: vuelve a enviarse con 1 intento
-  const m2 = mundo();
-  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m2.deps);
-  m2.estado.now = AHORA + 16 * MIN;
-  await despachar(m2.deps);
-  const t = m2.videos.todos()[0];
-  assert.equal(t.estado, "enviado");
-  assert.equal(t.intentos, 1);
-  assert.equal(m2.enviados.length, 2);
-  assert.equal(await m2.videos.getGasto(HOY), COSTO);
+  assert.equal(m.enviados.length, 2);
+  assert.equal(m.cancelados.length, 0);
 });
 
-test("consultar: solo trabajos del propio negocio, con lugar en la fila; despacha si hay lugar", async () => {
-  const m = mundo({}, { gasto: { [HOY]: 500 } });
+// ---------- Atorados: nunca pagar dos veces la misma toma ----------
+
+// Una toma enviada (req-1) que lleva `min` minutos sin aviso, y se corre el despacho.
+async function atorada(min: number, ajustes: (m: ReturnType<typeof mundo>) => void | Promise<void> = () => {}) {
+  const m = mundo();
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  const id = m.videos.todos()[0].id;
+  await ajustes(m);
+  m.estado.now = AHORA + min * MIN;
+  await despachar(m.deps);
+  return { m, id, t: (await m.videos.getTrabajo(id))! };
+}
+
+test("atorado EN FILA de fal: se cancela; si fal confirma, vuelve a la fila y su costo sale del gasto", async () => {
+  const { m, t } = await atorada(16, (m) => {
+    m.estado.estadoFal = "IN_QUEUE";
+    m.estado.cancelar = "cancelado";
+  });
+  assert.deepEqual(m.cancelados, ["https://queue.fal.run/m/requests/req-1/status"]);
+  // Salió de la cola de fal (no se cobra): se reenvía una sola vez y el gasto cuenta una toma
+  assert.equal(t.estado, "enviado");
+  assert.equal(t.intentos, 1);
+  assert.equal(t.falRequestId, "req-2");
+  assert.equal(m.enviados.length, 2);
+  assert.equal(await m.videos.getGasto(HOY), COSTO);
+  assert.equal(m.store.uso("n1", MES).tomas_ia, 1);
+});
+
+test("atorado EN FILA de fal y ya no se puede reintentar: falla, devuelve la toma y baja el gasto", async () => {
+  const { m, t } = await atorada(16, async (m) => {
+    m.estado.estadoFal = "IN_QUEUE";
+    m.estado.cancelar = "cancelado";
+    const c = await m.store.getConfig();
+    await m.store.guardarConfig({ videoIa: { ...c.videoIa, maxIntentos: 1 } });
+  });
+  assert.equal(t.estado, "fallo");
+  assert.equal(m.enviados.length, 1);
+  assert.equal(await m.videos.getGasto(HOY), 0);
+  assert.equal(m.store.uso("n1", MES).tomas_ia, 0);
+});
+
+test("atorado EN FILA de fal pero ya terminó al cancelar: se trae el resultado (sin reenviar)", async () => {
+  const { m, t } = await atorada(16, (m) => {
+    m.estado.estadoFal = "IN_QUEUE";
+    m.estado.cancelar = "terminado";
+  });
+  assert.equal(t.estado, "listo");
+  assert.equal(m.subidas[0].origen, "https://v3.fal.media/atorado.mp4");
+  assert.equal(m.enviados.length, 1);
+  assert.equal(await m.videos.getGasto(HOY), COSTO);
+});
+
+test("atorado EN FILA de fal y la cancelación no se confirma: sigue esperando (sin reenviar)", async () => {
+  for (const cancelar of ["pedido", "error"] as const) {
+    const { m, t } = await atorada(16, (m) => {
+      m.estado.estadoFal = "IN_QUEUE";
+      m.estado.cancelar = cancelar;
+    });
+    assert.equal(t.estado, "enviado", cancelar);
+    assert.equal(t.falRequestId, "req-1");
+    assert.equal(m.enviados.length, 1);
+    assert.equal(await m.videos.getGasto(HOY), COSTO);
+  }
+});
+
+test("atorado GENERÁNDOSE en fal: nunca se reenvía; espera hasta 3 × 15 min", async () => {
+  const { m, id, t } = await atorada(16); // IN_PROGRESS
+  assert.equal(t.estado, "enviado");
+  assert.equal(t.intentos, 0);
+  assert.equal(m.cancelados.length, 0);
+  for (const min of [20, 30, 44]) {
+    m.estado.now = AHORA + min * MIN;
+    await despachar(m.deps);
+  }
+  assert.equal((await m.videos.getTrabajo(id))?.estado, "enviado");
+  assert.equal(m.enviados.length, 1);
+  assert.equal(await m.videos.getGasto(HOY), COSTO);
+});
+
+test("atorado GENERÁNDOSE pasado el límite duro: se cancela y falla SIN bajar el gasto; el cliente recupera su toma", async () => {
+  const { m, t } = await atorada(46);
+  assert.equal(t.estado, "fallo");
+  assert.deepEqual(m.cancelados, ["https://queue.fal.run/m/requests/req-1/status"]);
+  assert.equal(m.enviados.length, 1);
+  assert.equal(await m.videos.getGasto(HOY), COSTO); // fal pudo haberla cobrado: sigue contando
+  assert.equal(m.store.uso("n1", MES).tomas_ia, 0);
+  assert.match(t.error ?? "", /45 minutos/);
+});
+
+test("atorado TERMINADO pero el resultado o la copia a R2 fallan: se reintenta después, nunca se reenvía", async () => {
+  const { m, id, t } = await atorada(16, (m) => {
+    m.estado.estadoFal = "COMPLETED";
+    m.estado.resultado = null;
+  });
+  assert.equal(t.estado, "enviado");
+  // Ahora el resultado llega pero R2 falla
+  m.estado.resultado = { videoUrl: "https://v3.fal.media/atorado.mp4" };
+  m.estado.subirFalla = true;
+  m.estado.now = AHORA + 30 * MIN;
+  await despachar(m.deps);
+  assert.equal((await m.videos.getTrabajo(id))?.estado, "enviado");
+  // R2 vuelve: queda listo
+  m.estado.subirFalla = false;
+  m.estado.now = AHORA + 40 * MIN;
+  await despachar(m.deps);
+  assert.equal((await m.videos.getTrabajo(id))?.estado, "listo");
+  assert.equal(m.enviados.length, 1);
+  assert.equal(await m.videos.getGasto(HOY), COSTO);
+});
+
+test("atorado TERMINADO que nunca se puede traer: al límite duro falla SIN bajar el gasto", async () => {
+  const { m, t } = await atorada(46, (m) => {
+    m.estado.estadoFal = "COMPLETED";
+    m.estado.resultado = new Error("fal caído");
+  });
+  assert.equal(t.estado, "fallo");
+  assert.equal(m.enviados.length, 1);
+  assert.equal(await m.videos.getGasto(HOY), COSTO);
+  assert.equal(m.store.uso("n1", MES).tomas_ia, 0);
+});
+
+test("atorado sin URL de estado o con fal sin responder: espera; al límite duro falla SIN bajar el gasto", async () => {
+  for (const caso of ["sin-url", "fal-caido", "raro"] as const) {
+    const ajustes = (m: ReturnType<typeof mundo>) => {
+      if (caso === "fal-caido") m.estado.estadoFal = new Error("sin red");
+      if (caso === "raro") m.estado.estadoFal = "";
+    };
+    const m = mundo();
+    const deps = m.deps; // (sin copiar: `now` se lee en cada llamada)
+    if (caso === "sin-url") {
+      const enviar = deps.fal!.enviar;
+      deps.fal = { ...deps.fal!, enviar: async (...a) => ({ ...(await enviar(...a)), statusUrl: "" }) };
+    }
+    await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, deps);
+    const id = m.videos.todos()[0].id;
+    ajustes(m);
+    m.estado.now = AHORA + 30 * MIN;
+    await despachar(deps);
+    assert.equal((await m.videos.getTrabajo(id))?.estado, "enviado", caso);
+    m.estado.now = AHORA + 46 * MIN;
+    await despachar(deps);
+    assert.equal((await m.videos.getTrabajo(id))?.estado, "fallo", caso);
+    assert.equal(m.enviados.length, 1, caso);
+    assert.equal(await m.videos.getGasto(HOY), COSTO, caso);
+    assert.equal(m.store.uso("n1", MES).tomas_ia, 0, caso);
+  }
+});
+
+test("la misma toma nunca se cobra dos veces: atorada horas y con avisos tarde, fal la recibe UNA vez", async () => {
+  const m = mundo();
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  const id = m.videos.todos()[0].id;
+  // Cada 5 min durante 3 horas: generándose, luego fal no responde, luego terminada sin resultado
+  for (let min = 5; min <= 180; min += 5) {
+    m.estado.now = AHORA + min * MIN;
+    m.estado.estadoFal = min < 30 ? "IN_PROGRESS" : min < 40 ? new Error("sin red") : "COMPLETED";
+    m.estado.resultado = null;
+    await despachar(m.deps);
+    await consultar("u1", [id], m.deps);
+  }
+  assert.equal(m.enviados.length, 1);
+  assert.equal((await m.videos.getTrabajo(id))?.estado, "fallo");
+  // El aviso tardío de fal ya no cambia nada ni cobra otra vez
+  assert.deepEqual(await m.aviso(0, m.OK), { status: 200 });
+  assert.equal((await m.videos.getTrabajo(id))?.estado, "fallo");
+  assert.equal(m.enviados.length, 1);
+  assert.equal(m.store.uso("n1", MES).tomas_ia, 0);
+  assert.equal(await m.videos.getGasto(HOY), COSTO);
+});
+
+test("consultar: solo trabajos del propio negocio, con lugar en la fila", async () => {
+  // Fila llena por los simultáneos (no por el tope: al tope no se calcula el lugar)
+  const m = mundo();
+  const cfg = await m.store.getConfig();
+  await m.store.guardarConfig({ videoIa: { ...cfg.videoIa, simultaneos: 0 } });
   const mio = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }, { imagenKey: foto("b"), movimiento: "" }] }, m.deps);
   m.estado.now = AHORA + 1000;
   const ajeno = await crearVideo(req("u2"), { tomas: [{ imagenKey: foto("c", "n2"), movimiento: "" }] }, m.deps);
@@ -408,18 +783,119 @@ test("si el despacho truena al crear, igual se devuelven los ids (las tomas qued
   assert.ok(r.ok && r.trabajos[0].estado === "en_fila");
 });
 
-test("consultar no empuja la fila si mis tomas ya se están generando (cuida las lecturas de Firestore)", async () => {
+// Cuenta cuántas veces se llama cada método de un almacén (para cuidar las lecturas de Firestore).
+function contar<T extends object>(o: T) {
+  const veces: Record<string, number> = {};
+  const vigilado = new Proxy(o, {
+    get(obj, k) {
+      const v = Reflect.get(obj, k);
+      if (typeof v !== "function" || typeof k !== "string") return v;
+      return (...a: unknown[]) => ((veces[k] = (veces[k] ?? 0) + 1), (v as (...x: unknown[]) => unknown).apply(obj, a));
+    },
+  });
+  return { vigilado, veces, limpiar: () => Object.keys(veces).forEach((k) => delete veces[k]) };
+}
+
+test("una consulta con la toma generándose: solo lee el usuario, la configuración y las tomas", async () => {
   const m = mundo();
   const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
   assert.ok(r.ok);
-  let candados = 0;
-  const contando = { ...m.videos, tomarCandado: async (...a: Parameters<typeof m.videos.tomarCandado>) => (candados++, m.videos.tomarCandado(...a)) };
-  await consultar("u1", [r.ok ? r.trabajos[0].id : ""], { ...m.deps, videos: contando });
-  assert.equal(candados, 0);
-  // Pero sí cuando lleva más de 15 min sin aviso
-  m.estado.now = AHORA + 16 * MIN;
-  await consultar("u1", [r.ok ? r.trabajos[0].id : ""], { ...m.deps, videos: contando });
-  assert.equal(candados, 1);
+  const v = contar(m.videos);
+  const st = contar(m.store);
+  m.estado.now = AHORA + 5 * MIN;
+  await consultar("u1", [r.ok ? r.trabajos[0].id : ""], { ...m.deps, now: m.estado.now, videos: v.vigilado, store: st.vigilado });
+  assert.deepEqual(v.veces, { listarTrabajos: 1 });
+  assert.deepEqual(st.veces, { getUsuario: 1, getConfig: 1 });
+});
+
+test("una consulta al tope de hoy: no despacha ni lee la fila; solo el gasto (y nada de lugar)", async () => {
+  const m = mundo({}, { gasto: { [HOY]: 500 } });
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  assert.ok(r.ok && r.trabajos[0].estado === "en_fila");
+  m.estado.now = AHORA + 5 * MIN;
+  const v = contar(m.videos);
+  const st = contar(m.store);
+  const c = await consultar("u1", [r.ok ? r.trabajos[0].id : ""], { ...m.deps, now: m.estado.now, videos: v.vigilado, store: st.vigilado });
+  assert.ok(c.ok && c.topeHoy && c.trabajos[0].estado === "en_fila" && c.trabajos[0].lugar === undefined);
+  assert.deepEqual(v.veces, { listarTrabajos: 1, getGasto: 1 });
+  assert.deepEqual(st.veces, { getUsuario: 1, getConfig: 1 });
+  assert.equal(m.enviados.length, 0);
+});
+
+test("una consulta con la toma en fila hace más de 1 min y con cupo: empuja la fila (una vez por minuto)", async () => {
+  // Ayer se quedó en fila por el tope; hoy hay cupo, pero nadie crea ni llega un aviso (versión de prueba)
+  const AYER = AHORA - 24 * 60 * MIN;
+  const m = mundo({}, { gasto: { "2026-11-09": 500 } });
+  m.estado.now = AYER;
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }, { imagenKey: foto("b"), movimiento: "" }] }, m.deps);
+  assert.ok(r.ok);
+  const ids = r.ok ? r.trabajos.map((t) => t.id) : [];
+  m.estado.now = AHORA;
+  const c = await consultar("u1", [ids[0]], m.deps);
+  assert.ok(c.ok && !c.topeHoy);
+  assert.equal(m.enviados.length, 2); // salieron las dos (el despacho atiende toda la fila)
+  // Un segundo pedido que entra en fila (sin lugar libre) y se consulta: no empuja antes del minuto
+  const v = contar(m.videos);
+  await consultar("u1", [ids[1]], { ...m.deps, now: AHORA + 30_000, videos: v.vigilado });
+  assert.equal(v.veces.tomarCandado, undefined);
+});
+
+test("una consulta con la toma recién puesta en fila (menos de 1 min) no empuja la fila", async () => {
+  const m = mundo();
+  m.estado.falFalla = true; // se rechaza: vuelve a la fila al momento
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  assert.ok(r.ok && r.trabajos[0].estado === "en_fila");
+  m.estado.falFalla = false;
+  const v = contar(m.videos);
+  await consultar("u1", [r.ok ? r.trabajos[0].id : ""], { ...m.deps, now: AHORA + 30_000, videos: v.vigilado });
+  assert.equal(v.veces.tomarCandado, undefined);
+  assert.equal(m.enviados.length, 0);
+  await consultar("u1", [r.ok ? r.trabajos[0].id : ""], { ...m.deps, now: AHORA + 61_000, videos: v.vigilado });
+  assert.equal(v.veces.tomarCandado, 2); // el del minuto (no se suelta) y el del despacho
+  assert.equal(m.enviados.length, 1);
+});
+
+test("una consulta con una toma atorada empuja la fila, pero como mucho una vez por minuto (entre servidores)", async () => {
+  const m = mundo();
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  assert.ok(r.ok);
+  const id = r.ok ? r.trabajos[0].id : "";
+  const v = contar(m.videos);
+  const consulta = (min: number) => consultar("u1", [id], { ...m.deps, now: AHORA + min * MIN, videos: v.vigilado });
+  await consulta(16);
+  assert.equal(v.veces.trabajosEnviados, 1); // corrió el despacho (revisa atorados)
+  assert.equal(v.veces.listarTrabajos, 1); // no vuelve a leer mis tomas
+  v.limpiar();
+  await consulta(16.5); // 30 s después: no
+  assert.equal(v.veces.trabajosEnviados, undefined);
+  await consulta(17.1); // pasado el minuto: sí
+  assert.equal(v.veces.trabajosEnviados, 1);
+});
+
+test("despachar lee el gasto del día una vez y se detiene en cuanto la siguiente toma no cabe", async () => {
+  const AYER = AHORA - 24 * 60 * MIN;
+  const m = mundo({}, { gasto: { "2026-11-09": 500, [HOY]: 450 } });
+  m.estado.now = AYER;
+  await crearVideo(req(), { tomas: ["a", "b", "c", "d"].map((l) => ({ imagenKey: foto(l), movimiento: "" })) }, m.deps);
+  assert.equal((await m.videos.trabajosEnFila(10)).length, 4);
+  m.estado.now = AHORA;
+  const v = contar(m.videos);
+  assert.deepEqual(await despachar({ ...m.deps, now: AHORA, videos: v.vigilado }), { enviados: 2 }); // 450 + 20 + 20 ≤ 500
+  assert.equal(v.veces.getGasto, 1);
+  assert.equal(v.veces.marcarEnviado, 2); // la tercera ya no cabe: ni se intenta
+  assert.equal(await m.videos.getGasto(HOY), 490);
+});
+
+test("el límite por cliente al día no lee todas las tomas del negocio: usa un contador del día", async () => {
+  const m = mundo();
+  const cfg = await m.store.getConfig();
+  await m.store.guardarConfig({ videoIa: { ...cfg.videoIa, tomasPorNegocioDia: 2 } });
+  const v = contar(m.videos);
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, { ...m.deps, videos: v.vigilado });
+  assert.ok(r.ok);
+  assert.equal(v.veces.trabajosDeNegocio, undefined);
+  assert.equal(v.veces.tomasDelDia, 1);
+  assert.equal(await m.videos.tomasDelDia("n1", HOY), 1);
 });
 
 test("baseDePedido: el aviso de fal va a la misma versión del sitio que recibió el pedido", () => {
@@ -462,7 +938,7 @@ test("un fallo guarda su motivo en el trabajo (para verlo en el panel de adminis
   m2.estado.falFalla = true;
   await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m2.deps);
   await despachar(m2.deps);
-  assert.match(m2.videos.todos()[0].error ?? "", /fal\.ai no aceptó el trabajo \(500\)/);
+  assert.match(m2.videos.todos()[0].error ?? "", /fal\.ai no aceptó el trabajo \(422\)/);
 });
 
 test("resumenVideo: solo administrador; da el gasto de hoy, el tope y los últimos fallos con su motivo", async () => {
@@ -567,7 +1043,7 @@ test("dos pedidos del mismo negocio al mismo tiempo: el segundo espera, no se co
 test("al terminar un pedido (bien o rechazado) el candado queda libre para el siguiente", async () => {
   const m = mundo();
   await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "zoom" }] }, m.deps);
-  assert.equal(await m.videos.tomarCandado("crear-video:n1", 30_000, AHORA), true);
+  assert.ok(await m.videos.tomarCandado("crear-video:n1", 30_000, AHORA));
 });
 
 // ---------- Límite por cliente y tope del día ----------
@@ -659,4 +1135,177 @@ test("ajustarVideo: rechaza valores absurdos (cero, negativos, decimales, gigant
       assert.ok(!r.ok, JSON.stringify(malo));
     }
   });
+});
+
+// ---------- Versión de prueba: sus propios archivos y su propio tope ----------
+
+async function conEntorno(vars: Record<string, string | undefined>, f: () => Promise<void>) {
+  const antes = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+  for (const [k, v] of Object.entries(vars)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+  try {
+    await f();
+  } finally {
+    for (const [k, v] of Object.entries(antes)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+
+test("versión de prueba: solo acepta fotos de su carpeta y guarda los clips bajo pruebas/", async () => {
+  await conEntorno({ STUDIO_COLECCION_PREFIJO: "prueba_studio_" }, async () => {
+    const m = mundo();
+    // Una llave de producción no es de esta versión
+    const prod = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+    assert.ok(!prod.ok && prod.status === 403);
+    const r = await crearVideo(req(), { tomas: [{ imagenKey: `pruebas/${foto("a")}`, movimiento: "" }] }, m.deps);
+    assert.ok(r.ok);
+    await m.aviso(0, m.OK);
+    const t = m.videos.todos()[0];
+    assert.equal(t.clipKey, `pruebas/negocios/n1/clips/${t.id}.mp4`);
+    // La prueba gratis: demo/pruebas/
+    const d = mundo(PRUEBA);
+    assert.ok(!(await crearVideo(req(), { tomas: [{ imagenKey: foto("a", "n1", true), movimiento: "" }] }, d.deps)).ok);
+    const rd = await crearVideo(req(), { tomas: [{ imagenKey: `demo/pruebas/${foto("a")}`, movimiento: "" }] }, d.deps);
+    assert.ok(rd.ok);
+    await d.aviso(0, d.OK);
+    const td = d.videos.todos()[0];
+    assert.equal(td.clipKey, `demo/pruebas/negocios/n1/clips/${td.id}.mp4`);
+  });
+  // Y producción no acepta las de pruebas
+  const m = mundo();
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: `pruebas/${foto("a")}`, movimiento: "" }] }, m.deps);
+  assert.ok(!r.ok && r.status === 403);
+});
+
+test("VIDEO_IA_TOPE_CENTAVOS: si está, manda sobre el tope guardado (para poner la versión de prueba más baja)", async () => {
+  const cfg = { ...DEFAULT_CONFIG, videoIa: { ...DEFAULT_CONFIG.videoIa, topeDiarioCentavos: 3000 } };
+  assert.equal(topeDiario(cfg, {}), 3000);
+  assert.equal(topeDiario(cfg, { VIDEO_IA_TOPE_CENTAVOS: "" }), 3000);
+  assert.equal(topeDiario(cfg, { VIDEO_IA_TOPE_CENTAVOS: " 300 " }), 300);
+  assert.equal(topeDiario(cfg, { VIDEO_IA_TOPE_CENTAVOS: "0" }), 0);
+  for (const malo of ["abc", "-5", "2.5", "999999999"]) assert.equal(topeDiario(cfg, { VIDEO_IA_TOPE_CENTAVOS: malo }), 3000, malo);
+  await conEntorno({ VIDEO_IA_TOPE_CENTAVOS: "30" }, async () => {
+    const m = mundo(); // el tope guardado es $5
+    const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }, { imagenKey: foto("b"), movimiento: "" }] }, m.deps);
+    assert.ok(r.ok);
+    assert.deepEqual(r.ok && r.trabajos.map((t) => t.estado), ["enviado", "en_fila"]); // 20 + 20 > 30
+    const c = await consultar("u1", [r.ok ? r.trabajos[1].id : ""], m.deps);
+    assert.ok(c.ok && c.topeHoy);
+    await conAdmin(async () => {
+      const res = await resumenVideo("admin@ejemplo.com", true, m.deps);
+      assert.ok(res.ok && res.topeCentavos === 30 && res.topeDeEntorno === true && res.topeGuardadoCentavos === 500);
+    });
+  });
+});
+
+test("sin la tarea de respaldo (versión de prueba), las consultas resuelven las tomas atoradas", async () => {
+  const m = mundo();
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  const id = r.ok ? r.trabajos[0].id : "";
+  m.estado.now = AHORA + 46 * MIN; // fal la sigue «generando» y nunca avisa
+  await consultar("u1", [id], m.deps); // empuja la fila (revisa atorados)
+  const c = await consultar("u1", [id], m.deps);
+  assert.deepEqual(c.ok && c.trabajos, [{ id, estado: "fallo" }]);
+  assert.equal(m.enviados.length, 1);
+  assert.equal(m.store.uso("n1", MES).tomas_ia, 0);
+});
+
+// ---------- Detalles ----------
+
+test("una foto de demo/ ya no sirve cuando la cuenta dejó la prueba gratis (R2 la borra a los 30 días)", async () => {
+  const m = mundo(); // Pro
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a", "n1", true), movimiento: "" }] }, m.deps);
+  assert.ok(!r.ok && r.status === 403);
+  assert.equal(!r.ok && r.error, "Esa foto se subió durante tu prueba gratis. Súbela de nuevo.");
+  assert.equal(m.store.uso("n1", MES).tomas_ia, 0);
+});
+
+test("el enlace de la foto que se manda a fal dura 6 horas (fal puede tardar en empezar)", async () => {
+  const m = mundo();
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  assert.match(String(m.enviados[0].input.image_url), /&s=21600$/);
+});
+
+test("clip de la prueba gratis con más de 29 días: consultar lo da por vencido (sin enlace) y el caché ya no lo usa", async () => {
+  const DIAS = 24 * 60 * MIN;
+  const m = mundo(PRUEBA);
+  const toma = { imagenKey: foto("a", "n1", true), movimiento: "zoom" };
+  const r = await crearVideo(req(), { tomas: [toma] }, m.deps);
+  await m.aviso(0, m.OK);
+  const id = r.ok ? r.trabajos[0].id : "";
+  const hoy = await consultar("u1", [id], m.deps);
+  assert.ok(hoy.ok && hoy.trabajos[0].clipUrl && !hoy.trabajos[0].vencido);
+  m.estado.now = AHORA + 30 * DIAS;
+  const tarde = await consultar("u1", [id], m.deps);
+  assert.deepEqual(tarde.ok && tarde.trabajos, [{ id, estado: "listo", vencido: true }]);
+  // Un clip de pago no vence
+  const p = mundo();
+  const rp = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, p.deps);
+  await p.aviso(0, p.OK);
+  p.estado.now = AHORA + 300 * DIAS;
+  const pago = await consultar("u1", [rp.ok ? rp.trabajos[0].id : ""], p.deps);
+  assert.ok(pago.ok && pago.trabajos[0].clipUrl && !pago.trabajos[0].vencido);
+});
+
+test("caché de la prueba gratis: una toma sacada del caché vence cuando vence el clip original", async () => {
+  const DIAS = 24 * 60 * MIN;
+  const m = mundo({ ...PRUEBA, pruebaHasta: AHORA + 60 * DIAS });
+  const cfg = await m.store.getConfig();
+  await m.store.guardarConfig({ limitesMes: { ...cfg.limitesMes, prueba: { ...cfg.limitesMes.prueba, tomas_ia: 10 } } });
+  const toma = { imagenKey: foto("a", "n1", true), movimiento: "zoom" };
+  await crearVideo(req(), { tomas: [toma] }, m.deps);
+  await m.aviso(0, m.OK);
+  // A los 20 días sale del caché…
+  m.estado.now = AHORA + 20 * DIAS;
+  const r = await crearVideo(req(), { tomas: [toma] }, m.deps);
+  assert.ok(r.ok && r.trabajos[0].estado === "listo");
+  const id = r.ok ? r.trabajos[0].id : "";
+  // …y a los 30 días del clip original ya no está, aunque esta toma tenga 10 días
+  m.estado.now = AHORA + 30 * DIAS;
+  const c = await consultar("u1", [id], m.deps);
+  assert.ok(c.ok && c.trabajos[0].vencido === true && !c.trabajos[0].clipUrl);
+  // Y pedirla otra vez genera una nueva (el caché ya no la entrega)
+  const otra = await crearVideo(req(), { tomas: [toma] }, m.deps);
+  assert.ok(otra.ok && otra.trabajos[0].estado === "enviado");
+});
+
+test("si no se puede devolver la toma tras un fallo, queda en el registro (sin secretos) para hacerlo a mano", async () => {
+  const m = mundo();
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  const t = m.videos.todos()[0];
+  m.store.devolverUso = async () => {
+    throw new Error("Firestore caído");
+  };
+  const errores: string[] = [];
+  const original = console.error;
+  console.error = (...a: unknown[]) => void errores.push(a.map(String).join(" "));
+  try {
+    await m.aviso(0, m.ERROR);
+    await m.aviso(1, m.ERROR).catch(() => {});
+  } finally {
+    console.error = original;
+  }
+  assert.equal(m.videos.todos()[0].estado, "fallo");
+  const linea = errores.find((e) => e.includes("no se pudo devolver la toma"));
+  assert.ok(linea, errores.join("\n"));
+  assert.match(linea!, /n1/);
+  for (const e of errores) {
+    assert.ok(!e.includes(t.secreto) && !e.includes(m.videos.todos()[0].secreto) && !/https?:\/\//.test(e), e);
+  }
+});
+
+test("al tope de hoy, ni una toma atorada hace que la consulta empuje la fila", async () => {
+  const m = mundo({}, { gasto: { [HOY]: 480 } });
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }, { imagenKey: foto("b"), movimiento: "" }] }, m.deps);
+  assert.ok(r.ok);
+  assert.deepEqual(r.ok && r.trabajos.map((t) => t.estado), ["enviado", "en_fila"]); // 480 + 20 = 500; la 2ª ya no cabe
+  const v = contar(m.videos);
+  const c = await consultar("u1", r.ok ? r.trabajos.map((t) => t.id) : [], { ...m.deps, now: AHORA + 20 * MIN, videos: v.vigilado });
+  assert.ok(c.ok && c.topeHoy);
+  assert.equal(v.veces.tomarCandado, undefined);
+  assert.equal(v.veces.trabajosEnFila, undefined);
 });

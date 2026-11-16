@@ -1,0 +1,41 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "studio_trabajos_video",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "estado",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "prioridad",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "creado",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "prueba_studio_trabajos_video",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "estado",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "prioridad",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "creado",
+          "order": "ASCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
