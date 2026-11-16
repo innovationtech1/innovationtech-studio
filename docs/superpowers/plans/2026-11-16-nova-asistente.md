@@ -79,3 +79,7 @@
 - [ ] Step 2: implement; PASS.
 - [ ] Step 3: UI: toggle «NOVA habla» (off by default, persisted with `usePersistentState("nova:habla")`); when on, speak the suggestion bubble and each finished assistant reply; the existing «Escuchar» per message uses the same voice; stop audio on new send, new chat, toggle off, unmount, and `document.hidden`; avatar `hablando` while audio plays. First suggestion of a visit is never spoken until the user has interacted.
 - [ ] Step 4: en.ts; `npm test` # fail 0, tsc, build. Commit «NOVA: voz propia, interruptor NOVA habla y lectura por partes».
+
+### Task 3 addendum (owner request 2026-11-16): «Ajustes de NOVA»
+- Gear button in NOVA's header opens a small panel «Ajustes de NOVA» with: voice choice among the Aura-2 voices of `lib/voices.ts` for the current language (no «Básica»), each with «Probar» (speaks «Hola, soy NOVA. ¿Qué creamos hoy?»); toggle «NOVA habla»; toggle «Sugerencias» (off = no idle bubbles). All persisted with `usePersistentState` keys `nova:voz`, `nova:habla`, `nova:sugerencias`. Default voice: es «es-estrella», en «en-luna».
+- `/api/nova/voz` accepts `voice` but only ids of Aura-2 voices from `lib/voices.ts` (`findVoice`, not `basic`); anything else → the default for the language.
