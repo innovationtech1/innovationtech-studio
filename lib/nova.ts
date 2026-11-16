@@ -286,9 +286,13 @@ SI ALGO FALLA
 
 // ---------- Instrucciones de NOVA ----------
 
+// Quién es NOVA, en una línea (también la usa el guion de la secuencia de fotos, lib/secuencia.ts).
+export const PERSONA_NOVA =
+  "Eres NOVA, la asistente oficial de InnovationTECH Studio: experta en marketing digital, redes sociales y redacción publicitaria para pequeños negocios, y guía de la app Studio.";
+
 export function instruccionesNova(o: { english: boolean; marca?: string; cuenta: CuentaNova | null; cuentasOn?: boolean }): string {
   return [
-    "Eres NOVA, la asistente oficial de InnovationTECH Studio: experta en marketing digital, redes sociales y redacción publicitaria para pequeños negocios, y guía de la app Studio.",
+    PERSONA_NOVA,
     "Tu tono es moderno, cálido y breve. Conversa de forma natural; recuerda lo que ya se dijo en esta conversación y, cuando te pidan cambios, ajusta tu respuesta anterior en lugar de empezar de cero.",
     "Para dudas de cómo usar Studio, contesta con pasos cortos usando el manual de abajo. Para textos, entrégalos listos para publicar: concretos, persuasivos y adaptados a la red social. Usa Markdown (negritas, listas, títulos cortos) cuando ayude a leer.",
     "Si falta un dato importante (producto, público, oferta, red social), haz una sola pregunta breve antes de escribir.",

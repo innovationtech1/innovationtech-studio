@@ -3,6 +3,7 @@ import { jsonError } from "@/lib/replicate";
 import { clavePropiaCF, getCreds, refund } from "@/lib/cf-auth";
 import { jsonAcceso, requireAccess, type Acceso } from "@/lib/account";
 import { MAX_ORDEN, instruccionesDirector } from "@/lib/director";
+import { DURACIONES_SECUENCIA, ESTILOS_FOTO, MAX_FOTOS, MAX_MOMENTO, MIN_FOTOS, leerSecuencia, limpiarGuion, palabrasGuion, promptGuion, promptSecuencia } from "@/lib/secuencia";
 
 export const maxDuration = 60;
 
@@ -97,9 +98,24 @@ function parseJson(text: string): Record<string, unknown> | null {
 }
 
 export async function POST(req: Request) {
-  const { prompt, platform, brand, model, provider, mode, scenes, dates, previous, estado, catalogo, texto, actual } = await req.json().catch(() => ({}));
+  const { prompt, platform, brand, model, provider, mode, scenes, dates, previous, estado, catalogo, texto, actual, n: nFotos, estilo, momentos, segundos } = await req.json().catch(() => ({}));
   if (!prompt || typeof prompt !== "string") return jsonError("Escribe qué quieres crear.");
   if ((mode === "director" || mode === "ajustar" || mode === "director_imagen") && prompt.length > MAX_ORDEN) return jsonError(`La orden es muy larga (máximo ${MAX_ORDEN} caracteres).`);
+  if ((mode === "secuencia" || mode === "guion_secuencia") && prompt.length > MAX_ORDEN) return jsonError(`La historia es muy larga (máximo ${MAX_ORDEN} caracteres).`);
+  // Secuencia de fotos: se revisan los datos antes de cobrar el texto (lib/secuencia.ts)
+  if (mode === "secuencia") {
+    if (!Number.isInteger(nFotos) || nFotos < MIN_FOTOS || nFotos > MAX_FOTOS) return jsonError(`Elige de ${MIN_FOTOS} a ${MAX_FOTOS} fotos.`);
+    if (!ESTILOS_FOTO.some((e) => e.id === estilo)) return jsonError("Elige un estilo de fotos.");
+  }
+  if (mode === "guion_secuencia") {
+    if (!(DURACIONES_SECUENCIA as readonly unknown[]).includes(segundos)) return jsonError(`Elige una duración de ${DURACIONES_SECUENCIA.join(", ")} segundos.`);
+    const ok =
+      Array.isArray(momentos) &&
+      momentos.length >= 1 &&
+      momentos.length <= MAX_FOTOS &&
+      momentos.every((m: unknown) => typeof m === "string" && m.trim() && m.length <= MAX_MOMENTO);
+    if (!ok) return jsonError(`Faltan los momentos de las fotos (de 1 a ${MAX_FOTOS}, cada uno de máximo ${MAX_MOMENTO} caracteres).`);
+  }
   const english = req.headers.get("x-lang") === "en";
   const brandBlock =
     (brand ? `\nContexto de la marca:\n${brand}` : "") +
@@ -253,6 +269,31 @@ export async function POST(req: Request) {
         return jsonError("No entendí la orden. Dila de otra forma.", 502);
       }
       return Response.json({ acciones: json.acciones, mensaje: typeof json.mensaje === "string" ? json.mensaje.slice(0, 300) : "" });
+    }
+
+    // Modo secuencia: de 3 a 8 fotos distintas que cuentan la historia en orden (lib/secuencia.ts).
+    if (mode === "secuencia") {
+      const system = promptSecuencia({ tema: prompt, n: nFotos, estilo, marca: typeof brand === "string" ? brand : undefined, english });
+      const salida = await generate(req, acceso, provider, model, { system, user: `Historia: ${prompt}`, maxTokens: 300 + nFotos * 140, temperatura: 0.7 });
+      try {
+        return Response.json(leerSecuencia(salida, nFotos, estilo));
+      } catch (e) {
+        await acceso.devolver(); // no se pudo armar: no se cobra el texto
+        return jsonError((e as Error).message, 502);
+      }
+    }
+
+    // Modo guion de la secuencia: NOVA escribe la voz en off que sigue los momentos en orden.
+    if (mode === "guion_secuencia") {
+      const lista = (momentos as string[]).map((m) => m.replace(/[\u0000-\u001f\u007f]+/g, " ").trim());
+      const system = promptGuion({ tema: prompt, momentos: lista, segundos, marca: typeof brand === "string" ? brand : undefined, english });
+      const salida = await generate(req, acceso, provider, model, { system, user: `Escribe el guion de: ${prompt}`, maxTokens: 120 + palabrasGuion(segundos) * 4, temperatura: 0.7 });
+      const guion = limpiarGuion(salida);
+      if (!guion) {
+        await acceso.devolver(); // llegó vacío: no se cobra el texto
+        return jsonError("NOVA no pudo escribir el guion. Intenta de nuevo.", 502);
+      }
+      return Response.json({ guion });
     }
 
     // Modo reel: textos cortos por escena + cierre + guion de voz.
