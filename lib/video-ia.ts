@@ -7,6 +7,7 @@ import {
   cancelarFal,
   entradaDeModelo,
   enviarAFal,
+  esRechazoFal,
   estadoFal,
   falConfigurado,
   resultadoFal,
@@ -34,6 +35,7 @@ import { firestoreVideoStore, type EstadoTrabajo, type TrabajoVideo, type VideoS
 
 export const EN_PAUSA = "Los videos con IA están en pausa por ahora. Puedes generar el video con animación.";
 const SEGUNDOS_ENLACE = 3600;
+const SEGUNDOS_FOTO_FAL = 3600; // enlace de la foto que se manda a fal
 const MS_CANDADO = 30_000;
 const CANDADO = "despacho_video";
 const MAX_TOMAS = 4;
@@ -348,16 +350,41 @@ async function despacharCon(m: Mundo): Promise<{ enviados: number }> {
       const r = await m.videos.marcarEnviado(t.id, { costo, dia, tope, simultaneos: v.simultaneos, ahora: m.ahora });
       if (r === "lleno") break;
       if (r !== "ok") continue; // tope del día (espera a mañana) o ya lo tomó otro despacho
+      const enviado = { ...t, estado: "enviado" as const };
+      let e: Awaited<ReturnType<FalDeps["enviar"]>>;
       try {
-        const imagen = m.r2.firmar("GET", t.imagenKey, SEGUNDOS_ENLACE);
+        // Si falla aquí (antes de llamar a fal), no se mandó nada: como un rechazo claro
+        const imagen = m.r2.firmar("GET", t.imagenKey, SEGUNDOS_FOTO_FAL);
         const webhook = `${m.base}/api/video-ia/aviso?t=${encodeURIComponent(t.id)}&s=${t.secreto}`;
         const mod = v.modelos[t.nivel];
-        const e = await m.fal.enviar(mod.id, entradaDeModelo(mod, imagen, t.movimiento, v.segundosToma), webhook);
-        await m.videos.guardarEnvio(t.id, { falRequestId: e.requestId, statusUrl: e.statusUrl, responseUrl: e.responseUrl });
-        enviados += 1;
-      } catch (e) {
-        console.error(`Video con IA: no se pudo enviar el trabajo ${t.id} (${motivo(e)}).`);
-        await reintentarOFallar(m, cfg, { ...t, estado: "enviado" }, undefined, motivo(e));
+        const entrada = entradaDeModelo(mod, imagen, t.movimiento, v.segundosToma);
+        try {
+          e = await m.fal.enviar(mod.id, entrada, webhook);
+        } catch (err) {
+          if (esRechazoFal(err)) throw err;
+          // Dudoso (tiempo agotado, sin red, 5xx, 429): fal pudo haberlo aceptado. Se queda «enviado» sin id
+          // (el aviso igual se acepta) y lo resuelven los atorados; nunca se manda otra vez a ciegas.
+          console.error(`Video con IA: no se supo si fal.ai recibió el trabajo ${t.id} (${motivo(err)}); se espera su aviso.`);
+          enviados += 1;
+          continue;
+        }
+      } catch (err) {
+        // fal dijo que no con certeza (o ni se llegó a mandar): no lo corre ni lo cobra; vuelve a la fila
+        console.error(`Video con IA: no se pudo enviar el trabajo ${t.id} (${motivo(err)}).`);
+        await reintentarOFallar(m, cfg, enviado, undefined, motivo(err), NO_COBRADO);
+        continue;
+      }
+      // fal ya lo aceptó: pase lo que pase al guardar, NUNCA vuelve a la fila
+      enviados += 1;
+      const datos = { falRequestId: e.requestId, statusUrl: e.statusUrl, responseUrl: e.responseUrl };
+      try {
+        await m.videos.guardarEnvio(t.id, datos);
+      } catch {
+        try {
+          await m.videos.guardarEnvio(t.id, datos);
+        } catch (err) {
+          console.error(`Video con IA: fal.ai aceptó el trabajo ${t.id} pero no se pudo guardar el envío (${motivo(err)}); se espera su aviso.`);
+        }
       }
     }
     return { enviados };

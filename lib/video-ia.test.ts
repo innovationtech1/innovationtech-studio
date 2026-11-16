@@ -4,6 +4,7 @@ import { ajustarVideo, baseDePedido, consultar, crearVideo, despachar, procesarA
 import type { Usuario } from "./account-store";
 import { memoryStore } from "./account-store-memory";
 import { memoryVideoStore } from "./video-store-memory";
+import { RechazoFal } from "./fal";
 import { DEFAULT_CONFIG, type Negocio } from "./plans";
 
 const AHORA = Date.parse("2026-11-10T18:00:00Z");
@@ -41,6 +42,7 @@ function mundo(n1: Partial<Negocio> = {}, opciones: { gasto?: Record<string, num
   const subidas: { origen: string; llave: string; tipo: string }[] = [];
   const estado = {
     falFalla: false,
+    falDudoso: false,
     subirFalla: false,
     estadoFal: "IN_PROGRESS" as string | Error, // un Error = fal no responde
     cancelar: "cancelado" as "cancelado" | "pedido" | "terminado" | "error",
@@ -61,9 +63,12 @@ function mundo(n1: Partial<Negocio> = {}, opciones: { gasto?: Record<string, num
     },
     fal: {
       async enviar(modelo, input, webhook) {
-        if (estado.falFalla) throw new Error("fal.ai no aceptó el trabajo (500)");
+        // falFalla: fal dijo que no con certeza (4xx); no lo corre ni lo cobra
+        if (estado.falFalla) throw new RechazoFal("fal.ai no aceptó el trabajo (422): fal.ai no aceptó la foto o los parámetros del modelo");
         const requestId = `req-${++n}`;
         enviados.push({ modelo, input, webhook, requestId });
+        // falDudoso: fal lo recibió, pero la respuesta no llegó (tiempo agotado, 5xx…)
+        if (estado.falDudoso) throw new Error("fal.ai no aceptó el trabajo (504)");
         return { requestId, statusUrl: `https://queue.fal.run/m/requests/${requestId}/status`, responseUrl: `https://queue.fal.run/m/requests/${requestId}` };
       },
       estado: async () => {
@@ -304,6 +309,92 @@ test("fal no acepta el trabajo al despachar: reintenta una vez y luego falla dev
   const t = m.videos.todos()[0];
   assert.equal(t.estado, "fallo");
   assert.equal(m.store.uso("n1", MES).tomas_ia, 0);
+});
+
+// ---------- Envío aceptado por fal pero sin saber el resultado ----------
+
+test("fal recibió el envío pero la respuesta se perdió: NO se reenvía; queda enviado y lo resuelve el aviso", async () => {
+  const m = mundo();
+  m.estado.falDudoso = true;
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  assert.ok(r.ok && r.trabajos[0].estado === "enviado");
+  const id = m.videos.todos()[0].id;
+  m.estado.falDudoso = false;
+  // Más despachos (y más tarde): nada se vuelve a mandar
+  for (const min of [1, 10, 20]) {
+    m.estado.now = AHORA + min * MIN;
+    await despachar(m.deps);
+  }
+  let t = (await m.videos.getTrabajo(id))!;
+  assert.equal(t.estado, "enviado");
+  assert.equal(t.falRequestId, undefined);
+  assert.equal(t.intentos, 0);
+  assert.equal(m.enviados.length, 1);
+  assert.equal(await m.videos.getGasto(HOY), COSTO);
+  // El aviso de fal llega y se acepta aunque no se guardó el id del envío
+  assert.deepEqual(await m.aviso(0, m.OK), { status: 200 });
+  t = (await m.videos.getTrabajo(id))!;
+  assert.equal(t.estado, "listo");
+  assert.equal(m.enviados.length, 1);
+});
+
+test("fal recibió el envío, la respuesta se perdió y nunca avisa: al límite duro falla SIN bajar el gasto", async () => {
+  const m = mundo();
+  m.estado.falDudoso = true;
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  m.estado.falDudoso = false;
+  m.estado.now = AHORA + 46 * MIN;
+  await despachar(m.deps);
+  const t = m.videos.todos()[0];
+  assert.equal(t.estado, "fallo");
+  assert.equal(m.enviados.length, 1);
+  assert.equal(await m.videos.getGasto(HOY), COSTO);
+  assert.equal(m.store.uso("n1", MES).tomas_ia, 0); // el cliente recupera su toma
+});
+
+test("fal aceptó pero guardar el envío falla una vez: se reintenta y queda guardado", async () => {
+  const m = mundo();
+  let fallas = 1;
+  const guardarEnvio = m.videos.guardarEnvio.bind(m.videos);
+  m.videos.guardarEnvio = async (...a) => {
+    if (fallas-- > 0) throw new Error("Firestore ocupado");
+    return guardarEnvio(...a);
+  };
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  const t = m.videos.todos()[0];
+  assert.equal(t.estado, "enviado");
+  assert.equal(t.falRequestId, "req-1");
+  assert.equal(m.enviados.length, 1);
+});
+
+test("fal aceptó pero guardar el envío falla dos veces: nunca se vuelve a la fila ni se reenvía", async () => {
+  const m = mundo();
+  m.videos.guardarEnvio = async () => {
+    throw new Error("Firestore caído");
+  };
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  for (const min of [1, 10, 20, 40]) {
+    m.estado.now = AHORA + min * MIN;
+    await despachar(m.deps);
+  }
+  const t = m.videos.todos()[0];
+  assert.equal(t.estado, "enviado");
+  assert.equal(t.intentos, 0);
+  assert.equal(m.enviados.length, 1);
+  assert.equal(await m.videos.getGasto(HOY), COSTO);
+  // El aviso de fal sí lo termina
+  assert.deepEqual(await m.aviso(0, m.OK), { status: 200 });
+  assert.equal(m.videos.todos()[0].estado, "listo");
+});
+
+test("fal rechaza con 429 o 5xx sin recibirlo: también es dudoso (no se reenvía)", async () => {
+  const m = mundo();
+  m.deps.fal = { ...m.deps.fal!, enviar: async () => { throw new Error("fal.ai no aceptó el trabajo (429): demasiados pedidos a la vez en fal.ai"); } };
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  await despachar(m.deps);
+  const t = m.videos.todos()[0];
+  assert.equal(t.estado, "enviado");
+  assert.equal(t.intentos, 0);
 });
 
 test("tope del día: el trabajo se queda en fila y sale al día siguiente", async () => {
@@ -640,7 +731,7 @@ test("un fallo guarda su motivo en el trabajo (para verlo en el panel de adminis
   m2.estado.falFalla = true;
   await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m2.deps);
   await despachar(m2.deps);
-  assert.match(m2.videos.todos()[0].error ?? "", /fal\.ai no aceptó el trabajo \(500\)/);
+  assert.match(m2.videos.todos()[0].error ?? "", /fal\.ai no aceptó el trabajo \(422\)/);
 });
 
 test("resumenVideo: solo administrador; da el gasto de hoy, el tope y los últimos fallos con su motivo", async () => {
