@@ -622,7 +622,8 @@ export async function procesarAviso(url: URL, headers: Headers, cuerpo: string, 
 // Estado de las tomas de un video, para quien es del negocio. Se consulta cada 10-30 s mientras se
 // espera: cada lectura de Firestore cuenta (el plan gratis se comparte con NOVA). Normalmente lee el
 // usuario, la configuración y las tomas; la fila y el gasto solo si alguna espera turno. Solo empuja la
-// fila si una de mis tomas lleva demasiado sin aviso, y como mucho una vez por minuto entre todos.
+// fila si una de mis tomas lleva demasiado sin aviso, o espera turno hace más de un minuto y hoy hay cupo;
+// y como mucho una vez por minuto entre todos.
 const CANDADO_CONSULTA = "despacho_consulta";
 const MS_CONSULTA = 60_000;
 const MAX_LUGAR = 50;
@@ -645,9 +646,18 @@ export async function consultar(
   const enFila = mios.some((t) => t.estado === "en_fila");
   const generando = mios.some((t) => t.estado === "enviado");
   const cfg = enFila || generando ? await m.store.getConfig() : null;
-  if (cfg && generando) {
+  // Primero el tope de hoy (si alguna espera turno): decide si vale la pena empujar la fila
+  let topeHoy = false;
+  if (cfg && enFila) {
+    const gasto = await m.videos.getGasto(diaChicago(m.ahora));
+    topeHoy = mios.some((t) => t.estado === "en_fila" && gasto + costoTomaCentavos(cfg, t.nivel) > topeDe(cfg, t.prioridad));
+  }
+  if (cfg) {
     const viejo = m.ahora - cfg.videoIa.minutosAtorado * 60_000;
-    if (mios.some((t) => t.estado === "enviado" && (t.enviado ?? t.actualizado) <= viejo)) {
+    const atorada = mios.some((t) => t.estado === "enviado" && (t.enviado ?? t.actualizado) <= viejo);
+    // Una que espera turno hace más de un minuto con cupo hoy: sin respaldo (versión de prueba) nadie más la empuja
+    const esperando = !topeHoy && mios.some((t) => t.estado === "en_fila" && t.actualizado <= m.ahora - MS_CONSULTA);
+    if (atorada || esperando) {
       try {
         // Este candado no se suelta: vence solo al minuto, así frena a todos los servidores
         if (await m.videos.tomarCandado(CANDADO_CONSULTA, MS_CONSULTA, m.ahora)) await despacharCon(m, cfg);
@@ -658,11 +668,6 @@ export async function consultar(
     }
   }
   const fila = enFila ? await m.videos.trabajosEnFila(MAX_LUGAR) : [];
-  let topeHoy = false;
-  if (cfg && enFila) {
-    const gasto = await m.videos.getGasto(diaChicago(m.ahora));
-    topeHoy = mios.some((t) => t.estado === "en_fila" && gasto + costoTomaCentavos(cfg, t.nivel) > topeDe(cfg, t.prioridad));
-  }
   const trabajos = mios.map((t): TrabajoPublico => {
     const r: TrabajoPublico = { id: t.id, estado: t.estado };
     if (t.estado === "en_fila") r.lugar = fila.findIndex((f) => f.id === t.id) + 1 || fila.length + 1;

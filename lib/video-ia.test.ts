@@ -805,20 +805,51 @@ test("una consulta con la toma generándose: solo lee el usuario, la configuraci
   assert.deepEqual(st.veces, { getUsuario: 1, getConfig: 1 });
 });
 
-test("una consulta con la toma en fila: no despacha; lee la fila y el gasto UNA vez", async () => {
-  // Fila llena por el tope del día
+test("una consulta con la toma en fila por el tope de hoy: no despacha; lee la fila y el gasto UNA vez", async () => {
   const m = mundo({}, { gasto: { [HOY]: 500 } });
   const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
   assert.ok(r.ok && r.trabajos[0].estado === "en_fila");
-  // Aunque se libere el tope, consultar no empuja la fila (eso lo hacen crear, el aviso y el respaldo)
-  m.estado.now = AHORA + 24 * 60 * MIN;
+  m.estado.now = AHORA + 5 * MIN;
   const v = contar(m.videos);
   const st = contar(m.store);
   const c = await consultar("u1", [r.ok ? r.trabajos[0].id : ""], { ...m.deps, now: m.estado.now, videos: v.vigilado, store: st.vigilado });
-  assert.ok(c.ok && c.trabajos[0].estado === "en_fila" && c.trabajos[0].lugar === 1);
+  assert.ok(c.ok && c.topeHoy && c.trabajos[0].estado === "en_fila" && c.trabajos[0].lugar === 1);
   assert.deepEqual(v.veces, { listarTrabajos: 1, trabajosEnFila: 1, getGasto: 1 });
   assert.deepEqual(st.veces, { getUsuario: 1, getConfig: 1 });
   assert.equal(m.enviados.length, 0);
+});
+
+test("una consulta con la toma en fila hace más de 1 min y con cupo: empuja la fila (una vez por minuto)", async () => {
+  // Ayer se quedó en fila por el tope; hoy hay cupo, pero nadie crea ni llega un aviso (versión de prueba)
+  const AYER = AHORA - 24 * 60 * MIN;
+  const m = mundo({}, { gasto: { "2026-11-09": 500 } });
+  m.estado.now = AYER;
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }, { imagenKey: foto("b"), movimiento: "" }] }, m.deps);
+  assert.ok(r.ok);
+  const ids = r.ok ? r.trabajos.map((t) => t.id) : [];
+  m.estado.now = AHORA;
+  const c = await consultar("u1", [ids[0]], m.deps);
+  assert.ok(c.ok && !c.topeHoy);
+  assert.equal(m.enviados.length, 2); // salieron las dos (el despacho atiende toda la fila)
+  // Un segundo pedido que entra en fila (sin lugar libre) y se consulta: no empuja antes del minuto
+  const v = contar(m.videos);
+  await consultar("u1", [ids[1]], { ...m.deps, now: AHORA + 30_000, videos: v.vigilado });
+  assert.equal(v.veces.tomarCandado, undefined);
+});
+
+test("una consulta con la toma recién puesta en fila (menos de 1 min) no empuja la fila", async () => {
+  const m = mundo();
+  m.estado.falFalla = true; // se rechaza: vuelve a la fila al momento
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  assert.ok(r.ok && r.trabajos[0].estado === "en_fila");
+  m.estado.falFalla = false;
+  const v = contar(m.videos);
+  await consultar("u1", [r.ok ? r.trabajos[0].id : ""], { ...m.deps, now: AHORA + 30_000, videos: v.vigilado });
+  assert.equal(v.veces.tomarCandado, undefined);
+  assert.equal(m.enviados.length, 0);
+  await consultar("u1", [r.ok ? r.trabajos[0].id : ""], { ...m.deps, now: AHORA + 61_000, videos: v.vigilado });
+  assert.equal(v.veces.tomarCandado, 2); // el del minuto (no se suelta) y el del despacho
+  assert.equal(m.enviados.length, 1);
 });
 
 test("una consulta con una toma atorada empuja la fila, pero como mucho una vez por minuto (entre servidores)", async () => {

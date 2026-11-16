@@ -12,9 +12,17 @@ export type FaseVideo =
 export const terminado = (trabajos: readonly TrabajoVisto[]) =>
   trabajos.length > 0 && trabajos.every((t) => t.estado === "listo" || t.estado === "fallo");
 
-// Cada cuánto consultar mientras se espera (cada consulta lee Firestore): 10 s si alguna toma se está
-// generando; 30 s si solo esperan turno en la fila.
-export const esperaConsulta = (trabajos: readonly TrabajoVisto[]) => (trabajos.some((t) => t.estado === "enviado") ? 10_000 : 30_000);
+// Cuándo volver a consultar mientras se espera (null = dejar de esperar; las tomas siguen en camino).
+// - Sin cupo hoy y nada generándose: cada 10 min, sin rendirse (salen al día siguiente).
+// - Hasta el límite duro de 45 min (cuando el servidor resuelve una toma atorada): 10 s mientras se genera
+//   en los primeros 20 min, luego 30 s; 30 s si solo espera en fila.
+const MIN = 60_000;
+export function siguienteEspera(trabajos: readonly TrabajoVisto[], topeHoy: boolean, transcurridoMs: number): number | null {
+  const generando = trabajos.some((t) => t.estado === "enviado");
+  if (topeHoy && !generando) return 10 * MIN;
+  if (transcurridoMs > 46 * MIN) return null;
+  return generando && transcurridoMs < 20 * MIN ? 10_000 : 30_000;
+}
 
 export function textoEstado(f: FaseVideo): string {
   if (f.tipo === "subiendo") return `Subiendo… ${Math.max(0, Math.min(100, Math.round(f.pct)))}%`;

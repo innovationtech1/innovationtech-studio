@@ -74,7 +74,7 @@ import {
   type Pendiente,
   type Resultado,
 } from "@/lib/director";
-import { esperaConsulta, terminado, textoEstado, type TrabajoVisto } from "@/lib/estados-video";
+import { siguienteEspera, terminado, textoEstado, type TrabajoVisto } from "@/lib/estados-video";
 import { consultarTomas, pedirTomas, prepararFoto, subirFoto } from "@/lib/video-ia-cliente";
 
 import { Clapperboard, Dices, Download, Eye, Mic, Play, Redo2, Sparkles, Square, Undo2, Video } from "lucide-react";
@@ -83,7 +83,6 @@ import { Clapperboard, Dices, Download, Eye, Mic, Play, Redo2, Sparkles, Square,
 
 // Tomas con IA que siguen en proceso (se guardan para retomarlas sin pedirlas ni descontarlas otra vez)
 type TomasPendientes = { ids: string[]; firma: string } | null;
-const MAX_ESPERA = 20 * 60 * 1000;
 
 // Los 4 clips vacíos con los que se empieza (ids fijos: igual en el servidor y en el navegador)
 const clipsIniciales = (): Clip[] => Array.from({ length: 4 }, (_, i) => nuevoClip({ id: `inicial-${i}` }));
@@ -772,9 +771,11 @@ export default function ReelStudio({
       const texto = textoEstado({ tipo: "trabajos", trabajos: r.vistos, topeHoy: r.topeHoy });
       pinta(texto);
       if (terminado(r.vistos)) return { vistos: r.vistos, enProceso: false, texto };
-      const hayCupo = !(r.topeHoy && !r.vistos.some((t) => t.estado === "enviado"));
-      if (!hayCupo || Date.now() - inicio > MAX_ESPERA) return { vistos: r.vistos, enProceso: true, texto: hayCupo ? "" : texto };
-      await new Promise((res) => setTimeout(res, esperaConsulta(r.vistos)));
+      // Sin cupo hoy se deja el aviso de «mañana» a la vista y se consulta cada 10 min (sale al día siguiente);
+      // si no, se espera hasta el límite duro del servidor (45 min) para que resuelva una toma atorada.
+      const espera = siguienteEspera(r.vistos, r.topeHoy, Date.now() - inicio);
+      if (espera === null) return { vistos: r.vistos, enProceso: true, texto: "" };
+      await new Promise((res) => setTimeout(res, espera));
     }
   }
 
