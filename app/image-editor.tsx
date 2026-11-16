@@ -48,6 +48,7 @@ import BgRemover from "./bg-remover";
 import ShapeCrop from "./shape-crop";
 import { toDataUrl } from "@/lib/media-store";
 import { aArchivo, compartirArchivos, descargarArchivo } from "@/lib/compartir";
+import CompartirBotones from "./compartir-botones";
 
 import { AlignCenter, AlignCenterHorizontal, AlignCenterVertical, AlignLeft, AlignRight, Aperture, BadgeCheck, BringToFront, Check, ChevronDown, ChevronUp, Download, Eraser, Eye, EyeOff, FlipHorizontal2, FlipVertical2, FolderOpen, Frame, ImagePlus, Layers, LayoutTemplate, Lock, LockOpen, Ratio, Redo2, Save, Scissors, SendToBack, Shapes, Share2, SlidersHorizontal, Sparkles, Square, Tag, Trash2, Type, type LucideIcon, Undo2 } from "lucide-react";
 type Tool = "plantillas" | "marca" | "ajustes" | "filtros" | "texto" | "stickers" | "formas" | "imagen" | "marco" | "capas";
@@ -1367,6 +1368,7 @@ export default function ImageEditor({
             <Share2 size={16} aria-hidden /> Compartir
           </button>
         )}
+        <CompartirBotones soloDrive src={exportImage} nombre={`innovationtech-diseno.${outFmt}`} />
         <button className="btn ghost" onClick={saveGallery}>
           <Save size={16} aria-hidden /> Guardar en galería
         </button>

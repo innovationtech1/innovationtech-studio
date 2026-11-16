@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { Brand, brandAccent, brandContext, brandVisual, emptyBrand, normalizeBrand, textOn } from "@/lib/brand";
 import { FONTS } from "@/lib/editor-model";
@@ -1192,6 +1192,13 @@ function Gallery({
   const [filter, setFilter] = useState<"todo" | "imagen" | "video">("todo");
   const [usage, setUsage] = useState<{ used: number; quota: number } | null>(null);
   const [open, setOpen] = useState<Item | null>(null);
+  // Cerrar la vista en grande cancela una subida a Drive en curso: se pregunta antes.
+  const subiendoDrive = useRef(false);
+  const cerrarVista = () => {
+    if (subiendoDrive.current && !confirm("La subida a Drive sigue en curso. ¿Cancelarla?")) return false;
+    setOpen(null);
+    return true;
+  };
 
   useEffect(() => {
     if (visible) storageUsage().then(setUsage);
@@ -1285,21 +1292,26 @@ function Gallery({
       )}
 
       {open && (
-        <div className="lightbox" onClick={() => setOpen(null)}>
+        <div className="lightbox" onClick={cerrarVista}>
           <div className="lightbox-inner" onClick={(e) => e.stopPropagation()}>
             {open.kind === "imagen" ? <img src={open.url} alt={open.prompt} /> : <video src={open.url} controls autoPlay playsInline />}
             <p className="muted">{open.prompt}</p>
             <div className="actions">
               {open.kind === "imagen" && (
-                <button className="btn small" onClick={() => (onEdit(open.url), setOpen(null))}>
+                <button className="btn small" onClick={() => cerrarVista() && onEdit(open.url)}>
                   <Pencil size={16} aria-hidden /> Editar
                 </button>
               )}
               <a className="btn ghost small" href={open.url} download={`innovationtech-${open.kind}.${ext(open)}`}>
                 <Download size={16} aria-hidden /> Descargar
               </a>
-              <CompartirBotones key={open.url} src={open.url} nombre={`innovationtech-${open.kind}.${ext(open)}`} />
-              <button className="btn ghost small" onClick={() => setOpen(null)}>
+              <CompartirBotones
+                key={open.url}
+                src={open.url}
+                nombre={`innovationtech-${open.kind}.${ext(open)}`}
+                alSubir={(activo) => (subiendoDrive.current = activo)}
+              />
+              <button className="btn ghost small" onClick={cerrarVista}>
                 Cerrar
               </button>
             </div>

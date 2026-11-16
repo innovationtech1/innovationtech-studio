@@ -191,6 +191,7 @@ export const EN: Record<string, string> = {
   "Todavía no hay imagen para compartir.": "There is no image to share yet.",
   "Guardar en Drive": "Save to Drive",
   "Guardado en Drive": "Saved to Drive",
+  "La subida a Drive sigue en curso. ¿Cancelarla?": "The upload to Drive is still in progress. Cancel it?",
   "Abrir en Drive": "Open in Drive",
   "Reintentar": "Retry",
   "Abre Studio en Chrome o Safari para guardar en Google Drive.": "Open Studio in Chrome or Safari to save to Google Drive.",

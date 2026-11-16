@@ -52,6 +52,8 @@ function mensajeDe(e: unknown): string {
 // lo descarga y lo explica. Drive sube el archivo directo del aparato al Google Drive de la persona.
 // Si el archivo no se deja leer (p. ej. un enlace remoto protegido), los botones se ocultan y queda
 // solo «Descargar». `src` puede ser una función cuando el archivo se arma en el momento del toque.
+// `soloDrive`: solo el botón de Drive (donde ya hay un «Compartir» propio, como el editor de imágenes).
+// `alSubir`: avisa si hay una subida a Drive en curso (para preguntar antes de cerrar la vista).
 // El archivo se prepara antes del toque: Safari (iPhone) pierde el permiso de compartir o de abrir
 // la ventana de Google si se espera una descarga entre el toque y esa acción.
 export default function CompartirBotones({
@@ -59,11 +61,15 @@ export default function CompartirBotones({
   nombre,
   texto,
   compacto,
+  soloDrive,
+  alSubir,
 }: {
   src: Fuente | (() => Fuente | null);
   nombre: string;
   texto?: string;
   compacto?: boolean;
+  soloDrive?: boolean;
+  alSubir?: (activo: boolean) => void;
 }) {
   const [preparando, setPreparando] = useState(false);
   const [oculto, setOculto] = useState(false);
@@ -76,6 +82,8 @@ export default function CompartirBotones({
   const subiendo = useRef(false);
   const cancelar = useRef<AbortController | null>(null);
   const previo = useRef<Promise<File | null> | null>(null);
+  const avisarSubida = useRef(alSubir);
+  avisarSubida.current = alSubir;
 
   const fija = typeof src === "function" ? null : src;
 
@@ -188,6 +196,7 @@ export default function CompartirBotones({
     cancelar.current = control;
     setAviso("");
     setDrive({ fase: "subiendo", pct: 0 });
+    avisarSubida.current?.(true);
     void subir(fuente, primerToken, control);
   }
 
@@ -218,6 +227,7 @@ export default function CompartirBotones({
     } finally {
       if (cancelar.current === control) cancelar.current = null;
       subiendo.current = false;
+      avisarSubida.current?.(false);
     }
   }
 
@@ -230,7 +240,7 @@ export default function CompartirBotones({
 
   return (
     <span className={`compartir${compacto ? " compacto" : ""}`} onPointerEnter={acercar} onFocus={acercar}>
-      {compacto ? (
+      {soloDrive ? null : compacto ? (
         <button type="button" title={etiqueta} aria-label={etiqueta} disabled={preparando} onClick={compartir}>
           <Share2 size={17} aria-hidden />
         </button>
