@@ -211,3 +211,12 @@ test("modeloCloudflare: el elegido en Configuración manda", () => {
   assert.deepEqual(modeloCloudflare("rapida", "@cf/qwen/otro"), { modelo: "@cf/qwen/otro", maxTokens: 1800 });
   assert.deepEqual(modeloCloudflare("creativa", "  "), { modelo: MODELO_CREATIVO, maxTokens: 1800 });
 });
+
+test("instruccionesNova: actúa primero, ajustes sobre la pieza e imágenes solo en piezas creativas", () => {
+  const rapida = instruccionesNova({ english: false, cuenta: null, velocidad: "rapida" });
+  const creativa = instruccionesNova({ english: false, cuenta: null, velocidad: "creativa" });
+  assert.match(rapida, /Nunca hagas listas de preguntas/);
+  assert.match(rapida, /no generes variantes de preguntas/);
+  assert.match(rapida, /no propongas imágenes/);
+  assert.match(creativa, /Solo cuando escribas una pieza de marketing/);
+});

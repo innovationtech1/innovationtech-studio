@@ -23,9 +23,9 @@ export async function POST(req: Request) {
   // (Una cuenta falsificada solo engaña a quien la manda: los límites reales los revisa requireAccess.)
   const cuentasOn = cuentasActivas();
   const cuenta = cuentasOn ? limpiarCuenta(nova?.cuenta) : null;
-  const system = instruccionesNova({ english, marca: limpiarMarca(brand), cuenta, cuentasOn });
   const atajo = typeof nova?.atajo === "string" ? nova.atajo : undefined;
   const velocidad = elegirVelocidad(history[history.length - 1].content, atajo);
+  const system = instruccionesNova({ english, marca: limpiarMarca(brand), cuenta, cuentasOn, velocidad });
 
   // Guardián: sesión, plan y límite diario, antes de llamar a cualquier proveedor.
   const acceso = await requireAccess(req, {
