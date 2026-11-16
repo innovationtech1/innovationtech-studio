@@ -45,13 +45,13 @@ export async function POST(req: Request) {
   const token = process.env.CF_API_TOKEN;
   if (!accountId || !token) return error("NOVA no está disponible en este momento.", 503);
 
-  const system = instruccionesTortas({ english: platica.english, hoy: hoyEnSanAntonio() });
+  const system = instruccionesTortas({ english: platica.english, hoy: hoyEnSanAntonio(), contexto: platica.contexto });
   let res: Response;
   try {
     res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${MODELO_CREATIVO}`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: [{ role: "system", content: system }, ...platica.history], max_tokens: 300, temperature: 0.3, stream: true }),
+      body: JSON.stringify({ messages: [{ role: "system", content: system }, ...platica.history], max_tokens: 400, temperature: 0.3, stream: true }),
       signal: AbortSignal.timeout(TIEMPO_MAXIMO_MS),
     });
   } catch {

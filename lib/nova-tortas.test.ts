@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { FICHAS_TORTAS, MAX_LETRAS_MENSAJE, MAX_MENSAJES, instruccionesTortas, origenPermitido, validarPlatica } from "./nova-tortas";
+import { FICHAS_TORTAS, MAX_CONTEXTO, MAX_LETRAS_MENSAJE, MAX_MENSAJES, instruccionesTortas, limpiarContexto, origenPermitido, validarPlatica } from "./nova-tortas";
 
 // ---------- origenPermitido ----------
 
@@ -70,4 +70,31 @@ test("instruccionesTortas: lleva la persona, las reglas, el día y todas las fic
   assert.ok(/nunca inventes/i.test(s));
   assert.ok(s.includes("español"));
   assert.ok(instruccionesTortas({ english: true, hoy: "x" }).includes("English"));
+});
+
+// ---------- contexto de la app (menú, zonas, días, horas) ----------
+
+test("limpiarContexto: sin menú o basura → null; recorta y quita caracteres de control", () => {
+  for (const x of [null, 5, "hola", {}, { menu: 7 }, { menu: "   " }]) assert.equal(limpiarContexto(x), null);
+  const c = limpiarContexto({ menu: "a | A | 1) X $5\u0000\u0007\nb | B | 1) Y $6" + "z".repeat(9000), zonas: 9, fechas: "2026-11-21 = Sáb", horas: "x".repeat(900) });
+  assert.ok(c);
+  if (c) {
+    assert.equal(c.menu.length, MAX_CONTEXTO.menu);
+    assert.ok(c.menu.startsWith("a | A | 1) X $5\nb | B"));
+    assert.equal(c.zonas, "");
+    assert.equal(c.horas.length, MAX_CONTEXTO.horas);
+  }
+});
+
+test("validarPlatica + instruccionesTortas: con contexto llevan el menú de la app y el formato PEDIDO; sin él no", () => {
+  const contexto = { menu: "kids | 7. Kids Tortuga | 1) COMBO $9", zonas: "converse = Converse", fechas: "2026-11-21 = Sáb 21 nov", horas: "cada 30 min de 10:00 a 17:30" };
+  const r = validarPlatica({ messages: [{ role: "user", content: "dos kids" }], contexto });
+  assert.ok(r.ok);
+  if (r.ok) {
+    const s = instruccionesTortas({ english: false, hoy: "x", contexto: r.contexto });
+    assert.ok(s.includes("kids | 7. Kids Tortuga | 1) COMBO $9"));
+    assert.ok(s.includes("converse = Converse"));
+    assert.ok(s.includes("PEDIDO:"));
+  }
+  assert.ok(!instruccionesTortas({ english: false, hoy: "x" }).includes("PEDIDO:"));
 });
