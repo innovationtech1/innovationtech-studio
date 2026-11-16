@@ -17,32 +17,64 @@ import {
   Trash2,
   Volume2,
   VolumeX,
+  X,
 } from "lucide-react";
 import { Brand, brandContext } from "@/lib/brand";
 import type { CuentaNova } from "@/lib/nova";
 import { friendlyError } from "@/lib/errors";
 import { getLang, tr } from "@/lib/i18n";
 import { usePersistentState } from "@/lib/persist";
-import { extract, phrases } from "@/lib/phrases";
+import { phrases } from "@/lib/phrases";
+import {
+  SUGERENCIAS,
+  debeSugerir,
+  ideasDeImagen,
+  siguienteSugerencia,
+  sinIdeasDeImagen,
+  type Sugerencia,
+} from "@/lib/nova-sugerencias";
 import type { Settings } from "@/lib/types";
 import { useCuenta, type ValorCuenta } from "./account-context";
 import MicButton from "./mic-button";
+import NovaAvatar, { type EstadoNova } from "./nova-avatar";
 
-// Asistente de marketing en forma de conversación (como un chat con Claude):
+// NOVA, la asistente de Studio, en forma de conversación (como un chat con Claude):
 // recuerda lo que se habló, responde en tiempo real, se le pueden pedir cambios
-// con un toque y se le puede hablar con el micrófono.
+// con un toque, se le puede hablar con el micrófono y, si el cliente se queda quieto,
+// le sugiere algo (de una lista local, sin gastar IA).
 
 type Msg = { role: "user" | "assistant"; content: string };
 type Chat = { id: string; title: string; messages: Msg[]; updated: number };
 
-const SUGGESTIONS = [
-  "Escribe un post para Instagram que promocione mi negocio esta semana",
-  "Dame 5 ideas de contenido para mis redes de esta semana",
-  "Crea el guion de un reel de 30 segundos para mi producto estrella",
-  "Escribe la descripción para mi perfil de Instagram",
-  "Ayúdame a responder con amabilidad a un cliente molesto",
-  "Escribe un anuncio corto para Facebook con llamada a la acción",
+// Los 4 atajos de inicio. id = el atajo que recibe /api/chat para elegir el modelo (lib/nova.ts).
+const ATAJOS = [
+  {
+    id: "comercial",
+    texto: "Crear un comercial",
+    mensaje: "Quiero crear un comercial. Pregúntame lo que necesites saber (mi negocio, el producto y la red social) y después escríbelo.",
+  },
+  { id: "ideas", texto: "Ideas para publicar", mensaje: "Dame ideas para publicar esta semana en las redes de mi negocio." },
+  { id: "studio", texto: "¿Cómo uso Studio?", mensaje: "¿Cómo uso Studio? Explícame paso a paso qué puedo hacer y por dónde empiezo." },
+  { id: "plan", texto: "Mi plan y mis límites", mensaje: "¿Qué plan tengo, cuánto me queda este mes y cuándo se reinicia?" },
 ];
+
+// Ideas sugeridas que ya vio en esta visita (para no repetirlas)
+const VISTAS_KEY = "nova:vistas";
+function leerVistas(): string[] {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(VISTAS_KEY) || "[]");
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+function guardarVistas(v: string[]) {
+  try {
+    sessionStorage.setItem(VISTAS_KEY, JSON.stringify(v));
+  } catch {
+    /* sin almacenamiento */
+  }
+}
 
 const QUICK = [
   "Hazlo más corto",
@@ -74,7 +106,7 @@ function cuentaParaNova({ activo, cuenta }: ValorCuenta): CuentaNova | null {
   };
 }
 
-const stripPrompt = (t: string) => t.replace(/\n?\**PROMPT DE IMAGEN:?\**.*$/im, "").trim();
+const stripPrompt = sinIdeasDeImagen;
 
 export default function AssistantChat({
   settings,
@@ -98,9 +130,13 @@ export default function AssistantChat({
   const [speaking, setSpeaking] = useState<number | null>(null);
   const [copied, setCopied] = useState<number | null>(null);
   const [picker, setPicker] = useState<number | null>(null);
+  const [sugerencia, setSugerencia] = useState<Sugerencia | null>(null);
   const abort = useRef<AbortController | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
+  const ultimaActividad = useRef(Date.now());
+  const ultimaSugerencia = useRef(0);
 
   const chat = chats.find((c) => c.id === currentId) || null;
   const messages = useMemo(() => chat?.messages || [], [chat]);
@@ -113,6 +149,47 @@ export default function AssistantChat({
   }, [messages]);
   // Detener la lectura en voz alta al salir
   useEffect(() => () => window.speechSynthesis?.cancel(), []);
+
+  // Lo último de la pantalla, para revisarlo cada 5 s sin reiniciar el reloj en cada cambio
+  const ahora = useRef({ streaming, input, interim, sugerencia, cuenta: cuentaParaNova(valorCuenta), marca: brand.name || "" });
+  useEffect(() => {
+    ahora.current = { streaming, input, interim, sugerencia, cuenta: cuentaParaNova(valorCuenta), marca: brand.name || "" };
+  });
+
+  // Sugerencias cuando el cliente lleva 45 s sin hacer nada con NOVA a la vista (máx. 1 cada 3 min)
+  useEffect(() => {
+    const actividad = () => (ultimaActividad.current = Date.now());
+    const eventos = ["keydown", "pointerdown", "scroll"] as const;
+    for (const e of eventos) window.addEventListener(e, actividad, { passive: true, capture: true });
+    const reloj = window.setInterval(() => {
+      const a = ahora.current;
+      if (a.sugerencia) return;
+      const t = Date.now();
+      const visible = document.visibilityState === "visible" && !!sectionRef.current && sectionRef.current.offsetParent !== null;
+      const ok = debeSugerir({
+        inactivoMs: t - ultimaActividad.current,
+        desdeUltimaMs: t - ultimaSugerencia.current,
+        escribiendo: !!a.interim,
+        transmitiendo: a.streaming,
+        visible,
+        textoEnCaja: !!a.input.trim(),
+      });
+      if (!ok) return;
+      const lista = SUGERENCIAS(a.cuenta, a.marca);
+      const vistas = leerVistas();
+      const s = siguienteSugerencia(lista, vistas);
+      if (!s) return;
+      // si ya las vio todas, se vuelve a empezar la cuenta
+      const todas = lista.every((x) => vistas.includes(x.id));
+      guardarVistas(todas ? [s.id] : [...vistas, s.id]);
+      ultimaSugerencia.current = t;
+      setSugerencia(s);
+    }, 5000);
+    return () => {
+      window.clearInterval(reloj);
+      for (const e of eventos) window.removeEventListener(e, actividad, { capture: true });
+    };
+  }, []);
 
   const saveMessages = (id: string, msgs: Msg[], title?: string) =>
     setChats((all) => {
@@ -127,6 +204,8 @@ export default function AssistantChat({
   async function send(text: string, base?: Msg[], atajo?: string) {
     const content = text.trim();
     if (!content || streaming) return;
+    ultimaActividad.current = Date.now();
+    setSugerencia(null);
     setError("");
     setPicker(null);
     const id = currentId && chat ? currentId : newId();
@@ -221,11 +300,22 @@ export default function AssistantChat({
   };
 
   const lastAssistant = messages.length && messages[messages.length - 1].role === "assistant" ? messages.length - 1 : -1;
+  // pensando: esperando la primera letra; hablando: llegando la respuesta; aviso: trae una sugerencia
+  const esperando = streaming && !(messages[messages.length - 1]?.content);
+  const estadoNova: EstadoNova = esperando ? "pensando" : streaming ? "hablando" : sugerencia ? "aviso" : "quieta";
 
   return (
-    <section className="card chat-card">
-      <div className="card-head">
-        <h2>Asistente</h2>
+    <section className="card chat-card" ref={sectionRef}>
+      <div className="card-head nova-head">
+        <div className="nova-id">
+          <NovaAvatar estado={estadoNova} tamano={44} />
+          <div>
+            <h2>NOVA</h2>
+            <p className="nova-online">
+              <span className="nova-dot" aria-hidden /> En línea · tu asistente de Studio
+            </p>
+          </div>
+        </div>
         <div className="actions">
           <button className="btn ghost small" onClick={() => setShowHistory((v) => !v)} aria-expanded={showHistory}>
             <History size={16} aria-hidden /> Conversaciones
@@ -235,6 +325,20 @@ export default function AssistantChat({
           </button>
         </div>
       </div>
+
+      {sugerencia && (
+        <div className="nova-burbuja" role="status">
+          <p>{sugerencia.texto}</p>
+          <div className="nova-burbuja-acciones">
+            <button className="btn small" onClick={() => send(tr(sugerencia.mensaje))}>
+              Hazlo
+            </button>
+            <button className="icon-only" onClick={() => setSugerencia(null)} title="Cerrar sugerencia" aria-label="Cerrar sugerencia">
+              <X size={16} aria-hidden />
+            </button>
+          </div>
+        </div>
+      )}
 
       {showHistory && (
         <div className="chat-history">
@@ -264,12 +368,12 @@ export default function AssistantChat({
       <div className="chat-list" ref={listRef} aria-live="polite">
         {messages.length === 0 ? (
           <div className="chat-empty">
-            <p className="chat-hello">{`Hola${brand.name ? `, equipo de ${brand.name}` : ""}. ¿Qué contenido creamos hoy?`}</p>
-            <p className="muted">Escribe o toca el micrófono para hablar. Puedes pedirme cambios cuantas veces quieras.</p>
-            <div className="chat-suggestions">
-              {SUGGESTIONS.map((s) => (
-                <button key={s} onClick={() => send(tr(s))}>
-                  {s}
+            <p className="chat-hello">{brand.name ? `Hola, ${brand.name}. ¿Qué creamos hoy?` : "Hola. ¿Qué creamos hoy?"}</p>
+            <p className="muted">Soy NOVA. Te ayudo con textos, ideas y con cómo usar Studio. Escribe o toca el micrófono para hablar.</p>
+            <div className="chat-suggestions nova-atajos">
+              {ATAJOS.map((a) => (
+                <button key={a.id} onClick={() => send(tr(a.mensaje), undefined, a.id)}>
+                  {a.texto}
                 </button>
               ))}
             </div>
@@ -307,16 +411,24 @@ export default function AssistantChat({
                     <button onClick={() => setPicker(picker === i ? null : i)}>
                       <PenLine size={15} aria-hidden /> Llevar al editor
                     </button>
-                    {extract(m.content, "PROMPT DE IMAGEN") && (
-                      <button onClick={() => onImage(extract(m.content, "PROMPT DE IMAGEN"))}>
-                        <ImagePlus size={15} aria-hidden /> Crear la imagen
-                      </button>
-                    )}
                     {i === lastAssistant && (
                       <button onClick={regenerate}>
                         <RefreshCw size={15} aria-hidden /> Otra respuesta
                       </button>
                     )}
+                  </div>
+                )}
+                {m.content && !(streaming && i === messages.length - 1) && ideasDeImagen(m.content).length > 0 && (
+                  <div className="nova-ideas">
+                    <p className="muted">Ideas de imagen</p>
+                    {ideasDeImagen(m.content).map((idea, k) => (
+                      <div key={k} className="nova-idea">
+                        <span data-no-translate>{idea}</span>
+                        <button onClick={() => onImage(idea)}>
+                          <ImagePlus size={15} aria-hidden /> Crear esta imagen
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 )}
                 {picker === i && (
