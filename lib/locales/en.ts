@@ -1054,6 +1054,8 @@ export const EN: Record<string, string> = {
   "Los videos con IA están en pausa por ahora. Puedes generar el video con animación.": "AI videos are paused for now. You can generate the video with animation.",
   "Falta configurar el almacenamiento de videos. Avísale a InnovationTECH.": "Video storage isn't set up yet. Let InnovationTECH know.",
   "Esa foto no es de tu cuenta. Súbela de nuevo.": "That photo isn't from your account. Upload it again.",
+  "Vuelve a revisar mañana.": "Check again tomorrow.",
+  "Revisar otra vez": "Check again",
   "Tus tomas con IA ya están listas. Toca «Generar con IA» para grabar tu video.": "Your AI takes are ready. Tap «Generate with AI» to record your video.",
   "Esa foto se subió durante tu prueba gratis. Súbela de nuevo.": "That photo was uploaded during your free trial. Upload it again.",
   "Elige de 1 a 4 fotos para las tomas con IA.": "Choose 1 to 4 photos for the AI shots.",

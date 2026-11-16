@@ -13,13 +13,14 @@ export const terminado = (trabajos: readonly TrabajoVisto[]) =>
   trabajos.length > 0 && trabajos.every((t) => t.estado === "listo" || t.estado === "fallo");
 
 // Cuándo volver a consultar mientras se espera (null = dejar de esperar; las tomas siguen en camino).
-// - Sin cupo hoy y nada generándose: cada 10 min, sin rendirse (salen al día siguiente).
+// - Sin cupo hoy y nada generándose: cada 30 min (cada consulta lee Firestore); a las 24 h se deja
+//   (transcurridoMs = desde que se empezó a esperar el cupo).
 // - Hasta el límite duro de 45 min (cuando el servidor resuelve una toma atorada): 10 s mientras se genera
 //   en los primeros 20 min, luego 30 s; 30 s si solo espera en fila.
 const MIN = 60_000;
 export function siguienteEspera(trabajos: readonly TrabajoVisto[], topeHoy: boolean, transcurridoMs: number): number | null {
   const generando = trabajos.some((t) => t.estado === "enviado");
-  if (topeHoy && !generando) return 10 * MIN;
+  if (topeHoy && !generando) return transcurridoMs > 24 * 60 * MIN ? null : 30 * MIN;
   if (transcurridoMs > 46 * MIN) return null;
   return generando && transcurridoMs < 20 * MIN ? 10_000 : 30_000;
 }

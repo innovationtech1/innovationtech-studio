@@ -657,7 +657,8 @@ export async function consultar(
     const atorada = mios.some((t) => t.estado === "enviado" && (t.enviado ?? t.actualizado) <= viejo);
     // Una que espera turno hace más de un minuto con cupo hoy: sin respaldo (versión de prueba) nadie más la empuja
     const esperando = !topeHoy && mios.some((t) => t.estado === "en_fila" && t.actualizado <= m.ahora - MS_CONSULTA);
-    if (atorada || esperando) {
+    // Al tope de hoy no se empuja nada desde aquí (sale mañana; el respaldo y los avisos siguen)
+    if (!topeHoy && (atorada || esperando)) {
       try {
         // Este candado no se suelta: vence solo al minuto, así frena a todos los servidores
         if (await m.videos.tomarCandado(CANDADO_CONSULTA, MS_CONSULTA, m.ahora)) await despacharCon(m, cfg);
@@ -667,10 +668,11 @@ export async function consultar(
       // Lo que cambió se ve en la siguiente consulta (no se vuelven a leer mis tomas)
     }
   }
-  const fila = enFila ? await m.videos.trabajosEnFila(MAX_LUGAR) : [];
+  // El lugar en la fila solo si hoy hay cupo (al tope basta con decirlo; leer la fila cuesta)
+  const fila = enFila && !topeHoy ? await m.videos.trabajosEnFila(MAX_LUGAR) : [];
   const trabajos = mios.map((t): TrabajoPublico => {
     const r: TrabajoPublico = { id: t.id, estado: t.estado };
-    if (t.estado === "en_fila") r.lugar = fila.findIndex((f) => f.id === t.id) + 1 || fila.length + 1;
+    if (t.estado === "en_fila" && !topeHoy) r.lugar = fila.findIndex((f) => f.id === t.id) + 1 || fila.length + 1;
     if (t.estado === "listo" && t.clipKey && clipVencido(t.clipKey, t.clipCreado ?? t.actualizado, m.ahora)) r.vencido = true;
     else if (t.estado === "listo" && t.clipKey && m.r2) r.clipUrl = m.r2.firmar("GET", t.clipKey, SEGUNDOS_ENLACE);
     if (t.desdeCache) r.desdeCache = true;

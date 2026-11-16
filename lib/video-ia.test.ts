@@ -507,7 +507,7 @@ test("tope del día: el trabajo se queda en fila y sale al día siguiente", asyn
   assert.equal(m.enviados.length, 0);
   const c = await consultar("u1", [r.ok ? r.trabajos[0].id : ""], m.deps);
   assert.ok(c.ok && c.topeHoy === true);
-  assert.deepEqual(c.ok && c.trabajos, [{ id: r.ok ? r.trabajos[0].id : "", estado: "en_fila", lugar: 1 }]);
+  assert.deepEqual(c.ok && c.trabajos, [{ id: r.ok ? r.trabajos[0].id : "", estado: "en_fila" }]); // al tope no se calcula el lugar
   m.estado.now = AHORA + 24 * 60 * MIN;
   assert.deepEqual(await despachar(m.deps), { enviados: 1 });
   assert.equal(await m.videos.getGasto("2026-11-11"), COSTO);
@@ -742,8 +742,11 @@ test("la misma toma nunca se cobra dos veces: atorada horas y con avisos tarde, 
   assert.equal(await m.videos.getGasto(HOY), COSTO);
 });
 
-test("consultar: solo trabajos del propio negocio, con lugar en la fila; despacha si hay lugar", async () => {
-  const m = mundo({}, { gasto: { [HOY]: 500 } });
+test("consultar: solo trabajos del propio negocio, con lugar en la fila", async () => {
+  // Fila llena por los simultáneos (no por el tope: al tope no se calcula el lugar)
+  const m = mundo();
+  const cfg = await m.store.getConfig();
+  await m.store.guardarConfig({ videoIa: { ...cfg.videoIa, simultaneos: 0 } });
   const mio = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }, { imagenKey: foto("b"), movimiento: "" }] }, m.deps);
   m.estado.now = AHORA + 1000;
   const ajeno = await crearVideo(req("u2"), { tomas: [{ imagenKey: foto("c", "n2"), movimiento: "" }] }, m.deps);
@@ -805,7 +808,7 @@ test("una consulta con la toma generándose: solo lee el usuario, la configuraci
   assert.deepEqual(st.veces, { getUsuario: 1, getConfig: 1 });
 });
 
-test("una consulta con la toma en fila por el tope de hoy: no despacha; lee la fila y el gasto UNA vez", async () => {
+test("una consulta al tope de hoy: no despacha ni lee la fila; solo el gasto (y nada de lugar)", async () => {
   const m = mundo({}, { gasto: { [HOY]: 500 } });
   const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
   assert.ok(r.ok && r.trabajos[0].estado === "en_fila");
@@ -813,8 +816,8 @@ test("una consulta con la toma en fila por el tope de hoy: no despacha; lee la f
   const v = contar(m.videos);
   const st = contar(m.store);
   const c = await consultar("u1", [r.ok ? r.trabajos[0].id : ""], { ...m.deps, now: m.estado.now, videos: v.vigilado, store: st.vigilado });
-  assert.ok(c.ok && c.topeHoy && c.trabajos[0].estado === "en_fila" && c.trabajos[0].lugar === 1);
-  assert.deepEqual(v.veces, { listarTrabajos: 1, trabajosEnFila: 1, getGasto: 1 });
+  assert.ok(c.ok && c.topeHoy && c.trabajos[0].estado === "en_fila" && c.trabajos[0].lugar === undefined);
+  assert.deepEqual(v.veces, { listarTrabajos: 1, getGasto: 1 });
   assert.deepEqual(st.veces, { getUsuario: 1, getConfig: 1 });
   assert.equal(m.enviados.length, 0);
 });
@@ -1293,4 +1296,16 @@ test("si no se puede devolver la toma tras un fallo, queda en el registro (sin s
   for (const e of errores) {
     assert.ok(!e.includes(t.secreto) && !e.includes(m.videos.todos()[0].secreto) && !/https?:\/\//.test(e), e);
   }
+});
+
+test("al tope de hoy, ni una toma atorada hace que la consulta empuje la fila", async () => {
+  const m = mundo({}, { gasto: { [HOY]: 480 } });
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }, { imagenKey: foto("b"), movimiento: "" }] }, m.deps);
+  assert.ok(r.ok);
+  assert.deepEqual(r.ok && r.trabajos.map((t) => t.estado), ["enviado", "en_fila"]); // 480 + 20 = 500; la 2ª ya no cabe
+  const v = contar(m.videos);
+  const c = await consultar("u1", r.ok ? r.trabajos.map((t) => t.id) : [], { ...m.deps, now: AHORA + 20 * MIN, videos: v.vigilado });
+  assert.ok(c.ok && c.topeHoy);
+  assert.equal(v.veces.tomarCandado, undefined);
+  assert.equal(v.veces.trabajosEnFila, undefined);
 });

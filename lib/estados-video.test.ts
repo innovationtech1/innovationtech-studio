@@ -43,7 +43,7 @@ test("firmaTomas: misma foto y movimiento dan la misma firma (para retomar sin c
   assert.notEqual(firmaTomas([{ sha256: "aa", movimiento: "zoom" }]), firmaTomas([{ sha256: "ab", movimiento: "zoom" }]));
 });
 
-test("siguienteEspera: se sigue consultando hasta el límite duro de 45 min, y con el tope de hoy cada 10 min", () => {
+test("siguienteEspera: se sigue consultando hasta el límite duro de 45 min, y con el tope de hoy cada 30 min hasta 24 h", () => {
   const MIN = 60_000;
   const gen = [{ id: "a", estado: "enviado" }] as const;
   const fila = [{ id: "a", estado: "en_fila", lugar: 1 }] as const;
@@ -53,9 +53,10 @@ test("siguienteEspera: se sigue consultando hasta el límite duro de 45 min, y c
   assert.equal(siguienteEspera(gen, false, 47 * MIN), null); // ya se resolvió por atorada o sigue sin aviso: se deja
   assert.equal(siguienteEspera(fila, false, 5 * MIN), 30_000);
   assert.equal(siguienteEspera(fila, false, 47 * MIN), null);
-  // Sin cupo hoy y nada generándose: cada 10 min, sin rendirse (sale al día siguiente)
-  assert.equal(siguienteEspera(fila, true, 5 * MIN), 10 * MIN);
-  assert.equal(siguienteEspera(fila, true, 20 * 60 * MIN), 10 * MIN);
+  // Sin cupo hoy y nada generándose: cada 30 min (cada consulta lee Firestore), y se deja a las 24 h
+  assert.equal(siguienteEspera(fila, true, 5 * MIN), 30 * MIN);
+  assert.equal(siguienteEspera(fila, true, 20 * 60 * MIN), 30 * MIN);
+  assert.equal(siguienteEspera(fila, true, 24 * 60 * MIN + 1), null);
   // Con tope pero una toma generándose: como siempre
   assert.equal(siguienteEspera([...gen, ...fila], true, 5 * MIN), 10_000);
 });
