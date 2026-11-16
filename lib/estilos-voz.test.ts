@@ -143,7 +143,10 @@ function contextoFalso() {
         nodo("compresor", { threshold: param(), knee: param(), ratio: param(), attack: param(), release: param() }),
       createConvolver: () => nodo("eco", { buffer: null }),
       createGain: () => nodo("volumen", { gain: param() }),
-      createBuffer: (c: number, l: number) => ({ numberOfChannels: c, length: l, getChannelData: () => new Float32Array(l) }),
+      createBuffer: (c: number, l: number) => {
+        const d = new Float32Array(l);
+        return { numberOfChannels: c, length: l, getChannelData: () => d };
+      },
       startRendering: async () => ({ getChannelData: () => new Float32Array(largo).fill(0.25), sampleRate: frecuencia, length: largo }),
     } as unknown as OfflineAudioContext;
   };
@@ -188,7 +191,22 @@ test("aplicarEstilo suave: quita agudos, pasa bajos y mezcla el ambiente", async
   assert.ok(!registro.nodos.some((n) => n.tipo === "compresor"));
   const eco = registro.nodos.find((n) => n.tipo === "eco") as { buffer: { length: number } };
   const render = registro.contextos.at(-1)!;
+  assert.equal(render.frecuencia, 24000);
   assert.equal(eco.buffer.length, Math.round(1.2 * render.frecuencia));
+  // la cola del eco se suma para que no se corte al final
+  assert.equal(render.largo, Math.ceil((2 * render.frecuencia) / 0.97) + Math.round(1.2 * render.frecuencia));
   const volumenes = registro.nodos.filter((n) => n.tipo === "volumen") as { gain: { value: number } }[];
   assert.ok(volumenes.some((g) => g.gain.value === 0.18));
+});
+
+test("aplicarEstilo suave: el eco es siempre el mismo (generador con semilla)", async () => {
+  const eco = async () => {
+    const { crear, registro } = contextoFalso();
+    await aplicarEstilo(mp3(), "suave", crear);
+    const n = registro.nodos.find((x) => x.tipo === "eco") as { buffer: { getChannelData: (c: number) => Float32Array } };
+    return Array.from(n.buffer.getChannelData(0).slice(0, 50));
+  };
+  const a = await eco();
+  assert.ok(a.some((x) => x !== 0));
+  assert.deepEqual(await eco(), a);
 });

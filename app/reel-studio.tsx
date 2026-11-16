@@ -318,6 +318,12 @@ export default function ReelStudio({
   const vocesHechas = useRef(new Map<string, string>());
   // La misma voz ya con un estilo aplicado (voz + estilo + guion → audio): cambiar de estilo no vuelve a pedirla
   const vocesConEstilo = useRef(new Map<string, string>());
+  // Cada caja guarda solo las 3 voces más recientes (son audios grandes en la memoria)
+  const guardarReciente = (caja: Map<string, string>, llave: string, audio: string) => {
+    caja.delete(llave);
+    caja.set(llave, audio);
+    while (caja.size > 3) caja.delete(caja.keys().next().value as string);
+  };
   // Los clips de IA del último video: para volver a grabarlo (otra voz, música o texto) sin pedirlos de nuevo
   const ultimosClips = useRef<{ firma: string; clips: (string | null)[]; cuando: number } | null>(null);
   const [vozCambio, setVozCambio] = useState(false);
@@ -645,13 +651,16 @@ export default function ReelStudio({
       const data = await res.json().catch(() => ({ error: "La voz no se pudo generar. Intenta de nuevo; si se repite, usa un guion más corto." }));
       if (!res.ok || !data.audio) throw new Error(data.error || "La voz no se pudo generar. Intenta de nuevo.");
       audio = data.audio as string;
-      vocesHechas.current.set(llave, audio);
+      guardarReciente(vocesHechas.current, llave, audio);
     }
     let final = vocesConEstilo.current.get(llaveEstilo);
     if (!final) {
       final = await conEstilo(audio, estilo);
-      vocesConEstilo.current.set(llaveEstilo, final);
+      guardarReciente(vocesConEstilo.current, llaveEstilo, final);
     }
+    // lo que se acaba de usar pasa a ser lo más reciente
+    guardarReciente(vocesHechas.current, llave, audio);
+    guardarReciente(vocesConEstilo.current, llaveEstilo, final);
     setVoice(final);
     if (result) setVozCambio(true);
   }
@@ -671,7 +680,6 @@ export default function ReelStudio({
     const estilo = estiloVoz(valor);
     setEstiloGuardado(estilo);
     if (!voice) return;
-    if (busy) return setVoice("");
     void run("Aplicando el estilo…", () => generarVoz(voiceId, script, estilo));
   }
 
@@ -706,7 +714,7 @@ export default function ReelStudio({
       let src = vocesConEstilo.current.get(llave);
       if (!src) {
         src = await conEstilo(muestra, estiloActual);
-        vocesConEstilo.current.set(llave, src);
+        guardarReciente(vocesConEstilo.current, llave, src);
       }
       const a = new Audio(src);
       audioPrueba.current = a;

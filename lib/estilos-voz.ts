@@ -94,8 +94,20 @@ function tipoDeAudio(audio: ArrayBuffer): string {
 
 // ---------- Proceso ----------
 
-const FRECUENCIA = 32000; // de sobra para una voz (las voces llegan a 24 kHz) y el WAV pesa poco
+const FRECUENCIA = 24000; // la de las voces Aura: no se pierde nada y el WAV pesa poco
 const ECO_SEGUNDOS = 1.2;
+
+// Números «al azar» que siempre salen iguales (mulberry32): el eco suena igual cada vez
+function azarConSemilla(semilla: number) {
+  let a = semilla >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 type CrearContexto = (canales: number, largo: number, frecuencia: number) => OfflineAudioContext;
 const contextoDelNavegador: CrearContexto = (c, l, f) => new OfflineAudioContext(c, l, f);
@@ -110,7 +122,8 @@ export async function aplicarEstilo(audio: ArrayBuffer, id: EstiloVoz, crearCont
   try {
     // decodeAudioData se queda con los bytes: se le pasa una copia para poder devolver el original
     const leido = await crearContexto(1, 1, FRECUENCIA).decodeAudioData(audio.slice(0));
-    const largo = Math.max(1, Math.ceil((leido.duration * FRECUENCIA) / p.velocidad));
+    const colaEco = p.ambiente > 0 ? Math.round(ECO_SEGUNDOS * FRECUENCIA) : 0; // para que el eco no se corte
+    const largo = Math.max(1, Math.ceil((leido.duration * FRECUENCIA) / p.velocidad) + colaEco);
     const ctx = crearContexto(1, largo, FRECUENCIA);
 
     const fuente = ctx.createBufferSource();
@@ -141,9 +154,10 @@ export async function aplicarEstilo(audio: ArrayBuffer, id: EstiloVoz, crearCont
     if (p.ambiente > 0) {
       // Eco de sala: ruido que se apaga poco a poco durante 1.2 s, mezclado bajito
       const n = Math.round(ECO_SEGUNDOS * FRECUENCIA);
+      const azar = azarConSemilla(1987);
       const impulso = ctx.createBuffer(1, n, FRECUENCIA);
       const d = impulso.getChannelData(0);
-      for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 3);
+      for (let i = 0; i < n; i++) d[i] = (azar() * 2 - 1) * Math.pow(1 - i / n, 3);
       const eco = ctx.createConvolver();
       eco.buffer = impulso;
       const mezcla = ctx.createGain();
