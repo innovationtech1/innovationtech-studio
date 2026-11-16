@@ -19,11 +19,13 @@ import {
   VolumeX,
 } from "lucide-react";
 import { Brand, brandContext } from "@/lib/brand";
+import type { CuentaNova } from "@/lib/nova";
 import { friendlyError } from "@/lib/errors";
 import { getLang, tr } from "@/lib/i18n";
 import { usePersistentState } from "@/lib/persist";
 import { extract, phrases } from "@/lib/phrases";
 import type { Settings } from "@/lib/types";
+import { useCuenta, type ValorCuenta } from "./account-context";
 import MicButton from "./mic-button";
 
 // Asistente de marketing en forma de conversación (como un chat con Claude):
@@ -53,6 +55,23 @@ const QUICK = [
 
 const newId = () => Math.random().toString(36).slice(2, 10);
 const titleOf = (t: string) => (t.length > 48 ? t.slice(0, 46).trimEnd() + "…" : t);
+// Los datos del plan que ya tiene la app (sin lecturas extra), para que NOVA los conozca.
+// Con las cuentas apagadas o sin negocio: null (NOVA dice que no ve el plan).
+function cuentaParaNova({ activo, cuenta }: ValorCuenta): CuentaNova | null {
+  if (!activo || !cuenta || !cuenta.usuario || !("negocio" in cuenta)) return null;
+  return {
+    plan: cuenta.efectivo.plan ?? "sin_plan",
+    estado: cuenta.efectivo.estado,
+    limites: cuenta.limites,
+    uso: cuenta.uso,
+    saldo: cuenta.saldo as Record<string, number>,
+    reinicio: cuenta.reinicio,
+    precios: cuenta.precios,
+    paquetes: cuenta.paquetes.map((p) => ({ id: p.id, monto: p.monto, contenido: p.contenido as Record<string, number> })),
+    esDueno: cuenta.esDueno,
+  };
+}
+
 const stripPrompt = (t: string) => t.replace(/\n?\**PROMPT DE IMAGEN:?\**.*$/im, "").trim();
 
 export default function AssistantChat({
@@ -66,6 +85,7 @@ export default function AssistantChat({
   onImage: (prompt: string) => void;
   onEditor: (text: string) => void;
 }) {
+  const valorCuenta = useCuenta();
   const [chats, setChats] = usePersistentState<Chat[]>("chat:conversaciones", []);
   const [currentId, setCurrentId] = usePersistentState("chat:actual", "");
   const [input, setInput] = usePersistentState("chat:borrador", "");
@@ -101,7 +121,8 @@ export default function AssistantChat({
       return next.sort((a, b) => b.updated - a.updated).slice(0, 30);
     });
 
-  async function send(text: string, base?: Msg[]) {
+  // atajo: el botón de inicio que lo pidió («studio», «plan», «comercial», «ideas»), para elegir el modelo
+  async function send(text: string, base?: Msg[], atajo?: string) {
     const content = text.trim();
     if (!content || streaming) return;
     setError("");
@@ -129,6 +150,7 @@ export default function AssistantChat({
           brand: brandContext(brand),
           provider: settings.textProvider,
           model: settings.textProvider === "cloudflare" ? settings.cfTextModel : settings.textModel,
+          nova: { cuenta: cuentaParaNova(valorCuenta), ...(atajo ? { atajo } : {}) },
         }),
       });
       if (!res.ok || !res.body) {
