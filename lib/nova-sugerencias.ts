@@ -4,7 +4,8 @@
 
 import type { CuentaNova } from "./nova";
 
-export type Sugerencia = { id: string; texto: string; mensaje: string }; // mensaje: lo que se le manda a NOVA
+// mensaje: lo que se le manda a NOVA; atajo: el que elige el modelo en /api/chat (como los atajos de inicio)
+export type Sugerencia = { id: string; texto: string; mensaje: string; atajo?: string };
 
 // 45 s sin actividad y como máximo una sugerencia cada 3 min
 export const INACTIVO_MS = 45_000;
@@ -36,6 +37,7 @@ export function SUGERENCIAS(c: CuentaNova | null, marca: string, ahora: Date = n
         id: "reel-ia",
         texto: "Tienes tomas de video con IA disponibles. ¿Armamos un reel?",
         mensaje: "Dame una idea de reel con video con IA para mi negocio: las tomas y el texto de cada una",
+        atajo: "comercial",
       });
     }
     const textos = quedan(c, "textos");
@@ -45,6 +47,7 @@ export function SUGERENCIAS(c: CuentaNova | null, marca: string, ahora: Date = n
         id: "textos-pocos",
         texto: `Te quedan ${textos} textos este mes: aprovecha uno en tu mejor post.`,
         mensaje: "Escribe el mejor post posible para mi negocio esta semana, uno que venda",
+        atajo: "ideas",
       });
     }
   }
@@ -53,6 +56,7 @@ export function SUGERENCIAS(c: CuentaNova | null, marca: string, ahora: Date = n
       id: "fin-de-semana",
       texto: "Llega el fin de semana: ¿un post para invitar a tus clientes?",
       mensaje: `Escribe un post para el fin de semana que invite a los clientes de ${negocio}`,
+      atajo: "ideas",
     });
   }
 
@@ -62,21 +66,25 @@ export function SUGERENCIAS(c: CuentaNova | null, marca: string, ahora: Date = n
       id: "ideas-semana",
       texto: "¿Te armo las ideas de publicaciones de esta semana?",
       mensaje: "Dame 5 ideas de publicaciones para esta semana para mi negocio",
+      atajo: "ideas",
     },
     {
       id: "presentar",
       texto: "Un post que presente tu negocio a clientes nuevos.",
       mensaje: `Escribe un post que presente ${negocio} a clientes nuevos`,
+      atajo: "ideas",
     },
     {
       id: "promocion",
       texto: "¿Escribimos una promoción con llamada a la acción?",
       mensaje: "Escribe una promoción corta para las redes de mi negocio con llamada a la acción",
+      atajo: "comercial",
     },
     {
       id: "guion-reel",
       texto: "Un guion de reel de 30 segundos para tu producto estrella.",
       mensaje: `Crea el guion de un reel de 30 segundos para el producto estrella de ${negocio}`,
+      atajo: "comercial",
     },
     {
       id: "perfil",
@@ -92,11 +100,13 @@ export function SUGERENCIAS(c: CuentaNova | null, marca: string, ahora: Date = n
       id: "hashtags",
       texto: "Hashtags para tu próxima publicación.",
       mensaje: "Dame 10 hashtags para la próxima publicación de mi negocio",
+      atajo: "ideas",
     },
     {
       id: "historias",
       texto: "Ideas para tus historias de hoy.",
       mensaje: "Dame 3 ideas de historias de Instagram para hoy para mi negocio",
+      atajo: "ideas",
     },
   );
   return lista;
@@ -133,3 +143,7 @@ export function ideasDeImagen(texto: string): string[] {
 
 // El texto de la respuesta sin las líneas de ideas de imagen (para mostrar, copiar y leer).
 export const sinIdeasDeImagen = (texto: string) => texto.replace(/^[ \t*_>-]*PROMPT DE IMAGEN:?.*(?:\r?\n|$)/gim, "").trim();
+
+// Mientras llega la respuesta: además quita la última línea si empieza con «PROMPT» (una idea de imagen
+// a medio llegar, como «PROMPT DE IMA…»), para que no se vea y luego desaparezca.
+export const sinIdeaAMedias = (texto: string) => sinIdeasDeImagen(texto.replace(/(^|\n)[ \t*_>-]*P(?:R(?:O(?:M(?:P(?:T.*)?)?)?)?)?$/i, "$1"));

@@ -34,9 +34,12 @@ export default function MicButton({
   cfHeaders,
   disabled,
   size = "md",
+  onActive,
 }: {
   onText: (text: string) => void;
   onInterim?: (text: string) => void;
+  // avisa si está escuchando, grabando o transcribiendo (true) o en reposo (false)
+  onActive?: (activo: boolean) => void;
   cfHeaders: Record<string, string>;
   disabled?: boolean;
   size?: "md" | "lg";
@@ -50,6 +53,16 @@ export default function MicButton({
   onTextRef.current = onText;
   const onInterimRef = useRef(onInterim);
   onInterimRef.current = onInterim;
+  const onActiveRef = useRef(onActive);
+  onActiveRef.current = onActive;
+  const activo = state !== "idle";
+  const primera = useRef(true);
+  useEffect(() => {
+    // al inicio no avisa (ya está en reposo); después, cada cambio
+    if (primera.current && !activo) return;
+    primera.current = false;
+    onActiveRef.current?.(activo);
+  }, [activo]);
 
   useEffect(
     () => () => {

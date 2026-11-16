@@ -30,6 +30,7 @@ import {
   debeSugerir,
   ideasDeImagen,
   siguienteSugerencia,
+  sinIdeaAMedias,
   sinIdeasDeImagen,
   type Sugerencia,
 } from "@/lib/nova-sugerencias";
@@ -131,6 +132,7 @@ export default function AssistantChat({
   const [copied, setCopied] = useState<number | null>(null);
   const [picker, setPicker] = useState<number | null>(null);
   const [sugerencia, setSugerencia] = useState<Sugerencia | null>(null);
+  const [micActivo, setMicActivo] = useState(false); // dictando: escuchando, grabando o transcribiendo
   const abort = useRef<AbortController | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -151,9 +153,9 @@ export default function AssistantChat({
   useEffect(() => () => window.speechSynthesis?.cancel(), []);
 
   // Lo último de la pantalla, para revisarlo cada 5 s sin reiniciar el reloj en cada cambio
-  const ahora = useRef({ streaming, input, interim, sugerencia, cuenta: cuentaParaNova(valorCuenta), marca: brand.name || "" });
+  const ahora = useRef({ streaming, input, interim, micActivo, sugerencia, cuenta: cuentaParaNova(valorCuenta), marca: brand.name || "" });
   useEffect(() => {
-    ahora.current = { streaming, input, interim, sugerencia, cuenta: cuentaParaNova(valorCuenta), marca: brand.name || "" };
+    ahora.current = { streaming, input, interim, micActivo, sugerencia, cuenta: cuentaParaNova(valorCuenta), marca: brand.name || "" };
   });
 
   // Sugerencias cuando el cliente lleva 45 s sin hacer nada con NOVA a la vista (máx. 1 cada 3 min)
@@ -169,7 +171,7 @@ export default function AssistantChat({
       const ok = debeSugerir({
         inactivoMs: t - ultimaActividad.current,
         desdeUltimaMs: t - ultimaSugerencia.current,
-        escribiendo: !!a.interim,
+        escribiendo: a.micActivo || !!a.interim,
         transmitiendo: a.streaming,
         visible,
         textoEnCaja: !!a.input.trim(),
@@ -330,7 +332,7 @@ export default function AssistantChat({
         <div className="nova-burbuja" role="status">
           <p>{sugerencia.texto}</p>
           <div className="nova-burbuja-acciones">
-            <button className="btn small" onClick={() => send(tr(sugerencia.mensaje))}>
+            <button className="btn small" onClick={() => send(tr(sugerencia.mensaje), undefined, sugerencia.atajo)}>
               Hazlo
             </button>
             <button className="icon-only" onClick={() => setSugerencia(null)} title="Cerrar sugerencia" aria-label="Cerrar sugerencia">
@@ -388,7 +390,9 @@ export default function AssistantChat({
               <div key={i} className="msg assistant">
                 <div className="msg-body" data-no-translate>
                   {m.content ? (
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{stripPrompt(m.content)}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {streaming && i === messages.length - 1 ? sinIdeaAMedias(m.content) : stripPrompt(m.content)}
+                    </ReactMarkdown>
                   ) : (
                     <span className="typing" aria-label="Escribiendo">
                       <i />
@@ -492,6 +496,10 @@ export default function AssistantChat({
           <MicButton
             cfHeaders={cfHeaders}
             disabled={streaming}
+            onActive={(v) => {
+              setMicActivo(v);
+              ultimaActividad.current = Date.now(); // tocar el micrófono cuenta como actividad
+            }}
             onInterim={setInterim}
             onText={(t) => setInput((v) => (v && !v.endsWith(" ") ? `${v} ${t}` : v + t))}
           />

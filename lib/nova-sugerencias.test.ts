@@ -8,6 +8,7 @@ import {
   debeSugerir,
   ideasDeImagen,
   sinIdeasDeImagen,
+  sinIdeaAMedias,
   siguienteSugerencia,
   type Sugerencia,
 } from "./nova-sugerencias";
@@ -128,4 +129,17 @@ test("ideasDeImagen: todas las líneas PROMPT DE IMAGEN, máximo 3", () => {
 
 test("sinIdeasDeImagen: quita todas las líneas de ideas de imagen", () => {
   assert.equal(sinIdeasDeImagen("Post\n\nPROMPT DE IMAGEN: a\n**PROMPT DE IMAGEN:** b\nFin"), "Post\n\nFin");
+});
+
+test("sinIdeaAMedias: oculta la última línea de idea de imagen a medio llegar", () => {
+  assert.equal(sinIdeaAMedias("Post listo\nPROMPT DE IMA"), "Post listo");
+  assert.equal(sinIdeaAMedias("Post listo\n**PROM"), "Post listo");
+  assert.equal(sinIdeaAMedias("Post\nPROMPT DE IMAGEN: a\nPROMPT DE IMAGEN: b, ni"), "Post");
+  assert.equal(sinIdeaAMedias("Post listo con Promoción"), "Post listo con Promoción");
+  assert.equal(sinIdeaAMedias("Post\nPromoción del día"), "Post\nPromoción del día");
+});
+
+test("SUGERENCIAS: cada sugerencia trae un atajo válido para elegir el modelo", () => {
+  for (const s of SUGERENCIAS(null, "", MARTES)) assert.ok(!s.atajo || ["ideas", "comercial", "plan", "studio"].includes(s.atajo));
+  assert.equal(SUGERENCIAS(null, "", MARTES).find((s) => s.id === "ideas-semana")?.atajo, "ideas");
 });
