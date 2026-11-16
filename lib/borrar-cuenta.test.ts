@@ -232,3 +232,16 @@ test("un miembro que borra su cuenta no pierde su derecho a prueba (nunca tuvo u
   assert.ok(r.ok);
   assert.ok(((await m.store.getNegocio("n_u2b"))!.pruebaHasta ?? 0) > AHORA + 1000);
 });
+
+test("en la versión de prueba se borran solo sus carpetas (pruebas/), nunca las de producción", async () => {
+  const antes = process.env.STUDIO_COLECCION_PREFIJO;
+  process.env.STUDIO_COLECCION_PREFIJO = "prueba_studio_";
+  try {
+    const m = await mundo();
+    await borrarCuenta(S1, SI, m.deps);
+    assert.deepEqual(m.hecho.archivos.sort(), ["demo/pruebas/negocios/n1/", "pruebas/negocios/n1/"]);
+  } finally {
+    if (antes === undefined) delete process.env.STUDIO_COLECCION_PREFIJO;
+    else process.env.STUDIO_COLECCION_PREFIJO = antes;
+  }
+});

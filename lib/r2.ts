@@ -1,6 +1,7 @@
 import "server-only";
 import { createHash, createHmac } from "node:crypto";
 import { firestoreStore, type AccountStore } from "./account-store";
+import { esEntornoPrincipal } from "./colecciones";
 import { stripeModoLive } from "./stripe-server";
 import { estadoEfectivo, type Negocio, type Plan } from "./plans";
 
@@ -102,8 +103,22 @@ export function firmarUrl(metodo: "GET" | "PUT", llave: string, segundos: number
 
 // ---------- Borrar la carpeta de un negocio (al borrar su cuenta) ----------
 
-// Solo la carpeta completa de UN negocio: negocios/<id>/ o demo/negocios/<id>/. Nada más amplio.
-const CARPETA_NEGOCIO = /^(demo\/)?negocios\/[A-Za-z0-9_-]+\/$/;
+// Producción y las versiones de prueba comparten el bucket de R2. Cada versión de prueba (con su propio
+// STUDIO_COLECCION_PREFIJO) guarda todo bajo pruebas/; producción, como siempre. Las de la prueba gratis
+// siguen empezando con demo/ (la regla de R2 las borra a los 30 días): demo/pruebas/… en las de prueba.
+//   producción:  negocios/<id>/…          demo/negocios/<id>/…
+//   pruebas:     pruebas/negocios/<id>/…  demo/pruebas/negocios/<id>/…
+export const carpetaEntorno = () => (esEntornoPrincipal() ? "" : "pruebas/");
+
+// Las dos carpetas de un negocio en ESTA versión (para borrarlas con la cuenta).
+export function carpetasNegocio(negocioId: string): [string, string] {
+  const e = carpetaEntorno();
+  return [`${e}negocios/${negocioId}/`, `demo/${e}negocios/${negocioId}/`];
+}
+
+// Solo la carpeta completa de UN negocio de esta versión. Nada más amplio, nada de la otra versión.
+const carpetaNegocioValida = (prefijo: string) =>
+  new RegExp(`^(demo/)?${carpetaEntorno().replace(/\//g, "\\/")}negocios/[A-Za-z0-9_-]+/$`).test(prefijo);
 
 type OpcionesBorrar = { cfg?: ConfigR2 | null; traer?: typeof fetch; ahora?: Date };
 
@@ -126,7 +141,7 @@ const deXml = (t: string) => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").repla
 // Borra todos los archivos de la carpeta de un negocio. Devuelve cuántos borró; si algo falla, lanza
 // un error (quien llama lo anota para revisarlo a mano).
 export async function borrarCarpeta(prefijo: string, opts: OpcionesBorrar = {}): Promise<number> {
-  if (!CARPETA_NEGOCIO.test(prefijo)) throw new Error("Carpeta no permitida: solo se borra la carpeta de un negocio.");
+  if (!carpetaNegocioValida(prefijo)) throw new Error("Carpeta no permitida: solo se borra la carpeta de un negocio.");
   const cfg = opts.cfg === undefined ? configR2() : opts.cfg;
   if (!cfg) throw new Error("R2 sin configurar");
   const traer = opts.traer ?? fetch;
@@ -183,11 +198,12 @@ export const MAX_FOTO = 8 * 1024 * 1024;
 const SEGUNDOS_SUBIDA = 300;
 
 // Carpeta de las fotos de un negocio. Las de la prueba gratis van bajo demo/ (R2 las borra a los 30 días).
+// (Las de una versión de prueba van bajo pruebas/; ver carpetaEntorno.)
 export function carpetaFotos(negocioId: string, plan: Plan): string {
-  return `${plan === "prueba" ? "demo/" : ""}negocios/${negocioId}/fotos/`;
+  return `${plan === "prueba" ? "demo/" : ""}${carpetaEntorno()}negocios/${negocioId}/fotos/`;
 }
 export function llaveClip(negocioId: string, plan: Plan, trabajoId: string): string {
-  return `${plan === "prueba" ? "demo/" : ""}negocios/${negocioId}/clips/${trabajoId}.mp4`;
+  return `${plan === "prueba" ? "demo/" : ""}${carpetaEntorno()}negocios/${negocioId}/clips/${trabajoId}.mp4`;
 }
 
 export type DepsR2 = { store?: AccountStore; now?: number; cfg?: ConfigR2 | null; stripeLive?: boolean };

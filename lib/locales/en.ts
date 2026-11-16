@@ -1349,6 +1349,7 @@ export const EN: Record<string, string> = {
   "Tomas por cliente al día": "Takes per customer per day",
   "Guardar límites": "Save limits",
   "Límites guardados.": "Limits saved.",
+  "Este sitio usa VIDEO_IA_TOPE_CENTAVOS: el tope que manda es el de esa variable de Netlify, no el de aquí.": "This site uses VIDEO_IA_TOPE_CENTAVOS: the cap that applies is that Netlify variable, not the one here.",
   "Replicate (opcional)": "Replicate (optional)",
   "Clave de Replicate (solo si eliges Replicate para tus imágenes) — replicate.com/account/api-tokens": "Replicate key (only if you choose Replicate for your images) — replicate.com/account/api-tokens",
   "Usar mis fotos (opcional)": "Use my photos (optional)",

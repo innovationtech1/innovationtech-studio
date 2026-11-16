@@ -189,6 +189,8 @@ function ResumenVideo() {
     encendido: boolean;
     gastoHoyCentavos: number;
     topeCentavos: number;
+    topeGuardadoCentavos: number;
+    topeDeEntorno: boolean;
     tomasPorNegocioDia: number;
     enProceso: number;
     enFila: number;
@@ -206,7 +208,7 @@ function ResumenVideo() {
     if (r.ok) {
       const d = r.datos as unknown as Resumen;
       setDatos(d);
-      setTope(String(d.topeCentavos / 100));
+      setTope(String(d.topeGuardadoCentavos / 100));
       setPorCliente(String(d.tomasPorNegocioDia));
     } else setError(String(r.datos.error ?? "No se pudo leer el resumen de video."));
   }
@@ -256,6 +258,7 @@ function ResumenVideo() {
             </button>{" "}
             {guardado}
           </p>
+          {datos.topeDeEntorno && <p>Este sitio usa VIDEO_IA_TOPE_CENTAVOS: el tope que manda es el de esa variable de Netlify, no el de aquí.</p>}
           {datos.fallos.length === 0 ? (
             <p>Sin fallos en los últimos 7 días.</p>
           ) : (

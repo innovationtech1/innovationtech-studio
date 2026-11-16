@@ -15,6 +15,9 @@ export function prefijoColecciones(): string {
   return p;
 }
 
+// ¿Es el sitio principal? (sin prefijo propio). Las versiones de prueba guardan sus archivos de R2 aparte.
+export const esEntornoPrincipal = () => prefijoColecciones() === PREDETERMINADO;
+
 export function colecciones() {
   const p = prefijoColecciones();
   return {

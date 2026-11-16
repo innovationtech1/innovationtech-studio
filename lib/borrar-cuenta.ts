@@ -77,7 +77,8 @@ export async function borrarCuenta(
   // 3) Video con IA: trabajos y archivos (fotos y clips). Lo que no se pueda borrar queda anotado.
   const pendientes: string[] = [];
   await d.videos.borrarTrabajosDeNegocio(negocio.id);
-  const carpetas = [`negocios/${negocio.id}/`, `demo/negocios/${negocio.id}/`];
+  // Solo las carpetas de ESTA versión: una versión de prueba nunca borra archivos de producción
+  const carpetas = (await import("./r2")).carpetasNegocio(negocio.id);
   const sinBorrar = await d.borrarArchivos(carpetas).catch(() => carpetas);
   for (const c of sinBorrar) pendientes.push(`archivos: ${c}`);
 

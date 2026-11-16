@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { ajustarVideo, baseDePedido, consultar, crearVideo, despachar, procesarAviso, resumenVideo, type DepsVideo } from "./video-ia";
+import { ajustarVideo, baseDePedido, consultar, crearVideo, despachar, procesarAviso, resumenVideo, topeDiario, type DepsVideo } from "./video-ia";
 import type { Usuario } from "./account-store";
 import { memoryStore } from "./account-store-memory";
 import { memoryVideoStore } from "./video-store-memory";
@@ -1038,4 +1038,81 @@ test("ajustarVideo: rechaza valores absurdos (cero, negativos, decimales, gigant
       assert.ok(!r.ok, JSON.stringify(malo));
     }
   });
+});
+
+// ---------- Versión de prueba: sus propios archivos y su propio tope ----------
+
+async function conEntorno(vars: Record<string, string | undefined>, f: () => Promise<void>) {
+  const antes = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+  for (const [k, v] of Object.entries(vars)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+  try {
+    await f();
+  } finally {
+    for (const [k, v] of Object.entries(antes)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+
+test("versión de prueba: solo acepta fotos de su carpeta y guarda los clips bajo pruebas/", async () => {
+  await conEntorno({ STUDIO_COLECCION_PREFIJO: "prueba_studio_" }, async () => {
+    const m = mundo();
+    // Una llave de producción no es de esta versión
+    const prod = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+    assert.ok(!prod.ok && prod.status === 403);
+    const r = await crearVideo(req(), { tomas: [{ imagenKey: `pruebas/${foto("a")}`, movimiento: "" }] }, m.deps);
+    assert.ok(r.ok);
+    await m.aviso(0, m.OK);
+    const t = m.videos.todos()[0];
+    assert.equal(t.clipKey, `pruebas/negocios/n1/clips/${t.id}.mp4`);
+    // La prueba gratis: demo/pruebas/
+    const d = mundo(PRUEBA);
+    assert.ok(!(await crearVideo(req(), { tomas: [{ imagenKey: foto("a", "n1", true), movimiento: "" }] }, d.deps)).ok);
+    const rd = await crearVideo(req(), { tomas: [{ imagenKey: `demo/pruebas/${foto("a")}`, movimiento: "" }] }, d.deps);
+    assert.ok(rd.ok);
+    await d.aviso(0, d.OK);
+    const td = d.videos.todos()[0];
+    assert.equal(td.clipKey, `demo/pruebas/negocios/n1/clips/${td.id}.mp4`);
+  });
+  // Y producción no acepta las de pruebas
+  const m = mundo();
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: `pruebas/${foto("a")}`, movimiento: "" }] }, m.deps);
+  assert.ok(!r.ok && r.status === 403);
+});
+
+test("VIDEO_IA_TOPE_CENTAVOS: si está, manda sobre el tope guardado (para poner la versión de prueba más baja)", async () => {
+  const cfg = { ...DEFAULT_CONFIG, videoIa: { ...DEFAULT_CONFIG.videoIa, topeDiarioCentavos: 3000 } };
+  assert.equal(topeDiario(cfg, {}), 3000);
+  assert.equal(topeDiario(cfg, { VIDEO_IA_TOPE_CENTAVOS: "" }), 3000);
+  assert.equal(topeDiario(cfg, { VIDEO_IA_TOPE_CENTAVOS: " 300 " }), 300);
+  assert.equal(topeDiario(cfg, { VIDEO_IA_TOPE_CENTAVOS: "0" }), 0);
+  for (const malo of ["abc", "-5", "2.5", "999999999"]) assert.equal(topeDiario(cfg, { VIDEO_IA_TOPE_CENTAVOS: malo }), 3000, malo);
+  await conEntorno({ VIDEO_IA_TOPE_CENTAVOS: "30" }, async () => {
+    const m = mundo(); // el tope guardado es $5
+    const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }, { imagenKey: foto("b"), movimiento: "" }] }, m.deps);
+    assert.ok(r.ok);
+    assert.deepEqual(r.ok && r.trabajos.map((t) => t.estado), ["enviado", "en_fila"]); // 20 + 20 > 30
+    const c = await consultar("u1", [r.ok ? r.trabajos[1].id : ""], m.deps);
+    assert.ok(c.ok && c.topeHoy);
+    await conAdmin(async () => {
+      const res = await resumenVideo("admin@ejemplo.com", true, m.deps);
+      assert.ok(res.ok && res.topeCentavos === 30 && res.topeDeEntorno === true && res.topeGuardadoCentavos === 500);
+    });
+  });
+});
+
+test("sin la tarea de respaldo (versión de prueba), las consultas resuelven las tomas atoradas", async () => {
+  const m = mundo();
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  const id = r.ok ? r.trabajos[0].id : "";
+  m.estado.now = AHORA + 46 * MIN; // fal la sigue «generando» y nunca avisa
+  await consultar("u1", [id], m.deps); // empuja la fila (revisa atorados)
+  const c = await consultar("u1", [id], m.deps);
+  assert.deepEqual(c.ok && c.trabajos, [{ id, estado: "fallo" }]);
+  assert.equal(m.enviados.length, 1);
+  assert.equal(m.store.uso("n1", MES).tomas_ia, 0);
 });

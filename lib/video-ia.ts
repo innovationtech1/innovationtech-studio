@@ -25,7 +25,7 @@ import {
   puedeUsar,
   type PlanesConfig,
 } from "./plans";
-import { configR2, firmarUrl, llaveClip, negocioActivo, SIN_ALMACEN, subirDesdeUrl } from "./r2";
+import { carpetaEntorno, configR2, firmarUrl, llaveClip, negocioActivo, SIN_ALMACEN, subirDesdeUrl } from "./r2";
 import type { SesionVerificada } from "./verify-token";
 import { firestoreVideoStore, type EstadoTrabajo, type TrabajoVideo, type VideoStore } from "./video-store";
 
@@ -137,10 +137,23 @@ function mundoDe(deps: DepsVideo): Mundo {
   };
 }
 
+// VIDEO_IA_TOPE_CENTAVOS (opcional): fija el tope de gasto del día de ESTA publicación, por encima del
+// guardado en el panel. Cada versión (producción y pruebas) tiene su propio gasto y su propio tope, pero
+// la cuenta de fal es la misma: así la versión de prueba puede tener un tope más bajo.
+function topeDeEntorno(env: Record<string, string | undefined> = process.env): number | null {
+  const v = (env.VIDEO_IA_TOPE_CENTAVOS ?? "").trim();
+  if (!v) return null;
+  const n = /^\d+$/.test(v) ? Number(v) : NaN;
+  return Number.isSafeInteger(n) && n <= 100_000 ? n : null;
+}
+export function topeDiario(cfg: PlanesConfig, env: Record<string, string | undefined> = process.env): number {
+  return topeDeEntorno(env) ?? cfg.videoIa.topeDiarioCentavos;
+}
+
 // Tope de gasto del día para una toma: la prueba (prioridad 3) se detiene antes, al umbral del demo.
 function topeDe(cfg: PlanesConfig, prioridad: number): number {
-  const v = cfg.videoIa;
-  return prioridad === 3 ? Math.floor(v.topeDiarioCentavos * v.umbralDemo) : v.topeDiarioCentavos;
+  const tope = topeDiario(cfg);
+  return prioridad === 3 ? Math.floor(tope * cfg.videoIa.umbralDemo) : tope;
 }
 
 // Mensaje corto para el registro: nunca claves, secretos ni enlaces firmados.
@@ -158,8 +171,10 @@ export function llaveCache(negocioId: string, fotoSha: string, movimiento: strin
 }
 
 // La foto debe ser del propio negocio (subida con /api/video-ia/subida). Devuelve su SHA-256 o null.
+// Solo se aceptan las llaves de ESTA versión del sitio (producción o pruebas/; ver carpetaEntorno en r2.ts).
 function fotoDelNegocio(imagenKey: string, negocioId: string): string | null {
-  const m = /^(?:demo\/)?negocios\/([^/]+)\/fotos\/([0-9a-f]{64})\.(?:jpg|png|webp)$/.exec(imagenKey);
+  const e = carpetaEntorno().replace(/\//g, "\\/");
+  const m = new RegExp(`^(?:demo\\/)?${e}negocios\\/([^/]+)\\/fotos\\/([0-9a-f]{64})\\.(?:jpg|png|webp)$`).exec(imagenKey);
   return m && m[1] === negocioId ? m[2] : null;
 }
 
@@ -641,7 +656,9 @@ export async function resumenVideo(
       ok: true;
       encendido: boolean;
       gastoHoyCentavos: number;
-      topeCentavos: number;
+      topeCentavos: number; // el que manda hoy
+      topeGuardadoCentavos: number; // el del panel
+      topeDeEntorno: boolean; // true si VIDEO_IA_TOPE_CENTAVOS manda sobre el del panel
       tomasPorNegocioDia: number;
       enProceso: number;
       enFila: number;
@@ -666,7 +683,9 @@ export async function resumenVideo(
     ok: true,
     encendido: m.encendido && !!m.r2,
     gastoHoyCentavos: gasto,
-    topeCentavos: cfg.videoIa.topeDiarioCentavos,
+    topeCentavos: topeDiario(cfg),
+    topeGuardadoCentavos: cfg.videoIa.topeDiarioCentavos,
+    topeDeEntorno: topeDeEntorno() !== null,
     tomasPorNegocioDia: cfg.videoIa.tomasPorNegocioDia,
     enProceso,
     enFila,
@@ -691,5 +710,6 @@ export async function ajustarVideo(
   const cfg = await m.store.getConfig();
   const videoIa = { ...cfg.videoIa, topeDiarioCentavos: c.topeDiarioCentavos as number, tomasPorNegocioDia: c.tomasPorNegocioDia as number };
   await m.store.guardarConfig({ videoIa });
-  return { ok: true, topeCentavos: videoIa.topeDiarioCentavos, tomasPorNegocioDia: videoIa.tomasPorNegocioDia };
+  // El tope que manda (si VIDEO_IA_TOPE_CENTAVOS está puesta, es el de esa variable)
+  return { ok: true, topeCentavos: topeDiario({ ...cfg, videoIa }), tomasPorNegocioDia: videoIa.tomasPorNegocioDia };
 }

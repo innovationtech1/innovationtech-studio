@@ -273,6 +273,7 @@ Entra a Netlify → proyecto **innovationtech-studio** → *Project configuratio
 | `R2_ACCOUNT_ID` | Account ID de Cloudflare donde está el bucket de R2 |
 | `R2_BUCKET` | Nombre del bucket de R2 (por ejemplo `studio-videos`) |
 | `VIDEO_IA` | Opcional. `off` apaga al instante las tomas con IA (los reels con animación siguen funcionando) |
+| `VIDEO_IA_TOPE_CENTAVOS` | Opcional. Tope de gasto del día en fal.ai para esa publicación, en centavos (`200` = $2); si está, manda sobre el tope del panel. Útil para que la versión de prueba gaste menos |
 | `STUDIO_COLECCION_PREFIJO` | Opcional. Inicio del nombre de las colecciones de Firestore (`studio_` si no la pones). Solo para las versiones de prueba: `prueba_studio_` (ver Paso 4) |
 
 Netlify bloquea la publicación si encuentra en el código un valor igual a una variable. Como las variables no secretas sí aparecen en el sitio, agrega una variable más:
@@ -331,8 +332,16 @@ La versión de prueba es una copia del sitio con otra dirección. Usa **claves d
 | `STRIPE_WEBHOOK_SECRET` | el del webhook real (Paso 5) | el del webhook de prueba |
 | `STUDIO_COLECCION_PREFIJO` | (vacía) | `prueba_studio_` |
 | `STUDIO_CUENTAS` / `NEXT_PUBLIC_STUDIO_CUENTAS` | `off` hasta el Paso 5 | `on` |
+| `VIDEO_IA_TOPE_CENTAVOS` | (vacía: manda el tope del panel) | opcional, por ejemplo `200` ($2 al día) |
+| `STUDIO_URL` | opcional | **nunca** (déjala vacía) |
 
-Las demás variables (Firebase, Cloudflare, administrador) pueden tener el mismo valor en todos los contextos. Después de cambiar variables, vuelve a construir la versión de prueba (sube un cambio a la rama `pruebas` o usa *Deploys → Trigger deploy*).
+Las demás variables (Firebase, Cloudflare, administrador) pueden tener el mismo valor en todos los contextos.
+
+**Ojo con el video con IA en la versión de prueba:** usa la misma cuenta de fal.ai (el mismo dinero) y el mismo bucket de R2 que el sitio principal.
+- `STUDIO_URL` **no** debe estar puesta en *Branch deploys* ni en *Deploy Previews*: si lo está, fal avisa al sitio principal, que no conoce esas tomas, y los avisos se pierden. Sin ella, cada versión recibe sus propios avisos.
+- Cada versión lleva su **propio gasto del día y su propio tope** (el tope del panel de `/admin` de esa versión). Para que la versión de prueba gaste menos, pon `VIDEO_IA_TOPE_CENTAVOS` solo en su contexto (en centavos: `200` = $2 al día); si está puesta, manda sobre el tope del panel.
+- Sus archivos van aparte en R2: `pruebas/negocios/...` (y `demo/pruebas/negocios/...` los de la prueba gratis, que la regla de `demo/` también borra a los 30 días). Borrar una cuenta en la versión de prueba nunca borra archivos del sitio principal.
+- La tarea de respaldo de cada 5 minutos solo corre en el sitio principal. En la versión de prueba, las tomas que se quedan sin aviso se resuelven cuando alguien crea una toma o consulta una toma atorada (como mucho una vez por minuto). Después de cambiar variables, vuelve a construir la versión de prueba (sube un cambio a la rama `pruebas` o usa *Deploys → Trigger deploy*).
 
 **c) Probar.** En la versión de prueba entra a `/admin` y presiona **Preparar Stripe**. Luego prueba: registrarte con Google y con correo, la prueba de 10 minutos, pagar Básico, mejorar a Pro, invitar a un miembro, una tarjeta rechazada (se pausa), pagar para reactivar, cancelar (se pausa) y activar a mano con Cash App.
 
@@ -387,7 +396,7 @@ En el **Creador de Reels**, el cliente puede marcar de 1 a 4 fotos «Con IA»: c
 
 Protecciones que ya vienen puestas (se pueden cambiar en Firestore, documento `studio_config/planes`, campo `videoIa`):
 
-- **Tope de gasto de $5 al día** para todo Studio (hora de Texas). Al llegar, las tomas esperan en fila y salen al día siguiente. El demo se detiene antes, al 80% ($4), para dejar lugar a los clientes que pagan.
+- **Tope de gasto de $5 al día** para todo Studio (hora de Texas). Se cambia en `/admin`; la variable opcional `VIDEO_IA_TOPE_CENTAVOS` lo fija para una publicación (cada versión, principal y de prueba, lleva su propio tope y su propio gasto). Al llegar, las tomas esperan en fila y salen al día siguiente. El demo se detiene antes, al 80% ($4), para dejar lugar a los clientes que pagan.
 - Máximo **3 tomas al mismo tiempo** en fal.ai; los de Pro pasan primero, luego los de paquete y al final el demo.
 - Si una toma falla, se reintenta **una vez**; si vuelve a fallar, se **devuelve la toma** al cliente y esa foto queda con animación normal.
 - **Nunca se paga dos veces la misma toma:** solo se vuelve a mandar a fal cuando fal rechazó el pedido o confirmó que la quitó de su fila sin correrla. Si fal la está generando, no contesta o no se sabe si la recibió, Studio espera; a los 45 minutos (3 × 15) la da por perdida, le devuelve la toma al cliente y su costo **sigue contando** en el gasto del día (por si fal sí la cobró).
