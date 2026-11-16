@@ -441,6 +441,7 @@ export default function Home() {
               handoff={handoff}
               sceneUpdate={sceneUpdate}
               incomingTopic={reelTopic}
+              incomingSecuencia={secuenciaVideo}
               onEditScene={(i, src) => openInEditor(src, { scene: i })}
               onOpenBrand={() => go("marca")}
             />

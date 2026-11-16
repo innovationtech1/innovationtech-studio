@@ -1526,6 +1526,24 @@ export const EN: Record<string, string> = {
   "Realista": "Realistic",
   "De estudio": "Studio",
   "Colorido": "Colorful",
+  // Hacer el video con NOVA (Creador de Reels)
+  "¿Reemplazo el video abierto o creo uno nuevo?": "Should I replace the open video or create a new one?",
+  "Crear uno nuevo": "Create a new one",
+  "Reemplazar": "Replace",
+  "Video de NOVA": "NOVA's video",
+  "NOVA está escribiendo el guion…": "NOVA is writing the script…",
+  "Duración de la voz": "Voice-over length",
+  "Escribir el guion otra vez": "Write the script again",
+  "NOVA escribió el guion. Puedes cambiarlo en «Sonido».": "NOVA wrote the script. You can change it in \"Sound\".",
+  "Sí, generarla": "Yes, generate it",
+  "Ahora no": "Not now",
+  "NOVA está generando la voz…": "NOVA is generating the voice…",
+  "Tu plan no incluye voz en off. El guion quedó listo en «Sonido»: puedes leerlo tú o mejorar tu plan.": "Your plan doesn't include voice-over. The script is ready in \"Sound\": you can read it yourself or upgrade your plan.",
+  "Si prefieres, elige otra voz en «Sonido» y toca «Generar voz».": "If you prefer, choose another voice in \"Sound\" and tap \"Generate voice\".",
+  "Marca «Con IA» en las fotos que quieras animar y presiona «Generar con IA». Después graba el video.": "Check \"With AI\" on the photos you want to animate and press \"Generate with AI\". Then record the video.",
+  "Ir a los clips": "Go to the clips",
+  "La voz está lista.": "The voice is ready.",
+  "NOVA no pudo escribir el guion. Intenta de nuevo.": "NOVA couldn't write the script. Try again.",
 };
 
 // Textos con números u otras partes que cambian
@@ -1659,4 +1677,9 @@ export const EN_PATTERNS: [RegExp, string][] = [
   [/^Esto usa (\d+) imágenes de tu límite \(te quedan (\d+)\)\. ¿Las creo\?$/, "This uses $1 images from your limit ($2 left). Create them?"],
   [/^Esto usa (\d+) imágenes de tu límite\. ¿Las creo\?$/, "This uses $1 images from your limit. Create them?"],
   [/^Foto (\d+) de (\d+)…$/, "Photo $1 of $2…"],
+  // Hacer el video con NOVA
+  [/^Generar la voz usa 1 voz en off de tu plan \(te queda 1\)\. ¿La genero\?$/, "Generating the voice uses 1 voice-over from your plan (1 left). Generate it?"],
+  [/^Generar la voz usa 1 voz en off de tu plan \(te quedan (\d+)\)\. ¿La genero\?$/, "Generating the voice uses 1 voice-over from your plan ($1 left). Generate it?"],
+  [/^Generar la voz usa 1 voz en off de tu plan\. ¿La genero\?$/, "Generating the voice uses 1 voice-over from your plan. Generate it?"],
+  [/^Ya tienes (\d+) videos guardados: solo se puede reemplazar el abierto \(o borra alguno\)\.$/, "You already have $1 saved videos: you can only replace the open one (or delete one)."],
 ];

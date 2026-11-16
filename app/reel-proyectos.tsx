@@ -6,6 +6,7 @@ import { FolderPlus, Pencil, Trash2 } from "lucide-react";
 import ReelStudio from "./reel-studio";
 import { MAX_PROYECTOS, borrarProyecto, cambiarA, crearProyecto, leerProyectos, renombrarProyecto, videosDeOtros, type Proyecto } from "@/lib/proyectos";
 import { deleteFile } from "@/lib/media-store";
+import { decidirEntrada, limpiarEntrante, tieneContenido, type SecuenciaEntrante } from "@/lib/secuencia-video";
 
 type Props = Omit<ComponentProps<typeof ReelStudio>, "videosDeOtros" | "onOcupado" | "onSubiendoDrive">;
 // Lo que se escribe se guarda con una pequeña pausa: antes de cambiar de video se espera a que termine
@@ -26,6 +27,11 @@ export default function ReelProyectos(props: Props) {
   const [aviso, setAviso] = useState("");
   // Lo que llegó de otras secciones antes de cambiar de video no se vuelve a aplicar al video nuevo
   const vistos = useRef({ h: -1, s: -1, t: -1 });
+  // «Hacer el video con NOVA»: la secuencia que va al Creador de Reels (ya decidido en qué video) y la pregunta
+  // «¿Reemplazo el video abierto o creo uno nuevo?» cuando el abierto ya tiene algo
+  const [entrante, setEntrante] = useState<SecuenciaEntrante | null>(null);
+  const [pregunta, setPregunta] = useState<{ s: SecuenciaEntrante; puedeNuevo: boolean } | null>(null);
+  const secuenciaVista = useRef(-1);
 
   const refrescar = () => {
     try {
@@ -39,8 +45,29 @@ export default function ReelProyectos(props: Props) {
   };
   useEffect(refrescar, []);
 
+  useEffect(() => {
+    const s = limpiarEntrante(props.incomingSecuencia);
+    if (!s || secuenciaVista.current === s.n) return;
+    secuenciaVista.current = s.n;
+    let hay = true; // sin poder leer lo guardado, se pregunta (no se reemplaza nada sin avisar)
+    let cuantos = 0;
+    try {
+      const leer = (k: string) => JSON.parse(localStorage.getItem(`its-draft:reel:${k}`) ?? "null");
+      hay = tieneContenido(leer("escenas-datos"), leer("guion"));
+      cuantos = leerProyectos(localStorage).proyectos.length;
+    } catch {
+      /* sin almacenamiento */
+    }
+    const d = decidirEntrada({ hayContenido: hay, proyectos: cuantos, max: MAX_PROYECTOS });
+    if (!d.preguntar) {
+      setPregunta(null);
+      setEntrante(s);
+    } else setPregunta({ s, puedeNuevo: d.puedeNuevo });
+  }, [props.incomingSecuencia]);
+
   // Hace un cambio de video: espera el guardado pendiente, aplica el cambio y vuelve a montar
-  async function conCambio(fn: () => void) {
+  // Con `secuencia`, el video que se abre la recibe (si fn no devuelve false)
+  async function conCambio(fn: () => void | boolean, secuencia?: SecuenciaEntrante) {
     if (cambiando || ocupado) return;
     const cortaDrive = subiendoDrive.current;
     if (cortaDrive && !confirm(tr("La subida a Drive sigue en curso. ¿Cancelarla?"))) return;
@@ -48,11 +75,14 @@ export default function ReelProyectos(props: Props) {
     setAviso("");
     setModo("");
     await new Promise((r) => setTimeout(r, ESPERA_GUARDADO));
+    let ok = true;
     try {
-      fn();
+      ok = fn() !== false;
     } catch {
+      ok = false;
       setAviso("No se pudo guardar en este dispositivo. Libera espacio e intenta de nuevo.");
     }
+    setEntrante(ok && secuencia ? secuencia : null); // cambiar de video no vuelve a cargar una secuencia vieja
     vistos.current = { h: props.handoff?.n ?? -1, s: props.sceneUpdate?.n ?? -1, t: props.incomingTopic?.n ?? -1 };
     refrescar();
     setVuelta((v) => v + 1);
@@ -79,6 +109,25 @@ export default function ReelProyectos(props: Props) {
     }
     setModo("");
     refrescar();
+  }
+
+  // Respuesta a «¿Reemplazo el video abierto o creo uno nuevo?»
+  function nuevoConSecuencia() {
+    if (!pregunta) return;
+    const { s } = pregunta;
+    setPregunta(null);
+    void conCambio(() => {
+      const r = crearProyecto(localStorage, s.tema);
+      if (!r.ok) {
+        setAviso(r.error);
+        return false;
+      }
+    }, s);
+  }
+  function reemplazarConSecuencia() {
+    if (!pregunta) return;
+    setEntrante(pregunta.s);
+    setPregunta(null);
   }
 
   const actual = proyectos.find((p) => p.id === activo);
@@ -131,12 +180,34 @@ export default function ReelProyectos(props: Props) {
           {aviso && <div className="error proy-aviso">{aviso}</div>}
         </div>
       )}
+      {pregunta && (
+        <div className="notice" role="alertdialog" aria-label="¿Reemplazo el video abierto o creo uno nuevo?">
+          <p style={{ margin: "0 0 8px" }}>¿Reemplazo el video abierto o creo uno nuevo?</p>
+          {!pregunta.puedeNuevo && proyectos.length >= MAX_PROYECTOS && (
+            <p className="muted" style={{ margin: "0 0 8px" }}>{`Ya tienes ${MAX_PROYECTOS} videos guardados: solo se puede reemplazar el abierto (o borra alguno).`}</p>
+          )}
+          <div className="actions">
+            {pregunta.puedeNuevo && (
+              <button className="btn small" disabled={bloqueado} onClick={nuevoConSecuencia}>
+                <FolderPlus size={15} aria-hidden /> Crear uno nuevo
+              </button>
+            )}
+            <button className={pregunta.puedeNuevo ? "btn ghost small" : "btn small"} disabled={bloqueado} onClick={reemplazarConSecuencia}>
+              Reemplazar
+            </button>
+            <button className="btn ghost small" onClick={() => setPregunta(null)}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
       <ReelStudio
         key={vuelta}
         {...props}
         handoff={props.handoff && props.handoff.n !== vistos.current.h ? props.handoff : null}
         sceneUpdate={props.sceneUpdate && props.sceneUpdate.n !== vistos.current.s ? props.sceneUpdate : null}
         incomingTopic={props.incomingTopic && props.incomingTopic.n !== vistos.current.t ? props.incomingTopic : null}
+        incomingSecuencia={entrante}
         videosDeOtros={otros}
         onOcupado={setOcupado}
         onSubiendoDrive={(activo) => (subiendoDrive.current = activo)}

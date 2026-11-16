@@ -65,6 +65,7 @@ import { anotar, deshacer, rehacer } from "@/lib/historial";
 import LineaTiempo from "./linea-tiempo";
 import Director from "./director";
 import {
+  MAX_ORDEN,
   aplicarAcciones,
   costoDe,
   resumenProyecto,
@@ -78,6 +79,19 @@ import {
 } from "@/lib/director";
 import { esperarEnFondo, siguienteEspera, terminado, textoEstado, type TrabajoVisto } from "@/lib/estados-video";
 import { consultarTomas, pedirTomas, prepararFoto, subirFoto } from "@/lib/video-ia-cliente";
+import { DURACIONES_SECUENCIA } from "@/lib/secuencia";
+import { quedanDe } from "@/lib/secuencia-pantalla";
+import {
+  clipsDeSecuencia,
+  duracionParaFotos,
+  limpiarEntrante,
+  repartirEnFotos,
+  textoConfirmarVoz,
+  type DuracionSecuencia,
+  type SecuenciaEntrante,
+} from "@/lib/secuencia-video";
+import { vozNova } from "@/lib/nova-voz";
+import NovaAvatar from "./nova-avatar";
 
 import { Clapperboard, Dices, Download, Eye, Loader2, Mic, Play, Redo2, Sparkles, Square, Undo2, Video } from "lucide-react";
 // Cada clip guarda su foto en el dispositivo (IndexedDB) con imageId, para que no se pierda
@@ -92,6 +106,19 @@ const clipsIniciales = (): Clip[] => Array.from({ length: 4 }, (_, i) => nuevoCl
 const esClip = (c: unknown): c is Clip =>
   !!c && typeof c === "object" && typeof (c as Clip).id === "string" && !!(c as Clip).tipo && typeof (c as Clip).segundos === "number";
 
+// Un ajuste guardado de otra sección (la voz y el estilo de NOVA): se lee al momento de usarlo
+function leerAjuste(llave: string): unknown {
+  try {
+    const raw = localStorage.getItem(`its-draft:${llave}`);
+    return raw === null ? undefined : JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+}
+
+// En qué va NOVA armando el video de una secuencia de fotos
+type FaseNova = "escribiendo" | "guion" | "voz" | "lista" | "error_guion" | "error_voz" | "omitida";
+
 export default function ReelStudio({
   settings,
   brand,
@@ -101,6 +128,7 @@ export default function ReelStudio({
   handoff,
   sceneUpdate,
   incomingTopic,
+  incomingSecuencia,
   onEditScene,
   onOpenBrand,
   videosDeOtros = [],
@@ -112,6 +140,9 @@ export default function ReelStudio({
   onSubiendoDrive?: (activo: boolean) => void; // hay una subida a Drive en curso (para preguntar antes de cambiar de proyecto)
   sceneUpdate: { scene: number; url: string; n: number } | null;
   incomingTopic?: { text: string; n: number } | null;
+  // Fotos de «Secuencia de fotos» para armar el video con NOVA (n cambia en cada envío). ReelProyectos ya
+  // decidió si van en este video o en uno nuevo: aquí se cargan.
+  incomingSecuencia?: SecuenciaEntrante | null;
   onEditScene: (i: number, src: string) => void;
   onOpenBrand: () => void;
   onVideo: (blob: Blob, prompt: string) => void;
@@ -1378,6 +1409,204 @@ export default function ReelStudio({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alFinal, busy, viendo, cola, voice, vozSegundos]);
 
+  // ---------- «Hacer el video con NOVA»: las fotos de la secuencia, el guion y la voz de NOVA ----------
+  const [secNova, setSecNova] = useState<{ tema: string; momentos: string[] } | null>(null);
+  const [faseNova, setFaseNova] = useState<FaseNova>("escribiendo");
+  const [segNova, setSegNova] = useState<DuracionSecuencia>(15);
+  const [errorNova, setErrorNova] = useState("");
+  const tarjetaNova = useRef<HTMLDivElement>(null);
+  const tituloClips = useRef<HTMLHeadingElement>(null);
+  const quedanVoces = cuentasOn && cuenta && "limites" in cuenta ? quedanDe(cuenta, "voces") : undefined;
+
+  const pedidoGuion = useRef(0); // un guion que llega tarde (tras «Empezar nuevo» u otro pedido) no se usa
+  async function escribirGuion(tema: string, momentos: string[], segundos: DuracionSecuencia) {
+    const pedido = ++pedidoGuion.current;
+    setFaseNova("escribiendo");
+    setErrorNova("");
+    try {
+      const res = await fetch("/api/text", {
+        method: "POST",
+        headers:
+          settings.textProvider === "cloudflare"
+            ? { "content-type": "application/json", ...cfHeaders }
+            : { "content-type": "application/json", "x-anthropic-key": settings.anthropicKey },
+        body: JSON.stringify({
+          mode: "guion_secuencia",
+          prompt: (tema || momentos.join(", ")).slice(0, MAX_ORDEN),
+          momentos,
+          segundos,
+          brand: brandContext(brand),
+          provider: settings.textProvider,
+          model: settings.textProvider === "cloudflare" ? settings.cfTextModel : settings.textModel,
+        }),
+      });
+      const data = await res.json().catch(() => ({ error: "NOVA no pudo escribir el guion. Intenta de nuevo." }));
+      if (pedido !== pedidoGuion.current) return;
+      if (!res.ok || typeof data.guion !== "string" || !data.guion.trim()) throw new Error(data.error || "NOVA no pudo escribir el guion. Intenta de nuevo.");
+      setScript(data.guion);
+      setVoice(""); // la voz de antes ya no corresponde al guion
+      setFaseNova("guion");
+      void refrescarCuenta();
+    } catch (e) {
+      if (pedido !== pedidoGuion.current) return;
+      setErrorNova(friendlyError((e as Error).message));
+      setFaseNova("error_guion");
+    }
+  }
+
+  // Pone las fotos en orden (una por clip), el tema y el formato; música encendida; NOVA escribe el guion
+  function cargarSecuencia(s: SecuenciaEntrante) {
+    if (!soltarResultado()) return setError("Espera a que termine la subida a Drive y vuelve a tocar «Hacer el video con NOVA».");
+    detenerPrevia();
+    stopListen();
+    const viejos = clipsRef.current;
+    const total = duracionParaFotos(s.fotos.length);
+    editar(() => clipsDeSecuencia(s.fotos, s.momentos, total)); // se puede deshacer
+    // Las fotos del video anterior se quitan del aparato (si se deshace, se vuelven a guardar solas)
+    for (const c of viejos) if (c.imageId && !clipsRef.current.some((x) => x.imageId === c.imageId)) olvidarFoto(c.imageId);
+    setElegido(-1);
+    setTopic(s.tema);
+    setFormat(s.formato);
+    setScript("");
+    setVoice("");
+    setMusicOn(true);
+    if (result) URL.revokeObjectURL(result.url);
+    setResult(null);
+    setVozCambio(false);
+    setAvisosVideo([]);
+    setError("");
+    setSecNova({ tema: s.tema, momentos: s.momentos });
+    setSegNova(total);
+    setTimeout(() => aLaVista(tarjetaNova.current), 50);
+    void escribirGuion(s.tema, s.momentos, total);
+  }
+
+  // Lo que llega de la secuencia se carga una sola vez, después de leer el borrador guardado (fotos y voz)
+  const secuenciaVista = useRef(-1);
+  useEffect(() => {
+    const s = limpiarEntrante(incomingSecuencia);
+    if (!s || secuenciaVista.current === s.n) return;
+    const t = setTimeout(() => {
+      if (secuenciaVista.current === s.n) return;
+      secuenciaVista.current = s.n;
+      cargarSecuencia(s);
+    }, 500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incomingSecuencia]);
+
+  // Otra duración: las fotos se reparten al momento; el guion se puede escribir otra vez
+  function cambiarDuracionNova(d: DuracionSecuencia) {
+    setSegNova(d);
+    editar((c) => repartirEnFotos(c, d));
+  }
+
+  // La voz de NOVA (la que eligió en sus Ajustes) con su estilo, por el mismo camino que «Generar voz»
+  async function generarVozNova() {
+    const lang = getLang();
+    const voz = vozNova(leerAjuste("nova:voz"), lang).id;
+    const estilo = estiloVoz(leerAjuste("nova:estilo"));
+    setVoiceId(voz);
+    setEstiloGuardado(estilo);
+    setFaseNova("voz");
+    setErrorNova("");
+    setError("");
+    setBusy("NOVA está generando la voz…");
+    try {
+      await generarVoz(voz, script, estilo);
+      ajustarTrasVoz.current = true; // al medir la voz, las fotos se alargan si hace falta para cubrirla
+      setFaseNova("lista");
+      void refrescarCuenta();
+    } catch (e) {
+      setErrorNova(friendlyError((e as Error).message));
+      setFaseNova("error_voz");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  const tarjetaDeNova = secNova && (
+    <div ref={tarjetaNova} className="notice" role="status" aria-live="polite" style={{ display: "grid", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <NovaAvatar estado={faseNova === "escribiendo" || faseNova === "voz" ? "pensando" : faseNova === "lista" ? "aviso" : "quieta"} tamano={36} />
+        <strong>Video de NOVA</strong>
+      </div>
+      <label htmlFor="nova-duracion" style={{ margin: 0 }}>Duración de la voz</label>
+      <div className="seg" id="nova-duracion" role="radiogroup" aria-label="Duración de la voz">
+        {DURACIONES_SECUENCIA.map((d) => (
+          <button key={d} role="radio" aria-checked={segNova === d} className={segNova === d ? "active" : ""} disabled={!!busy || faseNova === "escribiendo"} onClick={() => cambiarDuracionNova(d)} data-no-translate>
+            {d} s
+          </button>
+        ))}
+      </div>
+      {faseNova === "escribiendo" && (
+        <span>
+          <Loader2 size={15} className="spin" aria-hidden /> NOVA está escribiendo el guion…
+        </span>
+      )}
+      {faseNova === "error_guion" && <div className="error">{errorNova}</div>}
+      {(faseNova === "error_guion" || (faseNova !== "escribiendo" && faseNova !== "voz" && !!script.trim())) && (
+        <div className="actions">
+          <button className="btn ghost small" disabled={!!busy} onClick={() => void escribirGuion(secNova.tema, secNova.momentos, segNova)}>
+            {faseNova === "error_guion" ? "Intentar otra vez" : "Escribir el guion otra vez"}
+          </button>
+        </div>
+      )}
+      {faseNova === "guion" && <span>NOVA escribió el guion. Puedes cambiarlo en «Sonido».</span>}
+      {faseNova === "guion" && !puedeVoz && (
+        <div className="acct-upsell">
+          <span>Tu plan no incluye voz en off. El guion quedó listo en «Sonido»: puedes leerlo tú o mejorar tu plan.</span>
+          <button className="btn small" onClick={abrirPlanes}>
+            Ver planes
+          </button>
+        </div>
+      )}
+      {faseNova === "guion" && puedeVoz && (
+        <>
+          <span>{textoConfirmarVoz(quedanVoces)}</span>
+          <div className="actions">
+            <button className="btn small" disabled={!!busy || !script.trim()} onClick={() => void generarVozNova()}>
+              <Mic size={15} aria-hidden /> Sí, generarla
+            </button>
+            <button className="btn ghost small" onClick={() => setFaseNova("omitida")}>
+              Ahora no
+            </button>
+          </div>
+        </>
+      )}
+      {faseNova === "voz" && (
+        <span>
+          <Loader2 size={15} className="spin" aria-hidden /> NOVA está generando la voz…
+        </span>
+      )}
+      {faseNova === "error_voz" && (
+        <>
+          <div className="error">{errorNova}</div>
+          <span className="muted">Si prefieres, elige otra voz en «Sonido» y toca «Generar voz».</span>
+          <div className="actions">
+            <button className="btn small" disabled={!!busy || !script.trim()} onClick={() => void generarVozNova()}>
+              Intentar otra vez
+            </button>
+          </div>
+        </>
+      )}
+      {faseNova === "lista" && <span>La voz está lista.</span>}
+      {(faseNova === "lista" || faseNova === "omitida" || (faseNova === "guion" && !puedeVoz)) && (
+        <>
+          <span>Marca «Con IA» en las fotos que quieras animar y presiona «Generar con IA». Después graba el video.</span>
+          <div className="actions">
+            <button className="btn ghost small" onClick={() => tituloClips.current?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+              Ir a los clips
+            </button>
+            <button className="btn ghost small" onClick={() => setSecNova(null)}>
+              Entendido
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+
   // ---------- Videos propios en los clips ----------
   const galleryVideos = gallery.filter((g) => g.kind === "video" && g.id);
   const [camaraVideo, setCamaraVideo] = useState<string | null>(null); // id del clip que recibirá lo grabado
@@ -1631,6 +1860,8 @@ export default function ReelStudio({
             setAlFinal(null);
             antesDeOrden.current = null;
             setHayDeshacerOrden(false);
+            setSecNova(null);
+            pedidoGuion.current++;
           }}
         >
           Empezar nuevo
@@ -1651,8 +1882,10 @@ export default function ReelStudio({
         onDeshacer={hayDeshacerOrden ? deshacerOrden : null}
       />
 
+      {tarjetaDeNova}
+
       {/* 2. Escenas: la línea de tiempo */}
-      <h3 className="step">Clips</h3>
+      <h3 className="step" ref={tituloClips}>Clips</h3>
       <div className="lt-barra">
         <span className={`lt-tiempo${total > MAX_VIDEO ? " pasado" : ""}`} data-no-translate aria-label={`${formatoTiempo(total)} / ${formatoTiempo(MAX_VIDEO)}`}>
           {formatoTiempo(total)} / {formatoTiempo(MAX_VIDEO)}
