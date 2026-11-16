@@ -242,6 +242,46 @@ test("aviso falso: sin firma válida 401; con otro secreto o trabajo desconocido
   assert.equal(m.subidas.length, 0);
 });
 
+test("aviso: la firma de fal se revisa ANTES de leer Firestore; ids mal formados ni se buscan", async () => {
+  const m = mundo();
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  const t = m.videos.todos()[0];
+  const v = contar(m.videos);
+  let firmas = 0;
+  const deps: DepsVideo = { ...m.deps, videos: v.vigilado, fal: { ...m.deps.fal!, verificar: async () => (firmas++, m.estado.firmaValida) } };
+  const cuerpo = JSON.stringify({ request_id: "req-1", ...m.OK });
+  const aviso = (q: string) => procesarAviso(new URL(`https://studio.example/api/video-ia/aviso?${q}`), new Headers(), cuerpo, deps);
+  // Firma falsa con un trabajo real: 401 sin leer nada
+  m.estado.firmaValida = false;
+  assert.deepEqual(await aviso(`t=${t.id}&s=${t.secreto}`), { status: 401 });
+  assert.deepEqual(v.veces, {});
+  m.estado.firmaValida = true;
+  // Ids o secretos que no tienen la forma de los nuestros: 404 sin revisar firma ni leer Firestore
+  firmas = 0;
+  for (const q of [`t=no-existe&s=${t.secreto}`, `t=${t.id}x&s=${t.secreto}`, `t=../${t.id.slice(3)}&s=${t.secreto}`, `t=${t.id}&s=corto`, `t=${t.id}`, ""]) {
+    assert.deepEqual(await aviso(q), { status: 404 }, q);
+  }
+  assert.equal(firmas, 0);
+  assert.deepEqual(v.veces, {});
+});
+
+test("consultar: ids que no son de Studio se ignoran sin tocar Firestore", async () => {
+  const m = mundo();
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  assert.ok(r.ok);
+  const v = contar(m.videos);
+  const st = contar(m.store);
+  const deps = { ...m.deps, videos: v.vigilado, store: st.vigilado };
+  const nada = await consultar("u1", ["no-existe", "../x", "A".repeat(36)], deps);
+  assert.deepEqual(nada, { ok: true, trabajos: [], topeHoy: false });
+  assert.deepEqual(v.veces, {});
+  assert.deepEqual(st.veces, {});
+  const id = r.ok ? r.trabajos[0].id : "";
+  const mezcla = await consultar("u1", ["no-existe", id], deps);
+  assert.ok(mezcla.ok && mezcla.trabajos.length === 1 && mezcla.trabajos[0].id === id);
+  assert.deepEqual(v.veces.listarTrabajos, 1);
+});
+
 test("aviso de un envío viejo (otro request_id) se ignora", async () => {
   const m = mundo();
   await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);

@@ -40,6 +40,9 @@ const MS_CANDADO = 30_000;
 const CANDADO = "despacho_video";
 const MAX_TOMAS = 4;
 const MAX_CONSULTA = 10;
+// Forma de los ids de trabajo (randomUUID) y de su secreto (24 bytes en hex): lo demás ni se busca.
+const ID_TRABAJO = /^[0-9a-f-]{36}$/;
+const SECRETO = /^[0-9a-f]{48}$/;
 
 export type FalDeps = {
   enviar(modelo: string, input: EntradaFal, webhook: string): Promise<{ requestId: string; statusUrl: string; responseUrl: string }>;
@@ -537,9 +540,11 @@ export async function procesarAviso(url: URL, headers: Headers, cuerpo: string, 
   const m = mundoDe(deps);
   const id = url.searchParams.get("t") ?? "";
   const secreto = url.searchParams.get("s") ?? "";
-  const t = id && secreto ? await m.videos.getTrabajo(id) : null;
-  if (!t || !igual(secreto, t.secreto)) return { status: 404 };
+  // Primero lo que no cuesta: la forma del id y del secreto; luego la firma de fal; solo entonces Firestore
+  if (!ID_TRABAJO.test(id) || !SECRETO.test(secreto)) return { status: 404 };
   if (!(await m.fal.verificar(headers, cuerpo, m.ahora))) return { status: 401 };
+  const t = await m.videos.getTrabajo(id);
+  if (!t || !igual(secreto, t.secreto)) return { status: 404 };
 
   let aviso: { request_id?: unknown; status?: unknown; payload?: unknown; error?: unknown; payload_error?: unknown };
   try {
@@ -588,6 +593,9 @@ export async function consultar(
   if (ids.length < 1 || ids.length > MAX_CONSULTA || ids.some((i) => typeof i !== "string" || !i || i.length > 80)) {
     return falla(400, "Consulta no válida.");
   }
+  // Ids que no tienen la forma de los nuestros se ignoran, sin tocar Firestore
+  ids = ids.filter((i) => ID_TRABAJO.test(i));
+  if (ids.length === 0) return { ok: true, trabajos: [], topeHoy: false };
   const m = mundoDe(deps);
   const usuario = await m.store.getUsuario(uid);
   if (!usuario) return falla(403, "Crea tu cuenta para empezar.");
