@@ -192,6 +192,7 @@ export const EN: Record<string, string> = {
   "Tu sesión de Google venció. Vuelve a intentarlo.": "Your Google session expired. Please try again.",
   "Tu Google Drive está lleno. Libera espacio y vuelve a intentarlo.": "Your Google Drive is full. Free up space and try again.",
   "Google no dio permiso para guardar en tu Drive.": "Google didn't grant permission to save to your Drive.",
+  "Google Drive está ocupado. Espera un momento y vuelve a intentarlo.": "Google Drive is busy. Wait a moment and try again.",
   "Se perdió la conexión al subir a Drive. Vuelve a intentarlo.": "The connection was lost while uploading to Drive. Please try again.",
   "No se pudo guardar en Google Drive.": "Couldn't save to Google Drive.",
   "Componiendo música…": "Composing music…",
