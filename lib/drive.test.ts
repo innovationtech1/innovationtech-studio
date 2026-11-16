@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TROZO, ErrorDrive, errorDrive, carpetaDrive, iniciarSubida, subirTrozos, guardarEnDrive } from "./drive";
+import { enNavegadorDeApp, precargarGoogle, pedirToken, olvidarToken } from "./google-token";
 
 type Peticion = { url: string; method: string; headers: Record<string, string>; body: unknown; signal?: AbortSignal | null };
 type Respuesta = Response | Error;
@@ -389,4 +390,117 @@ test("guardarEnDrive: si la sesión vuelve a vencer (404), falla con OTRO", asyn
     (e: unknown) => e instanceof ErrorDrive && e.codigo === "OTRO",
   );
   assert.equal(peticiones.filter((p) => p.url.includes("/upload/")).length, 2);
+});
+
+// ---------- Token de Google (navegador) ----------
+
+test("enNavegadorDeApp detecta Instagram, Facebook y TikTok y no Chrome ni Safari", () => {
+  const dentro = [
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 350.0.0.0.0",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/22B83 [FBAN/FBIOS;FBAV/480.0.0.0;FBBV/1]",
+    "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36 [FB_IAB/FB4A;FBAV/480.0.0.0;]",
+    "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36 musical_ly_2023 TikTok",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Line/14.0.0",
+  ];
+  const fuera = [
+    "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15",
+  ];
+  for (const ua of dentro) assert.equal(enNavegadorDeApp(ua), true, ua);
+  for (const ua of fuera) assert.equal(enNavegadorDeApp(ua), false, ua);
+});
+
+// Google Identity Services falso: guarda la configuración y deja responder a mano.
+type ConfigGis = {
+  client_id: string;
+  scope: string;
+  callback: (r: Record<string, unknown>) => void;
+  error_callback: (e: { type: string }) => void;
+};
+function gisFalso() {
+  const estado = { configs: [] as ConfigGis[], pedidos: [] as ({ prompt?: string } | undefined)[] };
+  const g = globalThis as unknown as { window?: unknown; google?: unknown };
+  g.window = globalThis;
+  g.google = {
+    accounts: {
+      oauth2: {
+        initTokenClient: (c: ConfigGis) => {
+          estado.configs.push(c);
+          return { requestAccessToken: (o?: { prompt?: string }) => estado.pedidos.push(o) };
+        },
+      },
+    },
+  };
+  const ultima = () => estado.configs[estado.configs.length - 1];
+  return { estado, ultima, limpiar: () => (delete g.google, delete g.window) };
+}
+
+test("pedirToken pide el permiso drive.file en el mismo toque y reusa el token mientras no venza", async () => {
+  const gis = gisFalso();
+  try {
+    olvidarToken();
+    await precargarGoogle();
+    const p = pedirToken("cliente-1");
+    assert.equal(gis.estado.pedidos.length, 1, "requestAccessToken se llama sin esperar");
+    assert.equal(gis.ultima().scope, "https://www.googleapis.com/auth/drive.file");
+    assert.equal(gis.ultima().client_id, "cliente-1");
+    gis.ultima().callback({ access_token: "tk1", expires_in: 3599, scope: "https://www.googleapis.com/auth/drive.file" });
+    assert.equal(await p, "tk1");
+    assert.equal(await pedirToken("cliente-1"), "tk1");
+    assert.equal(gis.estado.pedidos.length, 1, "no vuelve a abrir Google");
+    assert.equal(gis.estado.configs.length, 1, "el cliente se crea una vez");
+
+    olvidarToken();
+    const p2 = pedirToken("cliente-1", { prompt: "" });
+    assert.deepEqual(gis.estado.pedidos[1], { prompt: "" });
+    gis.ultima().callback({ access_token: "tk2", expires_in: 3599, scope: "https://www.googleapis.com/auth/drive.file" });
+    assert.equal(await p2, "tk2");
+  } finally {
+    olvidarToken();
+    gis.limpiar();
+  }
+});
+
+test("pedirToken: token a punto de vencer (≤ 60 s) se vuelve a pedir", async () => {
+  const gis = gisFalso();
+  try {
+    olvidarToken();
+    const p = pedirToken("cliente-1");
+    gis.ultima().callback({ access_token: "corto", expires_in: 30, scope: "https://www.googleapis.com/auth/drive.file" });
+    assert.equal(await p, "corto");
+    const p2 = pedirToken("cliente-1");
+    assert.equal(gis.estado.pedidos.length, 2);
+    gis.ultima().callback({ access_token: "largo", expires_in: 3599, scope: "https://www.googleapis.com/auth/drive.file" });
+    assert.equal(await p2, "largo");
+  } finally {
+    olvidarToken();
+    gis.limpiar();
+  }
+});
+
+test("pedirToken: ventana bloqueada da un mensaje claro; cerrar la ventana es cancelar; sin permiso es PERMISO", async () => {
+  const gis = gisFalso();
+  try {
+    olvidarToken();
+    const p1 = pedirToken("cliente-1");
+    gis.ultima().error_callback({ type: "popup_failed_to_open" });
+    await assert.rejects(p1, { message: "Google no pudo abrir su ventana. Revisa que no estén bloqueadas las ventanas emergentes." });
+
+    const p2 = pedirToken("cliente-1");
+    gis.ultima().error_callback({ type: "popup_closed" });
+    await assert.rejects(p2, { name: "AbortError" });
+
+    const p3 = pedirToken("cliente-1");
+    gis.ultima().callback({ error: "access_denied" });
+    await assert.rejects(p3, (e: unknown) => e instanceof ErrorDrive && e.codigo === "PERMISO");
+
+    // Quitó la casilla de Drive en la pantalla de Google: el token no sirve para guardar.
+    const p4 = pedirToken("cliente-1");
+    gis.ultima().callback({ access_token: "sin-drive", expires_in: 3599, scope: "email profile" });
+    await assert.rejects(p4, (e: unknown) => e instanceof ErrorDrive && e.codigo === "PERMISO");
+  } finally {
+    olvidarToken();
+    gis.limpiar();
+  }
 });

@@ -2,7 +2,7 @@
 // BORRADOR del 13 de noviembre de 2026: debe revisarlo un abogado o contador antes del lanzamiento.
 // Si cambia el contenido de fondo, sube VERSION_LEGAL: las cuentas nuevas guardan qué versión aceptaron.
 
-export const VERSION_LEGAL = "2026-11-13";
+export const VERSION_LEGAL = "2026-11-15";
 export const CONTACTO_LEGAL = "hectordehoyos053@gmail.com";
 
 export type Seccion = { titulo: string; parrafos: string[] };
@@ -244,6 +244,7 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
           "Para generar contenido, lo que escribes o subes (por ejemplo, una descripción, una foto de referencia o un audio para subtítulos) se envía al servicio de IA que corresponda: Cloudflare Workers AI, o Replicate o Anthropic si usas tus propias claves. Esos servicios lo procesan según sus propias políticas.",
           "Si usas las tomas de video con IA, la foto que marcas y el movimiento que escribes se envían a fal.ai para generar el clip. Esa foto y el clip que resulta se guardan en nuestro almacenamiento privado (Cloudflare R2), ligados a tu negocio, para armar tu video y no cobrarte dos veces la misma toma. Los de la prueba gratis se borran a los 30 días; los demás se conservan hasta que nos pidas borrarlos.",
           "No subas datos personales sensibles de otras personas en tus pedidos a la IA.",
+          "Si eliges «Guardar en Drive», el archivo se sube directo desde tu dispositivo a tu propio Google Drive, con un permiso limitado a los archivos que Studio crea (no puede ver ni abrir el resto de tu Drive). InnovationTECH no recibe ni guarda el permiso (token) de Google ni una copia del archivo; el archivo queda bajo las condiciones de tu cuenta de Google.",
         ],
       },
       {
@@ -321,6 +322,7 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
           "To generate content, what you type or upload (for example, a description, a reference photo or an audio file for subtitles) is sent to the relevant AI service: Cloudflare Workers AI, or Replicate or Anthropic if you use your own keys. Those services process it under their own policies.",
           "If you use AI video shots, the photo you mark and the motion you describe are sent to fal.ai to generate the clip. That photo and the resulting clip are stored in our private storage (Cloudflare R2), linked to your business, to build your video and avoid charging you twice for the same shot. Those from the free trial are deleted after 30 days; the rest are kept until you ask us to delete them.",
           "Do not include other people’s sensitive personal data in your AI requests.",
+          "If you choose “Save to Drive”, the file is uploaded directly from your device to your own Google Drive, with a permission limited to the files Studio creates (it cannot see or open the rest of your Drive). InnovationTECH does not receive or keep the Google permission (token) or a copy of the file; the file is subject to your Google account’s terms.",
         ],
       },
       {

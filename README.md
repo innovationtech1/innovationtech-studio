@@ -274,13 +274,14 @@ Entra a Netlify → proyecto **innovationtech-studio** → *Project configuratio
 | `R2_BUCKET` | Nombre del bucket de R2 (por ejemplo `studio-videos`) |
 | `VIDEO_IA` | Opcional. `off` apaga al instante las tomas con IA (los reels con animación siguen funcionando) |
 | `STUDIO_COLECCION_PREFIJO` | Opcional. Inicio del nombre de las colecciones de Firestore (`studio_` si no la pones). Solo para las versiones de prueba: `prueba_studio_` (ver Paso 4) |
+| `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | Opcional. ID de cliente de Google para «Guardar en Drive» (es público; ver «Guardar en Google Drive»). Sin él, el botón no aparece |
 
 Netlify bloquea la publicación si encuentra en el código un valor igual a una variable. Como las variables no secretas sí aparecen en el sitio, agrega una variable más:
 
 - `SECRETS_SCAN_OMIT_KEYS` con este valor, **separado por comas y sin espacios**:
 
 ```
-FIREBASE_PROJECT_ID,NEXT_PUBLIC_FIREBASE_API_KEY,NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,NEXT_PUBLIC_FIREBASE_PROJECT_ID,STUDIO_ADMIN_EMAILS,CF_ACCOUNT_ID,STUDIO_CUENTAS,NEXT_PUBLIC_STUDIO_CUENTAS,STUDIO_COLECCION_PREFIJO,R2_ACCOUNT_ID,R2_BUCKET,VIDEO_IA
+FIREBASE_PROJECT_ID,NEXT_PUBLIC_FIREBASE_API_KEY,NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,NEXT_PUBLIC_FIREBASE_PROJECT_ID,STUDIO_ADMIN_EMAILS,CF_ACCOUNT_ID,STUDIO_CUENTAS,NEXT_PUBLIC_STUDIO_CUENTAS,STUDIO_COLECCION_PREFIJO,R2_ACCOUNT_ID,R2_BUCKET,VIDEO_IA,NEXT_PUBLIC_GOOGLE_CLIENT_ID
 ```
 
 Nunca pongas una clave secreta en una variable que empiece con `NEXT_PUBLIC_`.
@@ -421,6 +422,40 @@ Notas:
 - Una tarea programada de Netlify (`netlify/functions/video-ia-respaldo.mts`, cada 5 minutos, solo en el sitio principal) empuja la fila por si se pierde un aviso.
 - Los archivos de R2 son privados: el navegador solo recibe enlaces temporales de una hora.
 - Mientras falten `FAL_KEY` o las variables de R2, «Generar con IA» responde que los videos con IA están en pausa y el resto de Studio no cambia.
+
+### Guardar en Google Drive
+
+Junto a cada «Descargar» (Creador de Reels, Galería) aparece **«Guardar en Drive»**: el archivo se sube **directo del aparato del cliente a su propio Google Drive**, a una carpeta llamada «InnovationTECH Studio». No pasa por nuestro servidor y no cuesta nada. Studio solo pide el permiso `drive.file` («solo los archivos que esta app crea»): no puede ver ni abrir el resto del Drive del cliente. El permiso de Google (*token*: una llave temporal de una hora) vive solo en la memoria de la página; no se guarda en ningún lado.
+
+Mientras no pongas `NEXT_PUBLIC_GOOGLE_CLIENT_ID`, el botón no aparece y todo lo demás funciona igual.
+
+**Cómo prepararlo (una sola vez, gratis):**
+
+1. Entra a <https://console.cloud.google.com> con la cuenta de Google del negocio y elige arriba el proyecto **`innovationtech-nova`** (el mismo de Firebase).
+2. **Activar la API:** *APIs & Services → Library*, busca **«Google Drive API»** y toca **Enable**.
+3. **Pantalla de permisos** (lo que ve el cliente cuando Google le pregunta): *APIs & Services → OAuth consent screen*.
+   - Tipo de usuario: **External**.
+   - Nombre de la app (por ejemplo «InnovationTECH Studio»), correo de soporte y logo.
+   - Enlaces: Privacidad `https://innovationtech-studio.netlify.app/privacidad` y Términos `https://innovationtech-studio.netlify.app/terminos`.
+   - Permisos (*scopes*): agrega solo `https://www.googleapis.com/auth/drive.file`.
+   - Al terminar, toca **Publish app** (pasar a producción). `drive.file` no es un permiso sensible, así que Google no pide la verificación larga.
+4. **ID de cliente:** *APIs & Services → Credentials → Create credentials → OAuth client ID*.
+   - Tipo: **Web application**.
+   - *Authorized JavaScript origins* (las direcciones desde donde se puede pedir el permiso), estas tres:
+     - `https://innovationtech-studio.netlify.app`
+     - `https://pruebas--innovationtech-studio.netlify.app`
+     - `http://localhost:3000`
+   - No hace falta poner *redirect URIs*. Toca **Create** y copia el **Client ID** (termina en `.apps.googleusercontent.com`).
+5. **Netlify:** agrega la variable `NEXT_PUBLIC_GOOGLE_CLIENT_ID` con ese Client ID. **No es secreta** (va en la página, como la configuración de Firebase); por eso también va en la lista de `SECRETS_SCAN_OMIT_KEYS` (Paso 2). Para probar en tu computadora, ponla también en `.env.local`.
+6. **Vuelve a publicar** el sitio (*Deploys → Trigger deploy*): las variables `NEXT_PUBLIC_` solo se aplican al construir.
+7. **Prueba:** en Chrome o Safari, haz un reel, toca **Guardar en Drive**, acepta en la ventana de Google y espera «Guardado en Drive». Toca **Abrir en Drive**: el video debe estar en la carpeta «InnovationTECH Studio».
+
+Notas:
+
+- Dentro de la app de Instagram, Facebook o TikTok, Google no deja iniciar sesión: Studio le pide al cliente abrirlo en Chrome o Safari.
+- Si el navegador bloquea las ventanas emergentes, Studio lo avisa; el cliente debe permitirlas para este sitio.
+- Los videos grandes se suben por partes de 8 MB; si se corta la conexión, la subida sigue desde donde quedó. El cliente puede cancelarla.
+- El espacio usado es el del Drive del cliente (15 GB gratis en Google).
 
 ### Cómo usar `/admin`
 

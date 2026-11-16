@@ -188,6 +188,14 @@ export const EN: Record<string, string> = {
   "Colores en palabras (para la IA, opcional)": "Colors in words (for the AI, optional)",
   "Compartir": "Share",
   "Preparando…": "Preparing…",
+  "Todavía no hay imagen para compartir.": "There is no image to share yet.",
+  "Guardar en Drive": "Save to Drive",
+  "Guardado en Drive": "Saved to Drive",
+  "Abrir en Drive": "Open in Drive",
+  "Reintentar": "Retry",
+  "Abre Studio en Chrome o Safari para guardar en Google Drive.": "Open Studio in Chrome or Safari to save to Google Drive.",
+  "Google no pudo abrir su ventana. Revisa que no estén bloqueadas las ventanas emergentes.": "Google couldn't open its window. Check that pop-ups aren't blocked.",
+  "No se pudo conectar con Google. Revisa tu conexión y vuelve a intentarlo.": "Couldn't connect to Google. Check your connection and try again.",
   "Tu navegador no deja compartir este archivo: lo descargamos. Súbelo desde tu aparato a la red que quieras.": "Your browser can't share this file, so we downloaded it. Upload it from your device to the network you want.",
   "Tu sesión de Google venció. Vuelve a intentarlo.": "Your Google session expired. Please try again.",
   "Tu Google Drive está lleno. Libera espacio y vuelve a intentarlo.": "Your Google Drive is full. Free up space and try again.",
@@ -1421,6 +1429,7 @@ export const EN: Record<string, string> = {
 
 // Textos con números u otras partes que cambian
 export const EN_PATTERNS: [RegExp, string][] = [
+  [/^Subiendo a Drive… (\d+)%$/, "Uploading to Drive… $1%"],
   [/^Conectada \(cuenta …([0-9a-f]{4})\) · Sin límites del mes$/i, "Connected (account …$1) · No monthly limits"],
   [/^Invitación lista\. Pídele a (.+) que entre a Studio con ese correo\.$/, "Invitation ready. Ask $1 to sign in to Studio with that email."],
   [/^Se acabó lo incluido este mes \((\d+) (.+)\)\. Compra un paquete o espera al (.+)\.$/, "You've used everything included this month ($1 $2). Buy a pack or wait until $3."],
