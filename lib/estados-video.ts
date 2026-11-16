@@ -1,7 +1,8 @@
 // Textos de los estados de un video con IA, tal como se ven en el estudio de reels.
 // Funciones puras (sin pantalla) para poder probarlas.
 
-export type TrabajoVisto = { id: string; estado: "en_fila" | "enviado" | "listo" | "fallo"; lugar?: number; clipUrl?: string; desdeCache?: boolean };
+// vencido: estaba lista, pero su clip ya se borró (las de la prueba gratis duran 30 días)
+export type TrabajoVisto = { id: string; estado: "en_fila" | "enviado" | "listo" | "fallo"; lugar?: number; clipUrl?: string; desdeCache?: boolean; vencido?: boolean };
 
 export type FaseVideo =
   | { tipo: "subiendo"; pct: number }

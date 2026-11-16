@@ -406,14 +406,19 @@ export function ponerEnLibre(clips: Clip[], image: string): Clip[] {
 // Antes de grabar: ¿qué clips saldrían como imagen fija sin que nadie lo pidiera?
 // videos = clips de video cuyo archivo no está; tomas = tomas ya generadas que no se pudieron traer.
 // Devuelve el número de clip (desde 1) contando solo los que entran al video.
+// vencidas = tomas (por id de trabajo) cuyo clip ya se borró: se dicen aparte, no es la conexión.
 export function sinFuente(
   clips: Clip[],
-  fuentes: { tomas?: Record<string, string | null | undefined>; videos?: Record<string, string | null | undefined> },
-): { videos: number[]; tomas: number[] } {
-  const r = { videos: [] as number[], tomas: [] as number[] };
+  fuentes: {
+    tomas?: Record<string, string | null | undefined>;
+    videos?: Record<string, string | null | undefined>;
+    vencidas?: ReadonlySet<string>;
+  },
+): { videos: number[]; tomas: number[]; vencidas: number[] } {
+  const r = { videos: [] as number[], tomas: [] as number[], vencidas: [] as number[] };
   clips.filter(presente).forEach((c, i) => {
     if (c.tipo === "video" && !(c.archivoId && fuentes.videos?.[c.archivoId])) r.videos.push(i + 1);
-    if (c.tipo === "toma" && c.trabajoId && !fuentes.tomas?.[c.id]) r.tomas.push(i + 1);
+    if (c.tipo === "toma" && c.trabajoId && !fuentes.tomas?.[c.id]) (fuentes.vencidas?.has(c.trabajoId) ? r.vencidas : r.tomas).push(i + 1);
   });
   return r;
 }

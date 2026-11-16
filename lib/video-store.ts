@@ -1,4 +1,5 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 import { FieldValue } from "firebase-admin/firestore";
 import { colecciones } from "./colecciones";
 import { db } from "./firebase-server";
@@ -26,6 +27,7 @@ export type TrabajoVideo = {
   statusUrl?: string;
   responseUrl?: string;
   clipKey?: string;
+  clipCreado?: number; // cuándo se guardó el clip en R2 (los de demo/ se borran a los 30 días)
   costoCentavos: number;
   creado: number;
   actualizado: number;
@@ -83,12 +85,18 @@ export interface VideoStore {
     opciones?: { requestId?: string; devolverGasto?: boolean },
   ): Promise<boolean>;
   getGasto(dia: string): Promise<number>;
-  getCache(llave: string): Promise<string | null>;
-  guardarCache(llave: string, clipKey: string): Promise<void>;
-  // Candado con vencimiento: true si lo tomó. Vence solo a los `ms` (por si el servidor se cae).
-  tomarCandado(nombre: string, ms: number, ahora: number): Promise<boolean>;
-  soltarCandado(nombre: string): Promise<void>;
+  // El clip ya generado para esa llave, o null. Los de demo/ con más de 29 días no cuentan (R2 los borra a los 30).
+  getCache(llave: string, ahora: number): Promise<{ clipKey: string; creado: number } | null>;
+  guardarCache(llave: string, clipKey: string, ahora: number): Promise<void>;
+  // Candado con vencimiento: devuelve una ficha si lo tomó (null si no). Vence solo a los `ms` (por si el
+  // servidor se cae). Soltar solo lo borra si sigue siendo de esa ficha (si venció y otro lo tomó, no se toca).
+  tomarCandado(nombre: string, ms: number, ahora: number): Promise<string | null>;
+  soltarCandado(nombre: string, ficha: string): Promise<void>;
 }
+
+// Un clip de demo/ que ya no sirve: R2 lo borra a los 30 días; con 29 ya no se entrega.
+export const VIDA_DEMO_MS = 29 * 24 * 60 * 60 * 1000;
+export const clipVencido = (clipKey: string, creado: number, ahora: number) => clipKey.startsWith("demo/") && ahora - creado > VIDA_DEMO_MS;
 
 // Orden de la fila.
 export const ordenFila = (a: TrabajoVideo, b: TrabajoVideo) => a.prioridad - b.prioridad || a.creado - b.creado || a.id.localeCompare(b.id);
@@ -235,24 +243,31 @@ export function firestoreVideoStore(): VideoStore {
     async getGasto(dia) {
       return numero((await db().collection(C.gastoVideo).doc(dia).get()).data()?.centavos);
     },
-    async getCache(llave) {
-      const v = (await db().collection(C.cacheVideo).doc(llave).get()).data()?.clipKey;
-      return typeof v === "string" ? v : null;
+    async getCache(llave, ahora) {
+      const d = (await db().collection(C.cacheVideo).doc(llave).get()).data();
+      if (typeof d?.clipKey !== "string") return null;
+      const creado = numero(d.creado);
+      return clipVencido(d.clipKey, creado, ahora) ? null : { clipKey: d.clipKey, creado };
     },
-    async guardarCache(llave, clipKey) {
-      await db().collection(C.cacheVideo).doc(llave).set({ clipKey, creado: Date.now() });
+    async guardarCache(llave, clipKey, ahora) {
+      await db().collection(C.cacheVideo).doc(llave).set({ clipKey, creado: ahora });
     },
     async tomarCandado(nombre, ms, ahora) {
       const ref = db().collection(C.candados).doc(nombre);
+      const ficha = randomUUID();
       return db().runTransaction(async (t) => {
         const s = await t.get(ref);
-        if (s.exists && numero(s.data()?.hasta) > ahora) return false;
-        t.set(ref, { hasta: ahora + ms });
-        return true;
+        if (s.exists && numero(s.data()?.hasta) > ahora) return null;
+        t.set(ref, { hasta: ahora + ms, ficha });
+        return ficha;
       });
     },
-    async soltarCandado(nombre) {
-      await db().collection(C.candados).doc(nombre).delete();
+    async soltarCandado(nombre, ficha) {
+      const ref = db().collection(C.candados).doc(nombre);
+      await db().runTransaction(async (t) => {
+        const s = await t.get(ref);
+        if (s.exists && s.data()?.ficha === ficha) t.delete(ref);
+      });
     },
   };
 }

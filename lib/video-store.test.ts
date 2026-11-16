@@ -117,20 +117,41 @@ test("listarTrabajos devuelve solo los que existen; son copias", async () => {
   assert.equal((await s.getTrabajo("b"))?.estado, "en_fila");
 });
 
-test("caché: guarda y lee la llave del clip", async () => {
+test("caché: guarda y lee la llave del clip (con cuándo se guardó)", async () => {
   const s = memoryVideoStore();
-  assert.equal(await s.getCache("k"), null);
-  await s.guardarCache("k", "negocios/n1/clips/t1.mp4");
-  assert.equal(await s.getCache("k"), "negocios/n1/clips/t1.mp4");
+  assert.equal(await s.getCache("k", T0), null);
+  await s.guardarCache("k", "negocios/n1/clips/t1.mp4", T0);
+  assert.deepEqual(await s.getCache("k", T0 + 1000), { clipKey: "negocios/n1/clips/t1.mp4", creado: T0 });
+});
+
+test("caché: un clip de demo/ de más de 29 días ya no sirve (R2 lo borra a los 30); los demás sí", async () => {
+  const s = memoryVideoStore();
+  const DIA_MS = 24 * 60 * 60 * 1000;
+  await s.guardarCache("demo", "demo/negocios/n1/clips/t1.mp4", T0);
+  await s.guardarCache("pago", "negocios/n1/clips/t2.mp4", T0);
+  assert.ok(await s.getCache("demo", T0 + 28 * DIA_MS));
+  assert.equal(await s.getCache("demo", T0 + 29 * DIA_MS + 1), null);
+  assert.ok(await s.getCache("pago", T0 + 400 * DIA_MS));
 });
 
 test("candado: exclusivo hasta soltarlo o hasta que vence", async () => {
   const s = memoryVideoStore();
-  assert.equal(await s.tomarCandado("despacho", 10_000, T0), true);
-  assert.equal(await s.tomarCandado("despacho", 10_000, T0 + 1), false);
-  assert.equal(await s.tomarCandado("despacho", 10_000, T0 + 10_001), true); // venció
-  await s.soltarCandado("despacho");
-  assert.equal(await s.tomarCandado("despacho", 10_000, T0 + 10_002), true);
+  const a = await s.tomarCandado("despacho", 10_000, T0);
+  assert.ok(a);
+  assert.equal(await s.tomarCandado("despacho", 10_000, T0 + 1), null);
+  const b = await s.tomarCandado("despacho", 10_000, T0 + 10_001); // venció
+  assert.ok(b);
+  await s.soltarCandado("despacho", b!);
+  assert.ok(await s.tomarCandado("despacho", 10_000, T0 + 10_002));
+});
+
+test("candado: quien lo perdió (venció y lo tomó otro) no puede soltar el del otro", async () => {
+  const s = memoryVideoStore();
+  const viejo = await s.tomarCandado("despacho", 10_000, T0);
+  const nuevo = await s.tomarCandado("despacho", 10_000, T0 + 10_001);
+  assert.ok(viejo && nuevo && viejo !== nuevo);
+  await s.soltarCandado("despacho", viejo!); // el primero termina tarde
+  assert.equal(await s.tomarCandado("despacho", 10_000, T0 + 10_002), null); // el segundo lo sigue teniendo
 });
 
 test("trabajosDesde: los actualizados desde una fecha, del más nuevo al más viejo", async () => {

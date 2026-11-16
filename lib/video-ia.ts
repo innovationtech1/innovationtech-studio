@@ -27,7 +27,7 @@ import {
 } from "./plans";
 import { carpetaEntorno, configR2, firmarUrl, llaveClip, negocioActivo, SIN_ALMACEN, subirDesdeUrl } from "./r2";
 import type { SesionVerificada } from "./verify-token";
-import { firestoreVideoStore, type EstadoTrabajo, type TrabajoVideo, type VideoStore } from "./video-store";
+import { clipVencido, firestoreVideoStore, type EstadoTrabajo, type TrabajoVideo, type VideoStore } from "./video-store";
 
 // Video con IA: cada toma de 5 s es un trabajo que pasa por una fila con prioridad, se manda a fal.ai,
 // y fal avisa por webhook cuando termina. Aquí están las cuatro piezas: crear, despachar, aviso y consultar.
@@ -35,7 +35,7 @@ import { firestoreVideoStore, type EstadoTrabajo, type TrabajoVideo, type VideoS
 
 export const EN_PAUSA = "Los videos con IA están en pausa por ahora. Puedes generar el video con animación.";
 const SEGUNDOS_ENLACE = 3600;
-const SEGUNDOS_FOTO_FAL = 3600; // enlace de la foto que se manda a fal
+const SEGUNDOS_FOTO_FAL = 6 * 3600; // enlace de la foto que se manda a fal: puede tardar en empezar
 const MS_CANDADO = 30_000;
 const CANDADO = "despacho_video";
 const MAX_TOMAS = 4;
@@ -177,6 +177,8 @@ function fotoDelNegocio(imagenKey: string, negocioId: string): string | null {
   const m = new RegExp(`^(?:demo\\/)?${e}negocios\\/([^/]+)\\/fotos\\/([0-9a-f]{64})\\.(?:jpg|png|webp)$`).exec(imagenKey);
   return m && m[1] === negocioId ? m[2] : null;
 }
+// Las fotos de demo/ son de la prueba gratis y R2 las borra a los 30 días: un plan de pago las sube de nuevo.
+const FOTO_DE_PRUEBA = "Esa foto se subió durante tu prueba gratis. Súbela de nuevo.";
 
 type TomaPedida = { imagenKey: string; movimiento: string; variacion: number };
 export function tomasValidas(v: unknown): TomaPedida[] | null {
@@ -192,7 +194,8 @@ export function tomasValidas(v: unknown): TomaPedida[] | null {
   return r;
 }
 
-export type TrabajoPublico = { id: string; estado: EstadoTrabajo; lugar?: number; clipUrl?: string; desdeCache?: boolean };
+// vencido: estaba lista, pero su clip de demo/ ya se borró (R2 los borra a los 30 días)
+export type TrabajoPublico = { id: string; estado: EstadoTrabajo; lugar?: number; clipUrl?: string; desdeCache?: boolean; vencido?: boolean };
 
 // Crea las tomas con IA de un video (de 1 a 4). Las que ya están en caché se entregan listas sin descontar.
 export async function crearVideo(
@@ -230,6 +233,7 @@ export async function crearVideo(
   for (const toma of tomas) {
     const fotoSha = fotoDelNegocio(toma.imagenKey, negocio.id);
     if (!fotoSha) return falla(403, "Esa foto no es de tu cuenta. Súbela de nuevo.");
+    if (plan !== "prueba" && toma.imagenKey.startsWith("demo/")) return falla(403, FOTO_DE_PRUEBA, "FOTO_PRUEBA");
     const cacheLlave = llaveCache(negocio.id, fotoSha, toma.movimiento, modeloCache, toma.variacion);
     llaves.push(cacheLlave);
     if (!porLlave.has(cacheLlave)) porLlave.set(cacheLlave, toma);
@@ -238,20 +242,21 @@ export async function crearVideo(
   // Sin cobros dobles: mientras se revisa y se cobra un pedido de este negocio, no entra otro
   // (dos toques seguidos, dos pestañas o un reintento por mala señal).
   const candado = `crear-video:${negocio.id}`;
-  if (!(await m.videos.tomarCandado(candado, 30_000, m.ahora))) {
+  const ficha = await m.videos.tomarCandado(candado, 30_000, m.ahora);
+  if (!ficha) {
     return falla(409, "Ya estamos preparando tus tomas. Espera unos segundos y vuelve a intentar.", "OCUPADO");
   }
   const idDe = new Map<string, string>(); // llave → trabajo que la atiende
   let trabajos: TrabajoVideo[] = [];
   let nuevas = 0;
   try {
-    const preparadas: { toma: TomaPedida; cacheLlave: string; clipKey: string | null }[] = [];
+    const preparadas: { toma: TomaPedida; cacheLlave: string; clipKey: string | null; clipCreado?: number }[] = [];
     for (const [cacheLlave, toma] of porLlave) {
-      const clipKey = await m.videos.getCache(cacheLlave);
+      const enCache = await m.videos.getCache(cacheLlave, m.ahora);
       // Si esa misma toma ya va en camino, se usa esa: no se crea ni se cobra otra
-      const enCurso = clipKey ? null : await m.videos.trabajoEnCurso(cacheLlave);
+      const enCurso = enCache ? null : await m.videos.trabajoEnCurso(cacheLlave);
       if (enCurso) idDe.set(cacheLlave, enCurso.id);
-      else preparadas.push({ toma, cacheLlave, clipKey });
+      else preparadas.push({ toma, cacheLlave, clipKey: enCache?.clipKey ?? null, clipCreado: enCache?.creado });
     }
 
     // Cuota: solo las tomas nuevas. El guardián revisa sesión, plan y descuenta del mes o del saldo.
@@ -308,7 +313,16 @@ export async function crearVideo(
       };
       idDe.set(p.cacheLlave, base.id);
       if (p.clipKey) {
-        return { ...base, prioridad: prioridadToma(plan, false), estado: "listo", clipKey: p.clipKey, desdeCache: true, costoCentavos: 0, reserva: { mes: "", delMes: 0, delSaldo: 0 } };
+        return {
+          ...base,
+          prioridad: prioridadToma(plan, false),
+          estado: "listo",
+          clipKey: p.clipKey,
+          clipCreado: p.clipCreado, // vence con el clip original, no con esta toma
+          desdeCache: true,
+          costoCentavos: 0,
+          reserva: { mes: "", delMes: 0, delSaldo: 0 },
+        };
       }
       // Cada toma recuerda de dónde salió (primero lo del mes, luego el saldo) para devolverla si falla
       const usaSaldo = delMes <= 0;
@@ -334,7 +348,7 @@ export async function crearVideo(
       return fallaLimite(await m.videos.tomasDelDia(negocio.id, hoy));
     }
   } finally {
-    await m.videos.soltarCandado(candado).catch(() => {});
+    await m.videos.soltarCandado(candado, ficha).catch(() => {});
   }
   // Los trabajos ya existen: pase lo que pase con el despacho, el navegador recibe sus ids
   const estados = new Map<string, string>(trabajos.map((t) => [t.id, t.estado]));
@@ -359,7 +373,8 @@ async function despacharCon(m: Mundo, cfgLeida?: PlanesConfig): Promise<{ enviad
   // Sin cuentas no hay tomas con IA: no se toca la base de datos (el respaldo corre cada 5 min)
   if (!cuentasActivas()) return { enviados: 0 };
   if (!m.encendido || !m.r2) return { enviados: 0 };
-  if (!(await m.videos.tomarCandado(CANDADO, MS_CANDADO, m.ahora))) return { enviados: 0 };
+  const ficha = await m.videos.tomarCandado(CANDADO, MS_CANDADO, m.ahora);
+  if (!ficha) return { enviados: 0 };
   let enviados = 0;
   try {
     const cfg = cfgLeida ?? (await m.store.getConfig());
@@ -423,7 +438,7 @@ async function despacharCon(m: Mundo, cfgLeida?: PlanesConfig): Promise<{ enviad
     }
     return { enviados };
   } finally {
-    await m.videos.soltarCandado(CANDADO);
+    await m.videos.soltarCandado(CANDADO, ficha);
   }
 }
 
@@ -465,8 +480,8 @@ async function completar(m: Mundo, t: TrabajoVideo, videoUrl: string, requestId?
   if (!m.r2) throw new Error("R2 sin configurar");
   const clipKey = llaveClip(t.negocioId, t.plan, t.id);
   await m.r2.subir(videoUrl, clipKey, "video/mp4");
-  if (await m.videos.terminarTrabajo(t.id, { estado: "listo", clipKey, actualizado: m.ahora }, { requestId })) {
-    await m.videos.guardarCache(t.cacheLlave, clipKey);
+  if (await m.videos.terminarTrabajo(t.id, { estado: "listo", clipKey, clipCreado: m.ahora, actualizado: m.ahora }, { requestId })) {
+    await m.videos.guardarCache(t.cacheLlave, clipKey, m.ahora);
   }
 }
 
@@ -639,7 +654,8 @@ export async function consultar(
   const trabajos = mios.map((t): TrabajoPublico => {
     const r: TrabajoPublico = { id: t.id, estado: t.estado };
     if (t.estado === "en_fila") r.lugar = fila.findIndex((f) => f.id === t.id) + 1 || fila.length + 1;
-    if (t.estado === "listo" && t.clipKey && m.r2) r.clipUrl = m.r2.firmar("GET", t.clipKey, SEGUNDOS_ENLACE);
+    if (t.estado === "listo" && t.clipKey && clipVencido(t.clipKey, t.clipCreado ?? t.actualizado, m.ahora)) r.vencido = true;
+    else if (t.estado === "listo" && t.clipKey && m.r2) r.clipUrl = m.r2.firmar("GET", t.clipKey, SEGUNDOS_ENLACE);
     if (t.desdeCache) r.desdeCache = true;
     return r;
   });

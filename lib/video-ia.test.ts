@@ -121,7 +121,7 @@ test("crear: 2 tomas en Pro se descuentan, se despachan al momento y suman al ga
   assert.equal(m.enviados.length, 2);
   assert.equal(m.enviados[0].modelo, MODELO);
   assert.deepEqual(m.enviados[0].input, {
-    image_url: `https://r2.example/${foto("a")}?m=GET&s=3600`, prompt: "zoom lento", duration: 5, resolution: "768P", prompt_expansion_mode: "balanced",
+    image_url: `https://r2.example/${foto("a")}?m=GET&s=21600`, prompt: "zoom lento", duration: 5, resolution: "768P", prompt_expansion_mode: "balanced",
   });
   const t = (await m.videos.getTrabajo(r.trabajos[0].id))!;
   assert.equal(m.enviados[0].webhook, `https://studio.example/api/video-ia/aviso?t=${t.id}&s=${t.secreto}`);
@@ -215,7 +215,7 @@ test("aviso OK: copia el clip a R2, queda listo, guarda caché y despacha el sig
   assert.equal(t.estado, "listo");
   assert.equal(t.clipKey, `negocios/n1/clips/${id}.mp4`);
   assert.deepEqual(m.subidas, [{ origen: "https://v3.fal.media/clip.mp4", llave: `negocios/n1/clips/${id}.mp4`, tipo: "video/mp4" }]);
-  assert.equal(await m.videos.getCache(t.cacheLlave), t.clipKey);
+  assert.equal((await m.videos.getCache(t.cacheLlave, AHORA))?.clipKey, t.clipKey);
   assert.equal(await m.videos.getGasto(HOY), COSTO);
   // fal reenvía el mismo aviso
   assert.deepEqual(await m.aviso(0, m.OK), { status: 200 });
@@ -946,7 +946,7 @@ test("dos pedidos del mismo negocio al mismo tiempo: el segundo espera, no se co
 test("al terminar un pedido (bien o rechazado) el candado queda libre para el siguiente", async () => {
   const m = mundo();
   await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "zoom" }] }, m.deps);
-  assert.equal(await m.videos.tomarCandado("crear-video:n1", 30_000, AHORA), true);
+  assert.ok(await m.videos.tomarCandado("crear-video:n1", 30_000, AHORA));
 });
 
 // ---------- Límite por cliente y tope del día ----------
@@ -1115,4 +1115,63 @@ test("sin la tarea de respaldo (versión de prueba), las consultas resuelven las
   assert.deepEqual(c.ok && c.trabajos, [{ id, estado: "fallo" }]);
   assert.equal(m.enviados.length, 1);
   assert.equal(m.store.uso("n1", MES).tomas_ia, 0);
+});
+
+// ---------- Detalles ----------
+
+test("una foto de demo/ ya no sirve cuando la cuenta dejó la prueba gratis (R2 la borra a los 30 días)", async () => {
+  const m = mundo(); // Pro
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a", "n1", true), movimiento: "" }] }, m.deps);
+  assert.ok(!r.ok && r.status === 403);
+  assert.equal(!r.ok && r.error, "Esa foto se subió durante tu prueba gratis. Súbela de nuevo.");
+  assert.equal(m.store.uso("n1", MES).tomas_ia, 0);
+});
+
+test("el enlace de la foto que se manda a fal dura 6 horas (fal puede tardar en empezar)", async () => {
+  const m = mundo();
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  assert.match(String(m.enviados[0].input.image_url), /&s=21600$/);
+});
+
+test("clip de la prueba gratis con más de 29 días: consultar lo da por vencido (sin enlace) y el caché ya no lo usa", async () => {
+  const DIAS = 24 * 60 * MIN;
+  const m = mundo(PRUEBA);
+  const toma = { imagenKey: foto("a", "n1", true), movimiento: "zoom" };
+  const r = await crearVideo(req(), { tomas: [toma] }, m.deps);
+  await m.aviso(0, m.OK);
+  const id = r.ok ? r.trabajos[0].id : "";
+  const hoy = await consultar("u1", [id], m.deps);
+  assert.ok(hoy.ok && hoy.trabajos[0].clipUrl && !hoy.trabajos[0].vencido);
+  m.estado.now = AHORA + 30 * DIAS;
+  const tarde = await consultar("u1", [id], m.deps);
+  assert.deepEqual(tarde.ok && tarde.trabajos, [{ id, estado: "listo", vencido: true }]);
+  // Un clip de pago no vence
+  const p = mundo();
+  const rp = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, p.deps);
+  await p.aviso(0, p.OK);
+  p.estado.now = AHORA + 300 * DIAS;
+  const pago = await consultar("u1", [rp.ok ? rp.trabajos[0].id : ""], p.deps);
+  assert.ok(pago.ok && pago.trabajos[0].clipUrl && !pago.trabajos[0].vencido);
+});
+
+test("caché de la prueba gratis: una toma sacada del caché vence cuando vence el clip original", async () => {
+  const DIAS = 24 * 60 * MIN;
+  const m = mundo({ ...PRUEBA, pruebaHasta: AHORA + 60 * DIAS });
+  const cfg = await m.store.getConfig();
+  await m.store.guardarConfig({ limitesMes: { ...cfg.limitesMes, prueba: { ...cfg.limitesMes.prueba, tomas_ia: 10 } } });
+  const toma = { imagenKey: foto("a", "n1", true), movimiento: "zoom" };
+  await crearVideo(req(), { tomas: [toma] }, m.deps);
+  await m.aviso(0, m.OK);
+  // A los 20 días sale del caché…
+  m.estado.now = AHORA + 20 * DIAS;
+  const r = await crearVideo(req(), { tomas: [toma] }, m.deps);
+  assert.ok(r.ok && r.trabajos[0].estado === "listo");
+  const id = r.ok ? r.trabajos[0].id : "";
+  // …y a los 30 días del clip original ya no está, aunque esta toma tenga 10 días
+  m.estado.now = AHORA + 30 * DIAS;
+  const c = await consultar("u1", [id], m.deps);
+  assert.ok(c.ok && c.trabajos[0].vencido === true && !c.trabajos[0].clipUrl);
+  // Y pedirla otra vez genera una nueva (el caché ya no la entrega)
+  const otra = await crearVideo(req(), { tomas: [toma] }, m.deps);
+  assert.ok(otra.ok && otra.trabajos[0].estado === "enviado");
 });

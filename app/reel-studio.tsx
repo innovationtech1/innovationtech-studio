@@ -706,6 +706,8 @@ export default function ReelStudio({
   // Cada clip animado guarda el id de su toma (trabajoId): así se puede retomar, duplicar y volver a
   // grabar sin pedirla ni cobrarla de nuevo. Los enlaces de los clips caducan en 1 hora: se piden frescos.
   const enlacesToma = useRef(new Map<string, { url: string; cuando: number }>());
+  // Tomas cuyo clip ya se borró (las de la prueba gratis duran 30 días) o que el servidor ya no tiene
+  const tomasVencidas = useRef(new Set<string>());
   const [estadoToma, setEstadoToma] = useState<Record<string, string>>({}); // id del clip → qué está pasando
   const [animando, setAnimando] = useState<string[]>([]); // clips con una toma en camino
   // El mismo dato, pero al instante: dos toques seguidos no deben pedir (ni cobrar) dos tomas
@@ -724,6 +726,14 @@ export default function ReelStudio({
       topeHoy = topeHoy || r.topeHoy;
     }
     for (const t of vistos) if (t.estado === "listo" && t.clipUrl) enlacesToma.current.set(t.id, { url: t.clipUrl, cuando: Date.now() });
+    const vistosIds = new Set(vistos.map((t) => t.id));
+    for (const id of ids) {
+      const t = vistos.find((x) => x.id === id);
+      if (!vistosIds.has(id) || t?.vencido) {
+        tomasVencidas.current.add(id);
+        enlacesToma.current.delete(id);
+      } else tomasVencidas.current.delete(id);
+    }
     return { vistos, topeHoy };
   }
 
@@ -743,6 +753,8 @@ export default function ReelStudio({
   async function pedirTomaDe(c: Clip): Promise<string> {
     const f = await prepararFoto(c.image);
     let llave = subidas.current.get(f.sha256);
+    // Una foto subida durante la prueba gratis (demo/) ya no sirve si la cuenta cambió de plan: se sube otra vez
+    if (llave && llave.startsWith("demo/") !== esDemo) llave = undefined;
     if (!llave) {
       llave = await subirFoto(f, () => {});
       subidas.current.set(f.sha256, llave);
@@ -832,13 +844,18 @@ export default function ReelStudio({
     // Si los videos del proyecto aún se están abriendo (recién cargada la app), se espera un momento
     const idsVideo = lista.flatMap((c) => (c.tipo === "video" && c.archivoId ? [c.archivoId] : []));
     for (let k = 0; k < 50 && idsVideo.some((id) => !(id in urlsRef.current)); k++) await new Promise((r) => setTimeout(r, 100));
-    const faltan = sinFuente(lista, { tomas, videos: urlsRef.current });
+    const faltan = sinFuente(lista, { tomas, videos: urlsRef.current, vencidas: tomasVencidas.current });
     if (faltan.videos.length) {
       throw new Error(`El video del clip ${faltan.videos.join(", ")} no está en este dispositivo. Vuelve a subirlo o quita ese clip.`);
     }
-    const avisos = faltan.tomas.length
-      ? [`No se pudo traer la toma con IA del clip ${faltan.tomas.join(", ")} (revisa tu conexión): ahí la foto se ve con zoom. Vuelve a crear el video cuando tengas señal; no se cobra de nuevo.`]
-      : [];
+    const avisos = [
+      ...(faltan.tomas.length
+        ? [`No se pudo traer la toma con IA del clip ${faltan.tomas.join(", ")} (revisa tu conexión): ahí la foto se ve con zoom. Vuelve a crear el video cuando tengas señal; no se cobra de nuevo.`]
+        : []),
+      ...(faltan.vencidas.length
+        ? [`La toma con IA del clip ${faltan.vencidas.join(", ")} ya venció y se borró: ahí la foto se ve con zoom. Toca «Rehacer» en ese clip para animarla otra vez.`]
+        : []),
+    ];
     aLaVista(salida.current);
     const r = await renderReel({
       // Las opciones se leen AHORA (no las de cuando se tocó el botón): tras esperar las tomas con IA,

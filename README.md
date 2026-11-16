@@ -421,7 +421,7 @@ Protecciones que ya vienen puestas (se pueden cambiar en Firestore, documento `s
    ]
    ```
 
-5. En el bucket → *Settings → Object lifecycle rules*, agrega una regla: prefijo `demo/`, **borrar a los 30 días**. Ahí van las fotos y clips de las pruebas gratis.
+5. En el bucket → *Settings → Object lifecycle rules*, agrega una regla: prefijo `demo/`, **borrar a los 30 días**. Ahí van las fotos y clips de las pruebas gratis (también los de la versión de prueba, en `demo/pruebas/`). Studio deja de usar esos clips a los 29 días (el editor avisa que la toma venció) y no acepta fotos de `demo/` de una cuenta que ya pasó a un plan de pago.
 6. Vuelve a publicar el sitio y, en `/admin`, presiona **Preparar Stripe** otra vez para que cree el precio del paquete **Video** ($15).
 7. **Índice de Firestore para la fila** (gratis; una sola vez): en la consola de Firebase → *Firestore Database → Indexes → Composite → Create index*: colección `studio_trabajos_video`, campos `estado` (Ascending), `prioridad` (Ascending) y `creado` (Ascending), alcance *Collection*. Repite con la colección `prueba_studio_trabajos_video` si usas la versión de prueba. Tarda unos minutos en quedar *Enabled*. Es el mismo que está en `firestore.indexes.json` (con la herramienta de Firebase: `firebase deploy --only firestore:indexes`). Sin el índice todo sigue funcionando, pero la fila se ordena en el servidor y en el registro aparece un aviso.
 8. **Prueba:** entra con una cuenta en prueba, sube 2 fotos al Creador de Reels, marca una «Con IA» y toca **Generar con IA**. Debe pasar por «Subiendo…», «En fila», «Toma 1 de 1 · Generando…» y terminar con el video listo (suele tardar de 1 a 3 minutos).

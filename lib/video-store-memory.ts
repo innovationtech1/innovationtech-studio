@@ -1,4 +1,4 @@
-import { CAMPOS_ENVIO, esEnvioVigente, ordenFila, type TrabajoVideo, type VideoStore } from "./video-store";
+import { CAMPOS_ENVIO, clipVencido, esEnvioVigente, ordenFila, type TrabajoVideo, type VideoStore } from "./video-store";
 
 // Versión en memoria del almacén de video, para las pruebas. Cada método corre de un tirón
 // (sin await en medio), así que es atómico como una transacción.
@@ -7,8 +7,9 @@ export type MemoryVideoStore = VideoStore & { todos(): TrabajoVideo[] };
 export function memoryVideoStore(semilla: { gasto?: Record<string, number> } = {}): MemoryVideoStore {
   const trabajos = new Map<string, TrabajoVideo>();
   const gasto = new Map<string, number>(Object.entries(semilla.gasto ?? {}));
-  const cache = new Map<string, string>();
-  const candados = new Map<string, number>();
+  const cache = new Map<string, { clipKey: string; creado: number }>();
+  const candados = new Map<string, { hasta: number; ficha: string }>();
+  let fichas = 0;
   const porDia = new Map<string, number>(); // negocio|día → tomas nuevas
   const copia = <T>(v: T): T => structuredClone(v);
   const todos = () => [...trabajos.values()].map(copia);
@@ -90,19 +91,21 @@ export function memoryVideoStore(semilla: { gasto?: Record<string, number> } = {
     async getGasto(dia) {
       return gasto.get(dia) ?? 0;
     },
-    async getCache(llave) {
-      return cache.get(llave) ?? null;
+    async getCache(llave, ahora) {
+      const c = cache.get(llave);
+      return c && !clipVencido(c.clipKey, c.creado, ahora) ? { ...c } : null;
     },
-    async guardarCache(llave, clipKey) {
-      cache.set(llave, clipKey);
+    async guardarCache(llave, clipKey, ahora) {
+      cache.set(llave, { clipKey, creado: ahora });
     },
     async tomarCandado(nombre, ms, ahora) {
-      if ((candados.get(nombre) ?? 0) > ahora) return false;
-      candados.set(nombre, ahora + ms);
-      return true;
+      if ((candados.get(nombre)?.hasta ?? 0) > ahora) return null;
+      const ficha = `ficha-${++fichas}`;
+      candados.set(nombre, { hasta: ahora + ms, ficha });
+      return ficha;
     },
-    async soltarCandado(nombre) {
-      candados.delete(nombre);
+    async soltarCandado(nombre, ficha) {
+      if (candados.get(nombre)?.ficha === ficha) candados.delete(nombre);
     },
   };
 }
