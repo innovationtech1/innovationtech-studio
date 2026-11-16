@@ -22,6 +22,7 @@ import { CheckList, CloudflareCuenta, CloudflareWizard, testCloudflare, Welcome 
 import { EVENTO_AJUSTES } from "@/lib/limpiar-dispositivo";
 import { formatBytes, storageUsage, toDataUrl } from "@/lib/media-store";
 import type { Item, Settings } from "@/lib/types";
+import type { SecuenciaParaVideo } from "./secuencia-fotos";
 import AssistantChat from "./assistant-chat";
 import { extract, phrases } from "@/lib/phrases";
 import { BotonCuenta, CUENTAS_ON, MejorarPro, ProTag, useCuenta } from "./account-context";
@@ -39,6 +40,11 @@ const ShapeCrop = dynamic(() => import("./shape-crop"), { ssr: false });
 const ReelProyectos = dynamic(() => import("./reel-proyectos"), {
   ssr: false,
   loading: () => <section className="card">Cargando el creador de videos…</section>,
+});
+// Secuencia de fotos (pestaña Videos)
+const SecuenciaFotos = dynamic(() => import("./secuencia-fotos"), {
+  ssr: false,
+  loading: () => <section className="card">Cargando…</section>,
 });
 const ContentCalendar = dynamic(() => import("./content-calendar"), {
   ssr: false,
@@ -139,6 +145,14 @@ export default function Home() {
   // Diapositiva editada que vuelve al carrusel
   const [slideUpdate, setSlideUpdate] = useState<{ slide: number; url: string; n: number } | null>(null);
   const [imageMode, setImageMode] = usePersistentState<"ia" | "carrusel">("imagen:modo", "ia");
+  // Pestaña Videos: el Creador de Reels o «Secuencia de fotos»
+  const [videoMode, setVideoMode] = usePersistentState<"video" | "secuencia">("video:modo", "video");
+  // Fotos de la secuencia que van al Creador de Reels con «Hacer el video con NOVA» (n cambia en cada envío)
+  const [secuenciaVideo, setSecuenciaVideo] = useState<(SecuenciaParaVideo & { n: number }) | null>(null);
+  // Lo que llega al Creador de Reels desde otra sección (o desde la secuencia) abre «Video»
+  useEffect(() => {
+    if (handoff || reelTopic || sceneUpdate || secuenciaVideo) setVideoMode("video");
+  }, [handoff, reelTopic, sceneUpdate, secuenciaVideo, setVideoMode]);
   const [ready, setReady] = useState(false);
   const { status: demo } = useDemo();
   const [welcomeDone, setWelcomeDone] = usePersistentState("bienvenida", false);
@@ -211,7 +225,7 @@ export default function Home() {
   };
   // Las secciones pesadas se montan la primera vez que se abren y después se quedan (no se pierde nada al cambiar de pestaña)
   const [abiertas, setAbiertas] = useState<string[]>([]);
-  const marca = `${tab}|${tab === "video" ? "reel" : tab === "texto" ? textMode : ""}`;
+  const marca = `${tab}|${tab === "video" ? (videoMode === "secuencia" ? "secuencia" : "reel") : tab === "texto" ? textMode : ""}`;
   useEffect(() => setAbiertas((a) => (a.includes(marca) ? a : [...a, marca])), [marca]);
   const abierta = (m: string) => abiertas.includes(m) || marca === m;
   const go = (id: Tab) => {
@@ -394,7 +408,28 @@ export default function Home() {
         )}
       </div>
       <div hidden={tab !== "video"}>
-          <div>
+        <div className="mode-switch" role="tablist">
+          <button role="tab" aria-selected={videoMode === "video"} className={videoMode === "video" ? "active" : ""} onClick={() => setVideoMode("video")}>
+            <Clapperboard size={16} aria-hidden /> Video
+          </button>
+          <button role="tab" aria-selected={videoMode === "secuencia"} className={videoMode === "secuencia" ? "active" : ""} onClick={() => setVideoMode("secuencia")}>
+            <Images size={16} aria-hidden /> Secuencia de fotos
+          </button>
+        </div>
+        <div hidden={videoMode !== "secuencia"}>
+          {abierta("video|secuencia") && (
+            <SecuenciaFotos
+              settings={settings}
+              brand={brand}
+              onImages={addToGallery}
+              onHacerVideo={(s) => {
+                setSecuenciaVideo((v) => ({ ...s, n: (v?.n || 0) + 1 }));
+                go("video");
+              }}
+            />
+          )}
+        </div>
+          <div hidden={videoMode !== "video"}>
             <MejorarPro h="reels" />
             {abierta("video|reel") && (
             <ReelProyectos
