@@ -54,3 +54,13 @@ Privacidad: mencionar que, si el usuario lo pide, Studio guarda el archivo en **
 
 ## Para el que construye
 Detalles del componente, estilos (celular primero, paleta de marca), orden exacto de los botones y manejo de tamaños grandes quedan a su criterio, siguiendo los patrones del proyecto. Pruebas unitarias para la lógica pura (decidir compartir vs. descargar, trozos de la subida reanudable, armado de peticiones a Drive con `fetch` inyectado).
+
+## Respuestas y decisiones (revisión del constructor)
+- **De dónde sale el archivo:** el Creador de Reels entrega un Blob local (`URL.createObjectURL`, `reel-studio.tsx:160,349,448`). La Galería guarda `it.url` (puede ser `data:`, `blob:` o un enlace remoto). El componente acepta Blob o URL; si es URL, la convierte a Blob con `fetch`; si un enlace remoto no se deja leer (CORS), Compartir/Drive se ocultan para ese elemento y queda el «Descargar» de siempre. *(decisión de Claude)*
+- **Formato:** en Android el video puede salir en WebM; algunas apps (p. ej. Instagram) no aceptan WebM al compartir. No se convierte el video en esta etapa; si `canShare` dice que no, se descarga con el aviso. Se anota como límite conocido. *(decisión de Claude)*
+- **Navegadores dentro de otras apps (Instagram, Facebook, TikTok) y popups bloqueados:** el script de Google se precarga cuando aparece el botón, y el token se pide directo en el toque (sin esperas antes del popup). Si Google no puede abrirse (navegador dentro de una app o popup bloqueado), se muestra «Abre Studio en Chrome o Safari para guardar en Google Drive.». *(decisión de Claude)*
+- **Seguridad del sitio:** no hay Content-Security-Policy en el proyecto (revisado `netlify.toml`, `next.config`, `public/_headers`), así que nada bloquea `accounts.google.com` ni `www.googleapis.com`.
+- **Subida reanudable:** trozos de 8 MiB (múltiplos de 256 KiB, como pide Google), un reintento por trozo con espera corta, y retomar desde el último byte confirmado. *(decisión de Claude)*
+- **Botones existentes:** el editor de imágenes (un archivo) pasa al componente nuevo; el carrusel (varios archivos) usa la misma función de compartir con una lista de archivos. Se mantiene que cancelar el menú no muestra error. *(decisión de Claude)*
+- **Pruebas:** el proyecto ya usa `node:test` (`npm test`); no se instala nada nuevo.
+- **Legal:** solo `lib/legal.ts` (español e inglés), subiendo `VERSION_LEGAL`.
