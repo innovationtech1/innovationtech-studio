@@ -40,7 +40,7 @@ test("la fila sale por prioridad y luego por antigüedad", async () => {
 test("marcarEnviado: pasa a enviado y suma el costo al gasto del día", async () => {
   const s = memoryVideoStore();
   await s.crearTrabajos([trabajo()]);
-  assert.equal(await s.marcarEnviado("t1", { costo: 35, dia: DIA, tope: 500, simultaneos: 3, ahora: T0 + 1 }), "ok");
+  assert.equal(await s.marcarEnviado("t1", { costo: 35, dia: DIA, tope: 500, simultaneos: 3, ahora: T0 + 1, envio: "e1" }), "ok");
   const t = await s.getTrabajo("t1");
   assert.equal(t?.estado, "enviado");
   assert.equal(t?.enviado, T0 + 1);
@@ -52,17 +52,17 @@ test("marcarEnviado: pasa a enviado y suma el costo al gasto del día", async ()
 test("marcarEnviado respeta el tope del día y no cambia nada", async () => {
   const s = memoryVideoStore({ gasto: { [DIA]: 480 } });
   await s.crearTrabajos([trabajo()]);
-  assert.equal(await s.marcarEnviado("t1", { costo: 35, dia: DIA, tope: 500, simultaneos: 3, ahora: T0 }), "tope");
+  assert.equal(await s.marcarEnviado("t1", { costo: 35, dia: DIA, tope: 500, simultaneos: 3, ahora: T0, envio: "e1" }), "tope");
   assert.equal((await s.getTrabajo("t1"))?.estado, "en_fila");
   assert.equal(await s.getGasto(DIA), 480);
   // Justo al tope sí entra
-  assert.equal(await s.marcarEnviado("t1", { costo: 20, dia: DIA, tope: 500, simultaneos: 3, ahora: T0 }), "ok");
+  assert.equal(await s.marcarEnviado("t1", { costo: 20, dia: DIA, tope: 500, simultaneos: 3, ahora: T0, envio: "e1" }), "ok");
 });
 
 test("marcarEnviado es atómico: dos a la vez sobre el mismo trabajo, solo una gana", async () => {
   const s = memoryVideoStore();
   await s.crearTrabajos([trabajo()]);
-  const o = { costo: 35, dia: DIA, tope: 500, simultaneos: 3, ahora: T0 };
+  const o = { costo: 35, dia: DIA, tope: 500, simultaneos: 3, ahora: T0, envio: "e1" };
   const r = await Promise.all([s.marcarEnviado("t1", o), s.marcarEnviado("t1", o)]);
   assert.deepEqual(r.sort(), ["no_en_fila", "ok"]);
   assert.equal(await s.getGasto(DIA), 35);
@@ -71,7 +71,7 @@ test("marcarEnviado es atómico: dos a la vez sobre el mismo trabajo, solo una g
 test("marcarEnviado no pasa de los simultáneos", async () => {
   const s = memoryVideoStore();
   await s.crearTrabajos([trabajo({ id: "a" }), trabajo({ id: "b" }), trabajo({ id: "c" })]);
-  const o = { costo: 35, dia: DIA, tope: 500, simultaneos: 2, ahora: T0 };
+  const o = { costo: 35, dia: DIA, tope: 500, simultaneos: 2, ahora: T0, envio: "e1" };
   const r = await Promise.all(["a", "b", "c"].map((id) => s.marcarEnviado(id, o)));
   assert.deepEqual(r, ["ok", "ok", "lleno"]);
   assert.equal(await s.getGasto(DIA), 70);
@@ -81,9 +81,9 @@ test("terminarTrabajo: solo si sigue enviado; la segunda vez devuelve false", as
   const s = memoryVideoStore();
   await s.crearTrabajos([trabajo()]);
   assert.equal(await s.terminarTrabajo("t1", { estado: "listo" }), false); // todavía en fila
-  await s.marcarEnviado("t1", { costo: 35, dia: DIA, tope: 500, simultaneos: 3, ahora: T0 });
-  assert.equal(await s.terminarTrabajo("t1", { estado: "listo", clipKey: "c.mp4", actualizado: T0 + 9 }), true);
-  assert.equal(await s.terminarTrabajo("t1", { estado: "fallo" }), false);
+  await s.marcarEnviado("t1", { costo: 35, dia: DIA, tope: 500, simultaneos: 3, ahora: T0, envio: "e1" });
+  assert.equal(await s.terminarTrabajo("t1", { estado: "listo", clipKey: "c.mp4", actualizado: T0 + 9 }, { envio: "e1" }), true);
+  assert.equal(await s.terminarTrabajo("t1", { estado: "fallo" }, { envio: "e1" }), false);
   const t = await s.getTrabajo("t1");
   assert.equal(t?.estado, "listo");
   assert.equal(t?.clipKey, "c.mp4");
@@ -93,8 +93,8 @@ test("terminarTrabajo: solo si sigue enviado; la segunda vez devuelve false", as
 test("terminarTrabajo con devolverGasto resta el costo del día en que se envió (nunca bajo 0)", async () => {
   const s = memoryVideoStore();
   await s.crearTrabajos([trabajo()]);
-  await s.marcarEnviado("t1", { costo: 35, dia: DIA, tope: 500, simultaneos: 3, ahora: T0 });
-  assert.equal(await s.terminarTrabajo("t1", { estado: "en_fila", intentos: 1 }, { devolverGasto: true }), true);
+  await s.marcarEnviado("t1", { costo: 35, dia: DIA, tope: 500, simultaneos: 3, ahora: T0, envio: "e1" });
+  assert.equal(await s.terminarTrabajo("t1", { estado: "en_fila", intentos: 1 }, { devolverGasto: true, envio: "e1" }), true);
   assert.equal(await s.getGasto(DIA), 0);
   assert.equal((await s.getTrabajo("t1"))?.estado, "en_fila");
 });
@@ -102,10 +102,10 @@ test("terminarTrabajo con devolverGasto resta el costo del día en que se envió
 test("terminarTrabajo con requestId: ignora el aviso de un envío viejo", async () => {
   const s = memoryVideoStore();
   await s.crearTrabajos([trabajo()]);
-  await s.marcarEnviado("t1", { costo: 35, dia: DIA, tope: 500, simultaneos: 3, ahora: T0 });
-  await s.guardarEnvio("t1", { falRequestId: "req-2", statusUrl: "https://s", responseUrl: "https://r" });
-  assert.equal(await s.terminarTrabajo("t1", { estado: "listo" }, { requestId: "req-1" }), false);
-  assert.equal(await s.terminarTrabajo("t1", { estado: "listo" }, { requestId: "req-2" }), true);
+  await s.marcarEnviado("t1", { costo: 35, dia: DIA, tope: 500, simultaneos: 3, ahora: T0, envio: "e1" });
+  assert.equal(await s.guardarEnvio("t1", "e1", { falRequestId: "req-2", statusUrl: "https://s", responseUrl: "https://r" }), true);
+  assert.equal(await s.terminarTrabajo("t1", { estado: "listo" }, { requestId: "req-1", envio: "e1" }), false);
+  assert.equal(await s.terminarTrabajo("t1", { estado: "listo" }, { requestId: "req-2", envio: "e1" }), true);
 });
 
 test("listarTrabajos devuelve solo los que existen; son copias", async () => {
@@ -185,4 +185,26 @@ test("contarEnFila cuenta sin traer los trabajos", async () => {
   const s = memoryVideoStore();
   await s.crearTrabajos([trabajo({ id: "a" }), trabajo({ id: "b" }), trabajo({ id: "c", estado: "listo" })]);
   assert.equal(await s.contarEnFila(), 2);
+});
+
+test("cada envío tiene su ficha: lo de un envío anterior no cierra ni pisa el envío vigente", async () => {
+  const s = memoryVideoStore();
+  await s.crearTrabajos([trabajo()]);
+  await s.marcarEnviado("t1", { costo: 35, dia: DIA, tope: 500, simultaneos: 3, ahora: T0, envio: "A" });
+  assert.equal((await s.getTrabajo("t1"))?.envio, "A");
+  // El envío A vuelve a la fila (y la ficha se borra); sale el envío B
+  assert.equal(await s.terminarTrabajo("t1", { estado: "en_fila" }, { envio: "A" }), true);
+  assert.equal((await s.getTrabajo("t1"))?.envio, undefined);
+  await s.marcarEnviado("t1", { costo: 35, dia: DIA, tope: 500, simultaneos: 3, ahora: T0, envio: "B" });
+  // Lo que llegue tarde de A no cambia nada
+  assert.equal(await s.terminarTrabajo("t1", { estado: "listo" }, { envio: "A" }), false);
+  assert.equal(await s.terminarTrabajo("t1", { estado: "listo" }), false);
+  assert.equal(await s.guardarEnvio("t1", "A", { falRequestId: "req-A", statusUrl: "https://a", responseUrl: "https://a" }), false);
+  assert.equal(await s.guardarEnvio("t1", "B", { falRequestId: "req-B", statusUrl: "https://b", responseUrl: "https://b" }), true);
+  assert.equal((await s.getTrabajo("t1"))?.falRequestId, "req-B");
+  assert.equal(await s.guardarEnvio("t1", "A", { falRequestId: "req-A", statusUrl: "https://a", responseUrl: "https://a" }), false);
+  assert.equal((await s.getTrabajo("t1"))?.falRequestId, "req-B");
+  // Terminado, ya no se guarda nada
+  assert.equal(await s.terminarTrabajo("t1", { estado: "listo" }, { envio: "B" }), true);
+  assert.equal(await s.guardarEnvio("t1", "B", { falRequestId: "req-X", statusUrl: "https://x", responseUrl: "https://x" }), false);
 });

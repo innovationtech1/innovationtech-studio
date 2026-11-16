@@ -395,16 +395,17 @@ async function despacharCon(m: Mundo, cfgLeida?: PlanesConfig): Promise<{ enviad
       const costo = costoTomaCentavos(cfg, t.nivel);
       const tope = topeDe(cfg, t.prioridad);
       if (gasto + costo > tope) break; // no cabe hoy: los que siguen tampoco (van detrás en la fila)
-      const r = await m.videos.marcarEnviado(t.id, { costo, dia, tope, simultaneos: v.simultaneos, ahora: m.ahora });
+      const envio = randomUUID(); // ficha de ESTE envío: va en el enlace del aviso
+      const r = await m.videos.marcarEnviado(t.id, { costo, dia, tope, simultaneos: v.simultaneos, ahora: m.ahora, envio });
       if (r === "lleno" || r === "tope") break;
       if (r !== "ok") continue; // ya lo tomó otro despacho
       gasto += costo;
-      const enviado = { ...t, estado: "enviado" as const };
+      const enviado: TrabajoVideo = { ...t, estado: "enviado", envio };
       let e: Awaited<ReturnType<FalDeps["enviar"]>>;
       try {
         // Si falla aquí (antes de llamar a fal), no se mandó nada: como un rechazo claro
         const imagen = m.r2.firmar("GET", t.imagenKey, SEGUNDOS_FOTO_FAL);
-        const webhook = `${m.base}/api/video-ia/aviso?t=${encodeURIComponent(t.id)}&s=${t.secreto}`;
+        const webhook = `${m.base}/api/video-ia/aviso?t=${encodeURIComponent(t.id)}&s=${t.secreto}&e=${envio}`;
         const mod = v.modelos[t.nivel];
         const entrada = entradaDeModelo(mod, imagen, t.movimiento, v.segundosToma);
         try {
@@ -426,11 +427,12 @@ async function despacharCon(m: Mundo, cfgLeida?: PlanesConfig): Promise<{ enviad
       // fal ya lo aceptó: pase lo que pase al guardar, NUNCA vuelve a la fila
       enviados += 1;
       const datos = { falRequestId: e.requestId, statusUrl: e.statusUrl, responseUrl: e.responseUrl };
+      // Solo se guarda si sigue siendo este envío (si un aviso de error ya lo regresó a la fila, no se pisa el siguiente)
       try {
-        await m.videos.guardarEnvio(t.id, datos);
+        await m.videos.guardarEnvio(t.id, envio, datos);
       } catch {
         try {
-          await m.videos.guardarEnvio(t.id, datos);
+          await m.videos.guardarEnvio(t.id, envio, datos);
         } catch (err) {
           console.error(`Video con IA: fal.ai aceptó el trabajo ${t.id} pero no se pudo guardar el envío (${motivo(err)}); se espera su aviso.`);
         }
@@ -460,13 +462,21 @@ async function reintentarOFallar(
 ): Promise<boolean> {
   const intentos = t.intentos + 1;
   const reintenta = como.puedeReintentar && intentos < cfg.videoIa.maxIntentos;
-  const cambio = await m.videos.terminarTrabajo(
-    t.id,
-    { estado: reintenta ? "en_fila" : "fallo", intentos, actualizado: m.ahora, error },
-    { requestId, devolverGasto: como.devolverGasto },
-  );
+  // Al volver a la fila cambia el secreto: el enlace de aviso del envío anterior deja de servir
+  const cambios: Partial<TrabajoVideo> = { estado: reintenta ? "en_fila" : "fallo", intentos, actualizado: m.ahora, error };
+  if (reintenta) cambios.secreto = randomBytes(24).toString("hex");
+  // Solo si sigue siendo el MISMO envío (t.envio): lo de un envío anterior no cierra el vigente
+  const cambio = await m.videos.terminarTrabajo(t.id, cambios, { requestId, envio: t.envio, devolverGasto: como.devolverGasto });
   if (cambio && !reintenta && t.reserva.delMes + t.reserva.delSaldo > 0) {
-    await m.store.devolverUso(t.negocioId, t.reserva.mes, "tomas_ia", { delMes: t.reserva.delMes, delSaldo: t.reserva.delSaldo });
+    try {
+      await m.store.devolverUso(t.negocioId, t.reserva.mes, "tomas_ia", { delMes: t.reserva.delMes, delSaldo: t.reserva.delSaldo });
+    } catch (e) {
+      // El trabajo ya quedó en fallo: hay que devolver la toma a mano (sin datos secretos en el registro)
+      console.error(
+        `Video con IA: el trabajo ${t.id} falló pero no se pudo devolver la toma al negocio ${t.negocioId} (mes ${t.reserva.mes}, del mes ${t.reserva.delMes}, del saldo ${t.reserva.delSaldo}): ${motivo(e)}. Devuélvela a mano.`,
+      );
+      throw e;
+    }
     // Se devolvió: deja de contar para el límite del día en que se pidió
     await m.videos.restarTomaDelDia(t.negocioId, diaChicago(t.creado)).catch((e) =>
       console.error(`Video con IA: no se pudo bajar el contador del día del trabajo ${t.id} (${motivo(e)}).`),
@@ -480,7 +490,7 @@ async function completar(m: Mundo, t: TrabajoVideo, videoUrl: string, requestId?
   if (!m.r2) throw new Error("R2 sin configurar");
   const clipKey = llaveClip(t.negocioId, t.plan, t.id);
   await m.r2.subir(videoUrl, clipKey, "video/mp4");
-  if (await m.videos.terminarTrabajo(t.id, { estado: "listo", clipKey, clipCreado: m.ahora, actualizado: m.ahora }, { requestId })) {
+  if (await m.videos.terminarTrabajo(t.id, { estado: "listo", clipKey, clipCreado: m.ahora, actualizado: m.ahora }, { requestId, envio: t.envio })) {
     await m.videos.guardarCache(t.cacheLlave, clipKey, m.ahora);
   }
 }
@@ -570,8 +580,10 @@ export async function procesarAviso(url: URL, headers: Headers, cuerpo: string, 
   const m = mundoDe(deps);
   const id = url.searchParams.get("t") ?? "";
   const secreto = url.searchParams.get("s") ?? "";
-  // Primero lo que no cuesta: la forma del id y del secreto; luego la firma de fal; solo entonces Firestore
-  if (!ID_TRABAJO.test(id) || !SECRETO.test(secreto)) return { status: 404 };
+  // Ficha del envío (los avisos de envíos hechos antes de existir la ficha no la traen)
+  const envio = url.searchParams.get("e") ?? undefined;
+  // Primero lo que no cuesta: la forma del id, del secreto y de la ficha; luego la firma de fal; solo entonces Firestore
+  if (!ID_TRABAJO.test(id) || !SECRETO.test(secreto) || (envio !== undefined && !ID_TRABAJO.test(envio))) return { status: 404 };
   if (!(await m.fal.verificar(headers, cuerpo, m.ahora))) return { status: 401 };
   const t = await m.videos.getTrabajo(id);
   if (!t || !igual(secreto, t.secreto)) return { status: 404 };
@@ -584,7 +596,7 @@ export async function procesarAviso(url: URL, headers: Headers, cuerpo: string, 
   }
   const requestId = typeof aviso.request_id === "string" ? aviso.request_id : (headers.get("x-fal-webhook-request-id") ?? undefined);
   // Repetido, de un envío viejo o de un trabajo ya resuelto: nada que hacer
-  if (t.estado !== "enviado" || (t.falRequestId && requestId !== t.falRequestId)) return { status: 200 };
+  if (t.estado !== "enviado" || t.envio !== envio || (t.falRequestId && requestId !== t.falRequestId)) return { status: 200 };
 
   const video = aviso.status === "OK" ? videoDe(aviso.payload) : null;
   if (video) {

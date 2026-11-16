@@ -23,6 +23,7 @@ export type TrabajoVideo = {
   movimiento: string;
   estado: EstadoTrabajo;
   intentos: number; // envíos a fal que ya fallaron
+  envio?: string; // ficha del envío vigente (cambia en cada envío): lo de un envío anterior no lo toca
   falRequestId?: string;
   statusUrl?: string;
   responseUrl?: string;
@@ -40,7 +41,7 @@ export type TrabajoVideo = {
   error?: string; // motivo del último fallo (para el administrador; sin datos secretos)
 };
 
-export type OpcionesEnvio = { costo: number; dia: string; tope: number; simultaneos: number; ahora: number };
+export type OpcionesEnvio = { costo: number; dia: string; tope: number; simultaneos: number; ahora: number; envio: string };
 export type ResultadoEnvio = "ok" | "tope" | "lleno" | "no_en_fila";
 export type DatosEnvio = { falRequestId: string; statusUrl: string; responseUrl: string };
 
@@ -74,15 +75,17 @@ export interface VideoStore {
   // gasto del día. No cambia nada si ya no está en fila, si el gasto pasaría del tope o si ya hay
   // `simultaneos` enviados. Se llama ANTES de mandar a fal: así dos despachos a la vez no envían lo mismo.
   marcarEnviado(id: string, o: OpcionesEnvio): Promise<ResultadoEnvio>;
-  // Guarda los datos que devolvió fal al aceptar el trabajo.
-  guardarEnvio(id: string, datos: DatosEnvio): Promise<void>;
+  // Guarda los datos que devolvió fal al aceptar el trabajo, SOLO si sigue enviado con esa ficha de envío
+  // (si mientras tanto volvió a la fila y salió otro envío, no lo pisa). Devuelve si se guardó.
+  guardarEnvio(id: string, envio: string, datos: DatosEnvio): Promise<boolean>;
   // Saca el trabajo de «enviado» (a listo, fallo o de vuelta a la fila). Devuelve false, sin cambiar
-  // nada, si ya no estaba enviado (aviso repetido) o si `requestId` no es el del envío vigente.
-  // Con devolverGasto, resta su costo del gasto del día en que se envió (misma transacción).
+  // nada, si ya no estaba enviado (aviso repetido), si `envio` no es la ficha del envío vigente o si
+  // `requestId` no es el del envío vigente. Con devolverGasto, resta su costo del gasto del día en que se
+  // envió (misma transacción).
   terminarTrabajo(
     id: string,
     cambios: Partial<TrabajoVideo>,
-    opciones?: { requestId?: string; devolverGasto?: boolean },
+    opciones?: { requestId?: string; envio?: string; devolverGasto?: boolean },
   ): Promise<boolean>;
   getGasto(dia: string): Promise<number>;
   // El clip ya generado para esa llave, o null. Los de demo/ con más de 29 días no cuentan (R2 los borra a los 30).
@@ -101,12 +104,13 @@ export const clipVencido = (clipKey: string, creado: number, ahora: number) => c
 // Orden de la fila.
 export const ordenFila = (a: TrabajoVideo, b: TrabajoVideo) => a.prioridad - b.prioridad || a.creado - b.creado || a.id.localeCompare(b.id);
 
-// ¿Este aviso corresponde al envío vigente? (si todavía no se guardó el id del envío, se acepta)
-export const esEnvioVigente = (t: TrabajoVideo, requestId?: string) =>
-  requestId === undefined || t.falRequestId === undefined || t.falRequestId === requestId;
+// ¿Esto corresponde al envío vigente? La ficha del envío debe coincidir (los trabajos enviados antes de
+// existir la ficha no la tienen, ni la piden); el id de fal, si ya se guardó.
+export const esEnvioVigente = (t: TrabajoVideo, requestId?: string, envio?: string) =>
+  t.envio === envio && (requestId === undefined || t.falRequestId === undefined || t.falRequestId === requestId);
 
 // Campos que se quitan al salir de «enviado» hacia la fila (para el siguiente intento).
-export const CAMPOS_ENVIO = ["falRequestId", "statusUrl", "responseUrl", "enviado", "diaGasto"] as const;
+export const CAMPOS_ENVIO = ["envio", "falRequestId", "statusUrl", "responseUrl", "enviado", "diaGasto"] as const;
 
 const numero = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 const sinUndefined = (o: object) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
@@ -215,13 +219,19 @@ export function firestoreVideoStore(): VideoStore {
         if (gasto + o.costo > o.tope) return "tope";
         const enviados = await t.get(trabajos().where("estado", "==", "enviado").limit(o.simultaneos));
         if (enviados.size >= o.simultaneos) return "lleno";
-        t.update(ref, { estado: "enviado", enviado: o.ahora, diaGasto: o.dia, costoCentavos: o.costo, actualizado: o.ahora });
+        t.update(ref, { estado: "enviado", envio: o.envio, enviado: o.ahora, diaGasto: o.dia, costoCentavos: o.costo, actualizado: o.ahora });
         t.set(refGasto, { centavos: gasto + o.costo, actualizado: o.ahora }, { merge: true });
         return "ok";
       });
     },
-    async guardarEnvio(id, datos) {
-      await trabajos().doc(id).update(datos);
+    async guardarEnvio(id, envio, datos) {
+      const ref = trabajos().doc(id);
+      return db().runTransaction(async (t) => {
+        const s = await t.get(ref);
+        if (!s.exists || s.data()?.estado !== "enviado" || s.data()?.envio !== envio) return false;
+        t.update(ref, { ...datos });
+        return true;
+      });
     },
     async terminarTrabajo(id, cambios, opciones = {}) {
       const ref = trabajos().doc(id);
@@ -229,7 +239,7 @@ export function firestoreVideoStore(): VideoStore {
         const s = await t.get(ref);
         if (!s.exists) return false;
         const actual = deDoc(s);
-        if (actual.estado !== "enviado" || !esEnvioVigente(actual, opciones.requestId)) return false;
+        if (actual.estado !== "enviado" || !esEnvioVigente(actual, opciones.requestId, opciones.envio)) return false;
         const refGasto = opciones.devolverGasto && actual.diaGasto ? db().collection(C.gastoVideo).doc(actual.diaGasto) : null;
         const g = refGasto ? await t.get(refGasto) : null;
         const datos: Record<string, unknown> = sinUndefined(cambios);

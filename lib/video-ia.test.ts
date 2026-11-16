@@ -124,7 +124,8 @@ test("crear: 2 tomas en Pro se descuentan, se despachan al momento y suman al ga
     image_url: `https://r2.example/${foto("a")}?m=GET&s=21600`, prompt: "zoom lento", duration: 5, resolution: "768P", prompt_expansion_mode: "balanced",
   });
   const t = (await m.videos.getTrabajo(r.trabajos[0].id))!;
-  assert.equal(m.enviados[0].webhook, `https://studio.example/api/video-ia/aviso?t=${t.id}&s=${t.secreto}`);
+  assert.equal(m.enviados[0].webhook, `https://studio.example/api/video-ia/aviso?t=${t.id}&s=${t.secreto}&e=${t.envio}`);
+  assert.match(t.envio ?? "", /^[0-9a-f-]{36}$/);
   assert.equal(t.prioridad, 1);
   assert.equal(t.falRequestId, "req-1");
   assert.deepEqual(t.reserva, { mes: MES, delMes: 1, delSaldo: 0 });
@@ -280,6 +281,68 @@ test("consultar: ids que no son de Studio se ignoran sin tocar Firestore", async
   const mezcla = await consultar("u1", ["no-existe", id], deps);
   assert.ok(mezcla.ok && mezcla.trabajos.length === 1 && mezcla.trabajos[0].id === id);
   assert.deepEqual(v.veces.listarTrabajos, 1);
+});
+
+test("aviso tardío de un envío anterior mientras el vigente aún no guarda su id: se ignora", async () => {
+  const m = mundo();
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  const id = m.videos.todos()[0].id;
+  const secretoA = m.videos.todos()[0].secreto;
+  // El envío B no logra guardar su id de fal (falRequestId queda vacío)
+  m.videos.guardarEnvio = async () => {
+    throw new Error("Firestore caído");
+  };
+  assert.deepEqual(await m.aviso(0, m.ERROR), { status: 200 }); // A falla → vuelve a la fila → sale B
+  const b = (await m.videos.getTrabajo(id))!;
+  assert.equal(b.estado, "enviado");
+  assert.equal(b.falRequestId, undefined);
+  assert.equal(m.enviados.length, 2);
+  // Al volver a la fila cambió el secreto
+  assert.notEqual(b.secreto, secretoA);
+  // fal reenvía tarde el aviso de A con un video: no cierra B
+  assert.equal((await m.aviso(0, m.OK)).status, 404);
+  // Ni aunque el secreto siguiera siendo el mismo: la ficha del envío no coincide
+  const conSecretoB = new URL(m.enviados[0].webhook);
+  conSecretoB.searchParams.set("s", b.secreto);
+  await procesarAviso(conSecretoB, new Headers(), JSON.stringify({ request_id: "req-1", ...m.OK }), m.deps);
+  const t = (await m.videos.getTrabajo(id))!;
+  assert.equal(t.estado, "enviado");
+  assert.equal(m.subidas.length, 0);
+  // El aviso de B sí lo termina
+  assert.deepEqual(await m.aviso(1, m.OK), { status: 200 });
+  assert.equal((await m.videos.getTrabajo(id))?.estado, "listo");
+});
+
+test("aviso de error que gana la carrera al guardar el envío: no borra los datos del envío siguiente", async () => {
+  const m = mundo();
+  // El primer guardarEnvio (del envío A) se queda colgado hasta que lo soltemos
+  let soltar = () => {};
+  const guardarEnvio = m.videos.guardarEnvio.bind(m.videos);
+  let primero = true;
+  m.videos.guardarEnvio = async (...a) => {
+    if (primero) {
+      primero = false;
+      await new Promise<void>((r) => (soltar = r));
+    }
+    return guardarEnvio(...a);
+  };
+  const creando = crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  while (m.enviados.length < 1) await new Promise((r) => setTimeout(r, 1));
+  const id = m.videos.todos()[0].id;
+  // Llega el aviso de error de A antes de guardar: vuelve a la fila (el despacho sigue tomado por A)
+  assert.deepEqual(await m.aviso(0, m.ERROR), { status: 200 });
+  assert.equal((await m.videos.getTrabajo(id))?.estado, "en_fila");
+  // Pasa el candado del despacho: sale B y guarda sus datos
+  m.estado.now = AHORA + 31_000;
+  assert.deepEqual(await despachar(m.deps), { enviados: 1 });
+  assert.equal((await m.videos.getTrabajo(id))?.falRequestId, "req-2");
+  // Por fin se guarda lo de A: no pisa a B
+  soltar();
+  await creando;
+  const t = (await m.videos.getTrabajo(id))!;
+  assert.equal(t.estado, "enviado");
+  assert.equal(t.falRequestId, "req-2");
+  assert.equal(t.statusUrl, "https://queue.fal.run/m/requests/req-2/status");
 });
 
 test("aviso de un envío viejo (otro request_id) se ignora", async () => {
@@ -1174,4 +1237,29 @@ test("caché de la prueba gratis: una toma sacada del caché vence cuando vence 
   // Y pedirla otra vez genera una nueva (el caché ya no la entrega)
   const otra = await crearVideo(req(), { tomas: [toma] }, m.deps);
   assert.ok(otra.ok && otra.trabajos[0].estado === "enviado");
+});
+
+test("si no se puede devolver la toma tras un fallo, queda en el registro (sin secretos) para hacerlo a mano", async () => {
+  const m = mundo();
+  await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  const t = m.videos.todos()[0];
+  m.store.devolverUso = async () => {
+    throw new Error("Firestore caído");
+  };
+  const errores: string[] = [];
+  const original = console.error;
+  console.error = (...a: unknown[]) => void errores.push(a.map(String).join(" "));
+  try {
+    await m.aviso(0, m.ERROR);
+    await m.aviso(1, m.ERROR).catch(() => {});
+  } finally {
+    console.error = original;
+  }
+  assert.equal(m.videos.todos()[0].estado, "fallo");
+  const linea = errores.find((e) => e.includes("no se pudo devolver la toma"));
+  assert.ok(linea, errores.join("\n"));
+  assert.match(linea!, /n1/);
+  for (const e of errores) {
+    assert.ok(!e.includes(t.secreto) && !e.includes(m.videos.todos()[0].secreto) && !/https?:\/\//.test(e), e);
+  }
 });

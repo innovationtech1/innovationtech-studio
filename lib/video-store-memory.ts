@@ -71,17 +71,19 @@ export function memoryVideoStore(semilla: { gasto?: Record<string, number> } = {
       const hoy = gasto.get(o.dia) ?? 0;
       if (hoy + o.costo > o.tope) return "tope";
       if (todos().filter((x) => x.estado === "enviado").length >= o.simultaneos) return "lleno";
-      Object.assign(t, { estado: "enviado", enviado: o.ahora, diaGasto: o.dia, costoCentavos: o.costo, actualizado: o.ahora });
+      Object.assign(t, { estado: "enviado", envio: o.envio, enviado: o.ahora, diaGasto: o.dia, costoCentavos: o.costo, actualizado: o.ahora });
       gasto.set(o.dia, hoy + o.costo);
       return "ok";
     },
-    async guardarEnvio(id, datos) {
+    async guardarEnvio(id, envio, datos) {
       const t = trabajos.get(id);
-      if (t) Object.assign(t, datos);
+      if (!t || t.estado !== "enviado" || t.envio !== envio) return false;
+      Object.assign(t, datos);
+      return true;
     },
     async terminarTrabajo(id, cambios, opciones = {}) {
       const t = trabajos.get(id);
-      if (!t || t.estado !== "enviado" || !esEnvioVigente(t, opciones.requestId)) return false;
+      if (!t || t.estado !== "enviado" || !esEnvioVigente(t, opciones.requestId, opciones.envio)) return false;
       if (opciones.devolverGasto && t.diaGasto) gasto.set(t.diaGasto, Math.max(0, (gasto.get(t.diaGasto) ?? 0) - t.costoCentavos));
       const limpio = Object.fromEntries(Object.entries(copia(cambios)).filter(([k, v]) => v !== undefined && k !== "id"));
       Object.assign(t, limpio);
