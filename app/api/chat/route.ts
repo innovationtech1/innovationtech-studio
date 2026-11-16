@@ -1,7 +1,7 @@
 import { jsonError } from "@/lib/replicate";
 import { clavePropiaCF, getCreds, refund } from "@/lib/cf-auth";
-import { jsonAcceso, requireAccess } from "@/lib/account";
-import { elegirVelocidad, instruccionesNova, limpiarCuenta, modeloCloudflare } from "@/lib/nova";
+import { cuentasActivas, jsonAcceso, requireAccess } from "@/lib/account";
+import { elegirVelocidad, instruccionesNova, limpiarCuenta, limpiarMarca, modeloCloudflare } from "@/lib/nova";
 
 export const maxDuration = 60;
 
@@ -20,8 +20,10 @@ export async function POST(req: Request) {
   if (!history.length || history[history.length - 1].role !== "user") return jsonError("Escribe tu mensaje.");
 
   // NOVA: persona, manual de Studio y los datos del plan que manda el navegador (limpios: solo claves conocidas)
-  const cuenta = limpiarCuenta(nova?.cuenta);
-  const system = instruccionesNova({ english, marca: typeof brand === "string" ? brand : undefined, cuenta });
+  // (Una cuenta falsificada solo engaña a quien la manda: los límites reales los revisa requireAccess.)
+  const cuentasOn = cuentasActivas();
+  const cuenta = cuentasOn ? limpiarCuenta(nova?.cuenta) : null;
+  const system = instruccionesNova({ english, marca: limpiarMarca(brand), cuenta, cuentasOn });
   const atajo = typeof nova?.atajo === "string" ? nova.atajo : undefined;
   const velocidad = elegirVelocidad(history[history.length - 1].content, atajo);
 

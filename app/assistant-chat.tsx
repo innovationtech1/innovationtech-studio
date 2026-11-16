@@ -69,6 +69,8 @@ function cuentaParaNova({ activo, cuenta }: ValorCuenta): CuentaNova | null {
     precios: cuenta.precios,
     paquetes: cuenta.paquetes.map((p) => ({ id: p.id, monto: p.monto, contenido: p.contenido as Record<string, number> })),
     esDueno: cuenta.esDueno,
+    herramientas: cuenta.herramientas,
+    tomasPorDia: cuenta.tomasPorDia,
   };
 }
 
