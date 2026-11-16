@@ -59,6 +59,16 @@ async function errorDeFal(res: Response): Promise<string> {
   return `fal.ai no aceptó el trabajo (${res.status})${pista ? `: ${pista}` : ""}${detalle ? ` · ${detalle.slice(0, 140)}` : ""}`;
 }
 
+// Un envío que fal rechazó con certeza (o que ni se llegó a mandar): fal no lo va a correr ni a cobrar,
+// así que se puede volver a la fila. Cualquier otro error del envío es dudoso: fal pudo haberlo aceptado.
+export class RechazoFal extends Error {
+  readonly rechazado = true;
+}
+export const esRechazoFal = (e: unknown): boolean => e instanceof Error && (e as { rechazado?: unknown }).rechazado === true;
+
+// Solo un 4xx distinto de 429 es un «no» claro de fal. 429, 5xx, sin red o tiempo agotado: dudoso.
+const esRechazoClaro = (status: number) => status >= 400 && status < 500 && status !== 429;
+
 export async function enviarAFal(
   modelo: string,
   input: EntradaFal,
@@ -66,14 +76,17 @@ export async function enviarAFal(
   f: typeof fetch = fetch,
   clave: string = claveDeEntorno(),
 ): Promise<{ requestId: string; statusUrl: string; responseUrl: string }> {
-  if (!clave) throw new Error("Falta FAL_KEY");
-  if (!MODELO_VALIDO.test(modelo) || modelo.includes("..")) throw new Error("Id de modelo de fal no válido");
+  if (!clave) throw new RechazoFal("Falta FAL_KEY");
+  if (!MODELO_VALIDO.test(modelo) || modelo.includes("..")) throw new RechazoFal("Id de modelo de fal no válido");
   const res = await f(`https://queue.fal.run/${modelo}?fal_webhook=${encodeURIComponent(webhook)}`, {
     method: "POST",
     headers: { Authorization: `Key ${clave}`, "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (!res.ok) throw new Error(await errorDeFal(res));
+  if (!res.ok) {
+    const mensaje = await errorDeFal(res);
+    throw esRechazoClaro(res.status) ? new RechazoFal(mensaje) : new Error(mensaje);
+  }
   const d = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (typeof d.request_id !== "string" || typeof d.status_url !== "string" || typeof d.response_url !== "string") {
     throw new Error("fal.ai respondió sin los datos del trabajo");
@@ -93,6 +106,32 @@ export async function estadoFal(statusUrl: string, f: typeof fetch = fetch, clav
   if (!res.ok) throw new Error(`No se pudo consultar fal.ai (${res.status})`);
   const d = (await res.json().catch(() => ({}))) as { status?: unknown };
   return typeof d.status === "string" ? d.status : "";
+}
+
+export type ResultadoCancelar = "cancelado" | "pedido" | "terminado" | "error";
+
+// Pide a fal que quite un trabajo de su cola: PUT a la misma URL de estado con /cancel en vez de /status.
+// 200 = salió de la cola y nunca corre (no se cobra) · 202 = ya estaba corriendo: se pidió, pero puede
+// terminar · 400 = ya había terminado · lo demás (o sin red) = error. Nunca lanza.
+export async function cancelarFal(statusUrl: string, f: typeof fetch = fetch, clave: string = claveDeEntorno()): Promise<ResultadoCancelar> {
+  if (!clave) return "error";
+  let url: URL;
+  try {
+    url = new URL(urlDeFal(statusUrl));
+  } catch {
+    return "error";
+  }
+  if (!/\/status$/.test(url.pathname)) return "error";
+  url.pathname = url.pathname.replace(/\/status$/, "/cancel");
+  try {
+    const res = await f(url.toString(), { method: "PUT", headers: { Authorization: `Key ${clave}` } });
+    if (res.status === 200) return "cancelado";
+    if (res.status === 202) return "pedido";
+    if (res.status === 400) return "terminado";
+    return "error";
+  } catch {
+    return "error";
+  }
 }
 
 // El video de un resultado de fal (del aviso o de la consulta), o null si no trae.

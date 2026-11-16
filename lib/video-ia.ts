@@ -3,7 +3,18 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { cuentasActivas, requireAccess } from "./account";
 import { esCorreoAdmin } from "./account-api";
 import { firestoreStore, type AccountStore } from "./account-store";
-import { entradaDeModelo, enviarAFal, estadoFal, falConfigurado, resultadoFal, verificarFirmaFal, videoDe, type EntradaFal } from "./fal";
+import {
+  cancelarFal,
+  entradaDeModelo,
+  enviarAFal,
+  estadoFal,
+  falConfigurado,
+  resultadoFal,
+  verificarFirmaFal,
+  videoDe,
+  type EntradaFal,
+  type ResultadoCancelar,
+} from "./fal";
 import {
   costoTomaCentavos,
   diaChicago,
@@ -32,6 +43,8 @@ export type FalDeps = {
   enviar(modelo: string, input: EntradaFal, webhook: string): Promise<{ requestId: string; statusUrl: string; responseUrl: string }>;
   estado(statusUrl: string): Promise<string>;
   resultado(responseUrl: string): Promise<{ videoUrl: string } | null>;
+  // Quita el trabajo de la cola de fal (ver cancelarFal). Nunca lanza.
+  cancelar(statusUrl: string): Promise<ResultadoCancelar>;
   verificar(headers: Headers, cuerpo: string, ahora: number): Promise<boolean>;
 };
 export type R2Deps = {
@@ -105,6 +118,7 @@ function mundoDe(deps: DepsVideo): Mundo {
       enviar: (modelo, input, webhook) => enviarAFal(modelo, input, webhook),
       estado: (u) => estadoFal(u),
       resultado: (u) => resultadoFal(u),
+      cancelar: (u) => cancelarFal(u),
       verificar: (h, c, ahora) => verificarFirmaFal(h, c, ahora),
     },
     r2:
@@ -352,15 +366,28 @@ async function despacharCon(m: Mundo): Promise<{ enviados: number }> {
   }
 }
 
-// Un envío que falló: vuelve a la fila si le quedan intentos; si no, falla y se devuelve la toma.
-// En los dos casos su costo sale del gasto del día. Devuelve false si otro ya lo había resuelto.
-async function reintentarOFallar(m: Mundo, cfg: PlanesConfig, t: TrabajoVideo, requestId?: string, error?: string): Promise<boolean> {
+// Un envío que falló: vuelve a la fila si le quedan intentos; si no, falla y se devuelve la toma al cliente.
+// devolverGasto: su costo sale del gasto del día. SOLO cuando fal confirmó que no lo corrió (rechazo claro,
+// cancelado en su cola o terminó con error); si fal pudo haberlo cobrado, el gasto se queda y no se reintenta.
+// Devuelve false si otro ya lo había resuelto.
+type ComoFalla = { devolverGasto: boolean; puedeReintentar: boolean };
+const NO_COBRADO: ComoFalla = { devolverGasto: true, puedeReintentar: true };
+const QUIZA_COBRADO: ComoFalla = { devolverGasto: false, puedeReintentar: false };
+
+async function reintentarOFallar(
+  m: Mundo,
+  cfg: PlanesConfig,
+  t: TrabajoVideo,
+  requestId?: string,
+  error?: string,
+  como: ComoFalla = NO_COBRADO,
+): Promise<boolean> {
   const intentos = t.intentos + 1;
-  const reintenta = intentos < cfg.videoIa.maxIntentos;
+  const reintenta = como.puedeReintentar && intentos < cfg.videoIa.maxIntentos;
   const cambio = await m.videos.terminarTrabajo(
     t.id,
     { estado: reintenta ? "en_fila" : "fallo", intentos, actualizado: m.ahora, error },
-    { requestId, devolverGasto: true },
+    { requestId, devolverGasto: como.devolverGasto },
   );
   if (cambio && !reintenta && t.reserva.delMes + t.reserva.delSaldo > 0) {
     await m.store.devolverUso(t.negocioId, t.reserva.mes, "tomas_ia", { delMes: t.reserva.delMes, delSaldo: t.reserva.delSaldo });
@@ -378,20 +405,77 @@ async function completar(m: Mundo, t: TrabajoVideo, videoUrl: string, requestId?
   }
 }
 
-// Enviados hace más de N minutos sin aviso: se le pregunta a fal; si terminó se procesa, si no se reintenta.
+// Enviados hace más de N minutos sin aviso. Regla de oro: una toma solo se vuelve a mandar a fal cuando
+// fal confirmó que la quitó de su cola (no la corre ni la cobra). Si no se sabe, se espera; pasado el
+// límite duro (3 × N minutos) se da por perdida SIN bajar el gasto del día, y el cliente recupera su toma.
+const MAX_ENVIADOS = 50;
 async function revisarAtorados(m: Mundo, cfg: PlanesConfig): Promise<void> {
-  const limite = m.ahora - cfg.videoIa.minutosAtorado * 60_000;
-  for (const t of await m.videos.trabajosEnviados()) {
-    if ((t.enviado ?? t.actualizado) > limite) continue;
+  const minutos = cfg.videoIa.minutosAtorado;
+  const limite = m.ahora - minutos * 60_000;
+  const duro = m.ahora - 3 * minutos * 60_000;
+  for (const t of await m.videos.trabajosEnviados(MAX_ENVIADOS)) {
+    const desde = t.enviado ?? t.actualizado;
+    if (desde > limite) continue;
     try {
-      const terminado = t.statusUrl ? (await m.fal.estado(t.statusUrl)) === "COMPLETED" : false;
-      const video = terminado && t.responseUrl ? await m.fal.resultado(t.responseUrl) : null;
-      if (video) await completar(m, t, video.videoUrl, t.falRequestId);
-      else await reintentarOFallar(m, cfg, t, t.falRequestId, `fal.ai no avisó en ${cfg.videoIa.minutosAtorado} minutos`);
+      await resolverAtorado(m, cfg, t, desde <= duro);
     } catch (e) {
       console.error(`Video con IA: no se pudo revisar el trabajo atorado ${t.id} (${motivo(e)}).`);
     }
   }
+}
+
+async function resolverAtorado(m: Mundo, cfg: PlanesConfig, t: TrabajoVideo, pasoElLimite: boolean): Promise<void> {
+  const minutos = cfg.videoIa.minutosAtorado;
+  const darPorPerdida = () =>
+    reintentarOFallar(m, cfg, t, t.falRequestId, `fal.ai no entregó la toma en ${3 * minutos} minutos`, QUIZA_COBRADO);
+  // Trae el clip ya terminado y lo copia a R2. false si todavía no se pudo (se intenta en la siguiente vuelta).
+  const traer = async (): Promise<boolean> => {
+    if (!t.responseUrl) return false;
+    try {
+      const video = await m.fal.resultado(t.responseUrl);
+      if (!video) return false;
+      await completar(m, t, video.videoUrl, t.falRequestId);
+      return true;
+    } catch (e) {
+      console.error(`Video con IA: no se pudo traer el clip del trabajo ${t.id} (${motivo(e)}).`);
+      return false;
+    }
+  };
+
+  // Sin URL de estado (no se supo si fal lo aceptó): solo queda esperar el aviso
+  if (!t.statusUrl) {
+    if (pasoElLimite) await darPorPerdida();
+    return;
+  }
+  let estado = "";
+  try {
+    estado = await m.fal.estado(t.statusUrl);
+  } catch (e) {
+    console.error(`Video con IA: fal.ai no respondió por el trabajo ${t.id} (${motivo(e)}).`);
+  }
+  if (estado === "COMPLETED") {
+    if (!(await traer()) && pasoElLimite) await darPorPerdida();
+    return;
+  }
+  if (estado === "IN_QUEUE") {
+    const c = await m.fal.cancelar(t.statusUrl);
+    if (c === "cancelado") {
+      // Confirmado: salió de la cola de fal sin correr. Vuelve a la fila (o falla) y su costo sale del gasto.
+      await reintentarOFallar(m, cfg, t, t.falRequestId, `fal.ai no la empezó en ${minutos} minutos`, NO_COBRADO);
+      return;
+    }
+    if (c === "terminado") {
+      if (!(await traer()) && pasoElLimite) await darPorPerdida();
+      return;
+    }
+    if (pasoElLimite) await darPorPerdida();
+    return;
+  }
+  // Generándose, estado raro o fal sin responder: nunca se reenvía. Al límite duro se cancela y se da por perdida.
+  if (!pasoElLimite) return;
+  const c = await m.fal.cancelar(t.statusUrl);
+  if (c === "terminado" && (await traer())) return;
+  await darPorPerdida();
 }
 
 const igual = (a: string, b: string) => {

@@ -49,7 +49,8 @@ export interface VideoStore {
   listarTrabajos(ids: string[]): Promise<TrabajoVideo[]>;
   // Los que esperan turno: por prioridad y luego del más viejo al más nuevo.
   trabajosEnFila(limite: number): Promise<TrabajoVideo[]>;
-  trabajosEnviados(): Promise<TrabajoVideo[]>;
+  // Los que están en fal ahora (son pocos: no pasan de `simultaneos`, salvo atorados). Hasta `limite`.
+  trabajosEnviados(limite: number): Promise<TrabajoVideo[]>;
   // El trabajo con esa llave que sigue en camino (en fila o enviado), o null. La llave ya incluye al negocio.
   trabajoEnCurso(cacheLlave: string): Promise<TrabajoVideo | null>;
   // Borra todos los trabajos de un negocio (al borrar la cuenta). Devuelve cuántos eran.
@@ -119,7 +120,9 @@ export function firestoreVideoStore(): VideoStore {
     async trabajosEnFila(limite) {
       return (await porEstado("en_fila")).sort(ordenFila).slice(0, limite);
     },
-    trabajosEnviados: () => porEstado("enviado"),
+    async trabajosEnviados(limite) {
+      return (await trabajos().where("estado", "==", "enviado").limit(limite).get()).docs.map(deDoc);
+    },
     async borrarTrabajosDeNegocio(negocioId) {
       const docs = (await trabajos().where("negocioId", "==", negocioId).get()).docs;
       // Firestore admite 500 cambios por lote

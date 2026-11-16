@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
-import { entradaDeModelo, enviarAFal, estadoFal, resultadoFal, verificarFirmaFal } from "./fal";
+import { cancelarFal, entradaDeModelo, enviarAFal, esRechazoFal, estadoFal, resultadoFal, verificarFirmaFal } from "./fal";
 
 const AHORA = 1_800_000_000; // segundos
 const par = generateKeyPairSync("ed25519");
@@ -107,4 +107,71 @@ test("enviarAFal: el error dice el motivo probable (clave, saldo, parámetros) y
   await assert.rejects(pedir(con(403, { detail: "User is locked. Reason: Exhausted balance." })), /\(403\): falta saldo en fal\.ai o la cuenta está bloqueada · User is locked\. Reason: Exhausted balance\./);
   await assert.rejects(pedir(con(422, { detail: [{ msg: "field required", loc: ["body", "prompt"] }] })), /\(422\): fal\.ai no aceptó la foto o los parámetros del modelo/);
   await assert.rejects(pedir(con(500, "x")), /\(500\)/);
+});
+
+// ---------- Cancelar en fal (nunca pagar dos veces una toma atorada) ----------
+
+test("cancelarFal: PUT a la misma URL con /cancel en vez de /status, con la clave", async () => {
+  const vistas: { url: string; init?: RequestInit }[] = [];
+  const f = (async (url: string | URL | Request, init?: RequestInit) => {
+    vistas.push({ url: String(url), init });
+    return Response.json({ status: "OK" }, { status: 200 });
+  }) as typeof fetch;
+  assert.equal(await cancelarFal("https://queue.fal.run/fal-ai/m/requests/r1/status", f, "clave-fal"), "cancelado");
+  assert.equal(vistas[0].url, "https://queue.fal.run/fal-ai/m/requests/r1/cancel");
+  assert.equal(vistas[0].init?.method, "PUT");
+  assert.equal((vistas[0].init?.headers as Record<string, string>).Authorization, "Key clave-fal");
+});
+
+test("cancelarFal: 200 cancelado, 202 pedido, 400 terminado, lo demás error (sin tronar)", async () => {
+  const con = (status: number) => (async () => Response.json({}, { status })) as typeof fetch;
+  const url = "https://queue.fal.run/fal-ai/m/requests/r1/status";
+  assert.equal(await cancelarFal(url, con(200), "k"), "cancelado");
+  assert.equal(await cancelarFal(url, con(202), "k"), "pedido");
+  assert.equal(await cancelarFal(url, con(400), "k"), "terminado");
+  assert.equal(await cancelarFal(url, con(404), "k"), "error");
+  assert.equal(await cancelarFal(url, con(500), "k"), "error");
+  const sinRed = (async () => {
+    throw new Error("sin red");
+  }) as typeof fetch;
+  assert.equal(await cancelarFal(url, sinRed, "k"), "error");
+});
+
+test("cancelarFal: solo a fal.run y solo URLs de estado; nunca manda la clave a otro sitio", async () => {
+  let llamadas = 0;
+  const f = (async () => (llamadas++, Response.json({}, { status: 200 }))) as typeof fetch;
+  assert.equal(await cancelarFal("https://otro.sitio/fal-ai/m/requests/r1/status", f, "k"), "error");
+  assert.equal(await cancelarFal("http://queue.fal.run/fal-ai/m/requests/r1/status", f, "k"), "error");
+  assert.equal(await cancelarFal("https://queue.fal.run/fal-ai/m/requests/r1", f, "k"), "error");
+  assert.equal(await cancelarFal("no es url", f, "k"), "error");
+  assert.equal(await cancelarFal("https://queue.fal.run/fal-ai/m/requests/r1/status", f, ""), "error");
+  assert.equal(llamadas, 0);
+});
+
+// ---------- ¿fal rechazó el envío con certeza? ----------
+
+test("enviarAFal: rechazo claro solo con 4xx que no sea 429, o si ni se llegó a mandar", async () => {
+  const con = (status: number) => (async () => Response.json({ detail: "x" }, { status })) as typeof fetch;
+  const pedir = (f: typeof fetch, clave = "k", modelo = "fal-ai/m") => enviarAFal(modelo, { image_url: "u", prompt: "p" }, "https://w", f, clave);
+  const motivo = async (p: Promise<unknown>) => {
+    try {
+      await p;
+    } catch (e) {
+      return esRechazoFal(e);
+    }
+    throw new Error("no lanzó");
+  };
+  for (const s of [400, 401, 403, 404, 422]) assert.equal(await motivo(pedir(con(s))), true, String(s));
+  // Dudosos: fal pudo haberlo aceptado
+  for (const s of [429, 500, 502, 503, 504]) assert.equal(await motivo(pedir(con(s))), false, String(s));
+  const sinRed = (async () => {
+    throw new Error("timeout");
+  }) as typeof fetch;
+  assert.equal(await motivo(pedir(sinRed)), false);
+  // Aceptado (200) pero sin los datos del trabajo: también dudoso
+  assert.equal(await motivo(pedir((async () => Response.json({ request_id: "r" })) as typeof fetch)), false);
+  // Ni siquiera se mandó: rechazo seguro
+  assert.equal(await motivo(pedir(con(200), "")), true);
+  assert.equal(await motivo(pedir(con(200), "k", "../malo")), true);
+  assert.equal(esRechazoFal(new Error("otra cosa")), false);
 });

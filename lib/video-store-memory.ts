@@ -29,8 +29,8 @@ export function memoryVideoStore(semilla: { gasto?: Record<string, number> } = {
     async trabajosEnFila(limite) {
       return todos().filter((t) => t.estado === "en_fila").sort(ordenFila).slice(0, limite);
     },
-    async trabajosEnviados() {
-      return todos().filter((t) => t.estado === "enviado");
+    async trabajosEnviados(limite) {
+      return todos().filter((t) => t.estado === "enviado").slice(0, limite);
     },
     async borrarTrabajosDeNegocio(negocioId) {
       const ids = [...trabajos.values()].filter((t) => t.negocioId === negocioId).map((t) => t.id);
