@@ -12,6 +12,7 @@ import {
   MessageSquarePlus,
   PenLine,
   RefreshCw,
+  Settings as IconoAjustes,
   Sparkles,
   Square,
   Trash2,
@@ -34,6 +35,7 @@ import {
   sinIdeasDeImagen,
   type Sugerencia,
 } from "@/lib/nova-sugerencias";
+import { FRASE_PRUEBA, crearVozNova, vocesNova, vozNova } from "@/lib/nova-voz";
 import type { Settings } from "@/lib/types";
 import { useCuenta, type ValorCuenta } from "./account-context";
 import MicButton from "./mic-button";
@@ -42,7 +44,8 @@ import NovaAvatar, { type EstadoNova } from "./nova-avatar";
 // NOVA, la asistente de Studio, en forma de conversación (como un chat con Claude):
 // recuerda lo que se habló, responde en tiempo real, se le pueden pedir cambios
 // con un toque, se le puede hablar con el micrófono y, si el cliente se queda quieto,
-// le sugiere algo (de una lista local, sin gastar IA).
+// le sugiere algo (de una lista local, sin gastar IA). Con «NOVA habla» encendido lee en voz alta
+// las sugerencias y cada respuesta, con su propia voz (Aura-2, ruta /api/nova/voz).
 
 type Msg = { role: "user" | "assistant"; content: string };
 type Chat = { id: string; title: string; messages: Msg[]; updated: number };
@@ -128,17 +131,25 @@ export default function AssistantChat({
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState("");
   const [showHistory, setShowHistory] = useState(false);
-  const [speaking, setSpeaking] = useState<number | null>(null);
+  const [speaking, setSpeaking] = useState<number | null>(null); // la respuesta que se está escuchando
   const [copied, setCopied] = useState<number | null>(null);
   const [picker, setPicker] = useState<number | null>(null);
   const [sugerencia, setSugerencia] = useState<Sugerencia | null>(null);
   const [micActivo, setMicActivo] = useState(false); // dictando: escuchando, grabando o transcribiendo
+  // Ajustes de NOVA (recordados en el aparato): voz, «NOVA habla» (apagado al inicio) y sugerencias
+  const [vozId, setVozId] = usePersistentState("nova:voz", "");
+  const [habla, setHabla] = usePersistentState("nova:habla", false);
+  const [sugerenciasOn, setSugerenciasOn] = usePersistentState("nova:sugerencias", true);
+  const [ajustes, setAjustes] = useState(false);
+  const [vozSonando, setVozSonando] = useState(false);
+  const [probando, setProbando] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const sectionRef = useRef<HTMLElement>(null);
   const ultimaActividad = useRef(Date.now());
   const ultimaSugerencia = useRef(0);
+  const interactuo = useRef(false); // tocó o escribió algo en esta visita (antes, NOVA no habla sola)
 
   const chat = chats.find((c) => c.id === currentId) || null;
   const messages = useMemo(() => chat?.messages || [], [chat]);
@@ -149,23 +160,110 @@ export default function AssistantChat({
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
-  // Detener la lectura en voz alta al salir
-  useEffect(() => () => window.speechSynthesis?.cancel(), []);
+
+  // ---------- La voz de NOVA ----------
+  const lang = getLang();
+  const vozElegida = vozNova(vozId, lang);
+  const vozActual = useRef({ cfHeaders, voz: vozElegida.id, habla });
+  useEffect(() => {
+    vozActual.current = { cfHeaders, voz: vozElegida.id, habla };
+  });
+  const vozPrueba = useRef<string | null>(null); // la voz de «Probar» (si no, la elegida)
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const terminar = useRef<(() => void) | null>(null); // termina el audio o la voz del aparato que suena
+  const vozRef = useRef<ReturnType<typeof crearVozNova> | null>(null);
+  const voz = () =>
+    (vozRef.current ??= crearVozNova({
+      pedir: async (text) => {
+        const { cfHeaders: h, voz: elegida } = vozActual.current;
+        const res = await fetch("/api/nova/voz", {
+          method: "POST",
+          headers: { "content-type": "application/json", ...h },
+          body: JSON.stringify({ text, lang: getLang(), voice: vozPrueba.current ?? elegida }),
+        });
+        if (!res.ok) throw new Error(`Error ${res.status}`);
+        return res.blob();
+      },
+      reproducir: (b) =>
+        new Promise<void>((resolve, reject) => {
+          const url = URL.createObjectURL(b);
+          const a = new Audio(url);
+          audioRef.current = a;
+          const fin = (e?: unknown) => {
+            a.onended = a.onerror = null;
+            URL.revokeObjectURL(url);
+            if (audioRef.current === a) audioRef.current = null;
+            terminar.current = null;
+            if (e) reject(e);
+            else resolve();
+          };
+          terminar.current = () => fin();
+          a.onended = () => fin();
+          a.onerror = () => fin(new Error("audio"));
+          a.play().catch((e) => fin(e || new Error("audio")));
+        }),
+      // Si el audio no llega: la voz del aparato
+      respaldo: (t) =>
+        new Promise<void>((resolve) => {
+          const synth = typeof window !== "undefined" ? window.speechSynthesis : undefined;
+          if (!synth) return resolve();
+          const u = new SpeechSynthesisUtterance(t);
+          u.lang = getLang() === "en" ? "en-US" : "es-MX";
+          const fin = () => ((terminar.current = null), resolve());
+          terminar.current = fin;
+          u.onend = fin;
+          u.onerror = fin;
+          synth.speak(u);
+        }),
+      detener: () => {
+        audioRef.current?.pause();
+        window.speechSynthesis?.cancel();
+        terminar.current?.();
+      },
+      alCambiar: (h) => {
+        setVozSonando(h);
+        if (!h) {
+          setSpeaking(null);
+          setProbando(null);
+          vozPrueba.current = null;
+        }
+      },
+    }));
+  // Lo nuevo reemplaza lo que sonaba (y las marcas de «Escuchar» o «Probar» de antes)
+  const hablar = (texto: string, prueba: string | null = null) => {
+    setSpeaking(null);
+    setProbando(null);
+    vozPrueba.current = prueba;
+    voz().decir(texto);
+  };
+  const callar = () => vozRef.current?.callar();
+  // Callar al salir y al cambiar de pestaña o esconder la app
+  useEffect(() => {
+    const oculto = () => document.hidden && vozRef.current?.callar();
+    document.addEventListener("visibilitychange", oculto);
+    return () => {
+      document.removeEventListener("visibilitychange", oculto);
+      vozRef.current?.callar();
+    };
+  }, []);
 
   // Lo último de la pantalla, para revisarlo cada 5 s sin reiniciar el reloj en cada cambio
-  const ahora = useRef({ streaming, input, interim, micActivo, sugerencia, cuenta: cuentaParaNova(valorCuenta), marca: brand.name || "" });
+  const ahora = useRef({ streaming, input, interim, micActivo, sugerencia, sugerenciasOn, cuenta: cuentaParaNova(valorCuenta), marca: brand.name || "" });
   useEffect(() => {
-    ahora.current = { streaming, input, interim, micActivo, sugerencia, cuenta: cuentaParaNova(valorCuenta), marca: brand.name || "" };
+    ahora.current = { streaming, input, interim, micActivo, sugerencia, sugerenciasOn, cuenta: cuentaParaNova(valorCuenta), marca: brand.name || "" };
   });
 
   // Sugerencias cuando el cliente lleva 45 s sin hacer nada con NOVA a la vista (máx. 1 cada 3 min)
   useEffect(() => {
-    const actividad = () => (ultimaActividad.current = Date.now());
+    const actividad = (e: Event) => {
+      ultimaActividad.current = Date.now();
+      if (e.type !== "scroll") interactuo.current = true;
+    };
     const eventos = ["keydown", "pointerdown", "scroll"] as const;
     for (const e of eventos) window.addEventListener(e, actividad, { passive: true, capture: true });
     const reloj = window.setInterval(() => {
       const a = ahora.current;
-      if (a.sugerencia) return;
+      if (a.sugerencia || !a.sugerenciasOn) return;
       const t = Date.now();
       const visible = document.visibilityState === "visible" && !!sectionRef.current && sectionRef.current.offsetParent !== null;
       const ok = debeSugerir({
@@ -186,6 +284,8 @@ export default function AssistantChat({
       guardarVistas(todas ? [s.id] : [...vistas, s.id]);
       ultimaSugerencia.current = t;
       setSugerencia(s);
+      // Con «NOVA habla», la lee en voz alta (nunca antes de que el cliente haya tocado algo en esta visita)
+      if (vozActual.current.habla && interactuo.current) hablar(tr(s.texto));
     }, 5000);
     return () => {
       window.clearInterval(reloj);
@@ -207,6 +307,7 @@ export default function AssistantChat({
     const content = text.trim();
     if (!content || streaming) return;
     ultimaActividad.current = Date.now();
+    callar(); // una respuesta nueva: lo que estaba sonando se calla
     setSugerencia(null);
     setError("");
     setPicker(null);
@@ -249,6 +350,7 @@ export default function AssistantChat({
         saveMessages(id, [...history, { role: "assistant", content: out }]);
       }
       if (!out.trim()) throw new Error("La IA no respondió. Intenta de nuevo.");
+      if (vozActual.current.habla) hablar(out);
     } catch (e) {
       if ((e as Error).name === "AbortError") {
         if (!out.trim()) saveMessages(id, history);
@@ -271,28 +373,25 @@ export default function AssistantChat({
 
   const newChat = () => {
     abort.current?.abort();
-    window.speechSynthesis?.cancel();
+    callar();
     setCurrentId("");
     setError("");
     setShowHistory(false);
     inputRef.current?.focus();
   };
 
+  // «Escuchar» de cada respuesta: con la misma voz de NOVA (tocar otra vez la detiene)
   const speak = (i: number, text: string) => {
-    const synth = window.speechSynthesis;
-    if (!synth) return;
-    if (speaking === i) {
-      synth.cancel();
-      setSpeaking(null);
-      return;
-    }
-    synth.cancel();
-    const u = new SpeechSynthesisUtterance(stripPrompt(text).replace(/[*#_`>|-]/g, " "));
-    u.lang = getLang() === "en" ? "en-US" : "es-MX";
-    u.onend = () => setSpeaking(null);
-    u.onerror = () => setSpeaking(null);
-    setSpeaking(i);
-    synth.speak(u);
+    if (speaking === i) return callar();
+    hablar(text);
+    if (vozRef.current?.hablando()) setSpeaking(i); // sin nada que leer no queda marcado
+  };
+
+  // «Probar» de Ajustes de NOVA: una frase corta con esa voz
+  const probar = (id: string) => {
+    if (probando === id) return callar();
+    hablar(FRASE_PRUEBA[lang], id);
+    if (vozRef.current?.hablando()) setProbando(id);
   };
 
   const copy = (i: number, text: string) => {
@@ -304,7 +403,7 @@ export default function AssistantChat({
   const lastAssistant = messages.length && messages[messages.length - 1].role === "assistant" ? messages.length - 1 : -1;
   // pensando: esperando la primera letra; hablando: llegando la respuesta; aviso: trae una sugerencia
   const esperando = streaming && !(messages[messages.length - 1]?.content);
-  const estadoNova: EstadoNova = esperando ? "pensando" : streaming ? "hablando" : sugerencia ? "aviso" : "quieta";
+  const estadoNova: EstadoNova = esperando ? "pensando" : streaming || vozSonando ? "hablando" : sugerencia ? "aviso" : "quieta";
 
   return (
     <section className="card chat-card" ref={sectionRef}>
@@ -325,8 +424,72 @@ export default function AssistantChat({
           <button className="btn ghost small" onClick={newChat}>
             <MessageSquarePlus size={16} aria-hidden /> Nueva
           </button>
+          <button
+            className="btn ghost small nova-engrane"
+            onClick={() => setAjustes((v) => !v)}
+            aria-expanded={ajustes}
+            title="Ajustes de NOVA"
+            aria-label="Ajustes de NOVA"
+          >
+            <IconoAjustes size={16} aria-hidden />
+          </button>
         </div>
       </div>
+
+      {ajustes && (
+        <div className="nova-ajustes" role="group" aria-label="Ajustes de NOVA">
+          <h3>Ajustes de NOVA</h3>
+          <label className="nova-interruptor">
+            <input
+              type="checkbox"
+              checked={habla}
+              onChange={(e) => {
+                setHabla(e.target.checked);
+                if (!e.target.checked) callar();
+              }}
+            />
+            <span>
+              <strong>NOVA habla</strong>
+              <span className="muted">Lee en voz alta sus sugerencias y cada respuesta.</span>
+            </span>
+          </label>
+          <label className="nova-interruptor">
+            <input
+              type="checkbox"
+              checked={sugerenciasOn}
+              onChange={(e) => {
+                setSugerenciasOn(e.target.checked);
+                if (!e.target.checked) setSugerencia(null);
+              }}
+            />
+            <span>
+              <strong>Sugerencias</strong>
+              <span className="muted">Ideas cuando llevas un rato sin escribir.</span>
+            </span>
+          </label>
+          <p className="muted nova-ajustes-voz">Voz de NOVA</p>
+          <div className="nova-voces">
+            {vocesNova(lang).map((v) => {
+              const on = vozElegida.id === v.id;
+              return (
+                <div key={v.id} className={`nova-voz ${on ? "on" : ""}`}>
+                  <button className="nova-voz-elegir" onClick={() => setVozId(v.id)} aria-pressed={on}>
+                    <strong data-no-translate>{v.name}</strong>
+                    <span className="muted">
+                      {v.gender === "mujer" ? "Mujer" : "Hombre"}
+                      {v.lang === "es" ? ` · ${v.accent}` : ""}
+                    </span>
+                  </button>
+                  <button className="nova-voz-probar" onClick={() => probar(v.id)} aria-label={probando === v.id ? "Detener" : `Probar a ${v.name}`}>
+                    {probando === v.id ? <VolumeX size={15} aria-hidden /> : <Volume2 size={15} aria-hidden />}
+                    {probando === v.id ? "Detener" : "Probar"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {sugerencia && (
         <div className="nova-burbuja" role="status">

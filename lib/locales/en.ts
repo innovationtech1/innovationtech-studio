@@ -1475,6 +1475,18 @@ export const EN: Record<string, string> = {
   "Dame 10 hashtags para la próxima publicación de mi negocio": "Give me 10 hashtags for my business's next post",
   "Ideas para tus historias de hoy.": "Ideas for your stories today.",
   "Dame 3 ideas de historias de Instagram para hoy para mi negocio": "Give me 3 Instagram story ideas for today for my business",
+  // NOVA: voz y Ajustes de NOVA
+  "Ajustes de NOVA": "NOVA settings",
+  "NOVA habla": "NOVA speaks",
+  "Lee en voz alta sus sugerencias y cada respuesta.": "Reads her suggestions and every reply out loud.",
+  "Sugerencias": "Suggestions",
+  "Ideas cuando llevas un rato sin escribir.": "Ideas when you haven't typed for a while.",
+  "Voz de NOVA": "NOVA's voice",
+  "Probar": "Try",
+  "Falta el texto que NOVA va a leer.": "The text for NOVA to read is missing.",
+  "El texto es demasiado largo para leerlo de una vez.": "The text is too long to read in one go.",
+  "NOVA está hablando muy seguido. Espera un momento.": "NOVA is speaking too often. Wait a moment.",
+  "La voz de NOVA tardó demasiado. Intenta de nuevo.": "NOVA's voice took too long. Try again.",
 };
 
 // Textos con números u otras partes que cambian
@@ -1594,6 +1606,7 @@ export const EN_PATTERNS: [RegExp, string][] = [
   [/^No hay espacio para guardar en tu dispositivo \(ocupado: (\d+ MB) de (\d+ MB)\)\. Puedes crear tu video ahora, pero si cierras la app eso no estará al volver\. Para liberar espacio borra proyectos o videos de la Galería que ya no uses\.$/, "There's no space to save on your device (used: $1 of $2). You can create your video now, but if you close the app it won't be here when you return. To free up space, delete projects or Gallery videos you no longer use."],
   // NOVA (Asistente), con el nombre del negocio o el número de textos
   [/^Hola, (.+)\. ¿Qué creamos hoy\?$/, "Hi, $1. What shall we create today?"],
+  [/^Probar a (.+)$/, "Try $1"],
   [/^Te quedan (\d+) textos este mes: aprovecha uno en tu mejor post\.$/, "You have $1 texts left this month: use one on your best post."],
   [/^Escribe un post para el fin de semana que invite a los clientes de (.+)$/, "Write a weekend post that invites $1's customers"],
   [/^Escribe un post que presente (.+) a clientes nuevos$/, "Write a post that introduces $1 to new customers"],
