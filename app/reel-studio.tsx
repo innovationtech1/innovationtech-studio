@@ -74,7 +74,7 @@ import {
   type Pendiente,
   type Resultado,
 } from "@/lib/director";
-import { terminado, textoEstado, type TrabajoVisto } from "@/lib/estados-video";
+import { esperaConsulta, terminado, textoEstado, type TrabajoVisto } from "@/lib/estados-video";
 import { consultarTomas, pedirTomas, prepararFoto, subirFoto } from "@/lib/video-ia-cliente";
 
 import { Clapperboard, Dices, Download, Eye, Mic, Play, Redo2, Sparkles, Square, Undo2, Video } from "lucide-react";
@@ -83,7 +83,6 @@ import { Clapperboard, Dices, Download, Eye, Mic, Play, Redo2, Sparkles, Square,
 
 // Tomas con IA que siguen en proceso (se guardan para retomarlas sin pedirlas ni descontarlas otra vez)
 type TomasPendientes = { ids: string[]; firma: string } | null;
-const ESPERA_TOMAS = 5000; // cada cuánto se consulta
 const MAX_ESPERA = 20 * 60 * 1000;
 
 // Los 4 clips vacíos con los que se empieza (ids fijos: igual en el servidor y en el navegador)
@@ -763,7 +762,7 @@ export default function ReelStudio({
       if (terminado(r.vistos)) return { vistos: r.vistos, enProceso: false, texto };
       const hayCupo = !(r.topeHoy && !r.vistos.some((t) => t.estado === "enviado"));
       if (!hayCupo || Date.now() - inicio > MAX_ESPERA) return { vistos: r.vistos, enProceso: true, texto: hayCupo ? "" : texto };
-      await new Promise((res) => setTimeout(res, ESPERA_TOMAS));
+      await new Promise((res) => setTimeout(res, esperaConsulta(r.vistos)));
     }
   }
 

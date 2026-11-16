@@ -27,6 +27,7 @@ test("colecciones: sin prefijo, los nombres de siempre", () => {
     cacheVideo: "studio_cache_video",
     gastoVideo: "studio_gasto_video",
     candados: "studio_candados",
+    tomasDia: "studio_tomas_dia",
   });
 });
 

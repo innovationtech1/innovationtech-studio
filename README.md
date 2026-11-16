@@ -390,6 +390,7 @@ Protecciones que ya vienen puestas (se pueden cambiar en Firestore, documento `s
 - **Tope de gasto de $5 al día** para todo Studio (hora de Texas). Al llegar, las tomas esperan en fila y salen al día siguiente. El demo se detiene antes, al 80% ($4), para dejar lugar a los clientes que pagan.
 - Máximo **3 tomas al mismo tiempo** en fal.ai; los de Pro pasan primero, luego los de paquete y al final el demo.
 - Si una toma falla, se reintenta **una vez**; si vuelve a fallar, se **devuelve la toma** al cliente y esa foto queda con animación normal.
+- **Nunca se paga dos veces la misma toma:** solo se vuelve a mandar a fal cuando fal rechazó el pedido o confirmó que la quitó de su fila sin correrla. Si fal la está generando, no contesta o no se sabe si la recibió, Studio espera; a los 45 minutos (3 × 15) la da por perdida, le devuelve la toma al cliente y su costo **sigue contando** en el gasto del día (por si fal sí la cobró).
 - La misma foto con el mismo movimiento no se cobra dos veces (se guarda el clip).
 - **Interruptor:** pon `VIDEO_IA` en `off` en Netlify y vuelve a publicar para apagar la IA de video al instante.
 
@@ -413,13 +414,15 @@ Protecciones que ya vienen puestas (se pueden cambiar en Firestore, documento `s
 
 5. En el bucket → *Settings → Object lifecycle rules*, agrega una regla: prefijo `demo/`, **borrar a los 30 días**. Ahí van las fotos y clips de las pruebas gratis.
 6. Vuelve a publicar el sitio y, en `/admin`, presiona **Preparar Stripe** otra vez para que cree el precio del paquete **Video** ($15).
-7. **Prueba:** entra con una cuenta en prueba, sube 2 fotos al Creador de Reels, marca una «Con IA» y toca **Generar con IA**. Debe pasar por «Subiendo…», «En fila», «Toma 1 de 1 · Generando…» y terminar con el video listo (suele tardar de 1 a 3 minutos).
+7. **Índice de Firestore para la fila** (gratis; una sola vez): en la consola de Firebase → *Firestore Database → Indexes → Composite → Create index*: colección `studio_trabajos_video`, campos `estado` (Ascending), `prioridad` (Ascending) y `creado` (Ascending), alcance *Collection*. Repite con la colección `prueba_studio_trabajos_video` si usas la versión de prueba. Tarda unos minutos en quedar *Enabled*. Es el mismo que está en `firestore.indexes.json` (con la herramienta de Firebase: `firebase deploy --only firestore:indexes`). Sin el índice todo sigue funcionando, pero la fila se ordena en el servidor y en el registro aparece un aviso.
+8. **Prueba:** entra con una cuenta en prueba, sube 2 fotos al Creador de Reels, marca una «Con IA» y toca **Generar con IA**. Debe pasar por «Subiendo…», «En fila», «Toma 1 de 1 · Generando…» y terminar con el video listo (suele tardar de 1 a 3 minutos).
 
 Notas:
 
 - fal.ai avisa a Studio cuando termina cada toma en `/api/video-ia/aviso` (no hay que configurar nada en fal: la dirección va en cada pedido). Studio revisa la firma de fal en cada aviso.
 - Una tarea programada de Netlify (`netlify/functions/video-ia-respaldo.mts`, cada 5 minutos, solo en el sitio principal) empuja la fila por si se pierde un aviso.
 - Los archivos de R2 son privados: el navegador solo recibe enlaces temporales de una hora.
+- Lecturas de Firestore: mientras se espera, el navegador consulta cada 10 s si alguna toma se está generando y cada 30 s si solo espera en fila. Una consulta lee el usuario, la configuración y las tomas (más la fila y el gasto si alguna espera turno). Solo empuja la fila si una toma lleva más de 15 minutos sin aviso, y como mucho una vez por minuto. El límite por cliente al día usa un contador por negocio y por día (colección `studio_tomas_dia`).
 - Mientras falten `FAL_KEY` o las variables de R2, «Generar con IA» responde que los videos con IA están en pausa y el resto de Studio no cambia.
 
 ### Cómo usar `/admin`

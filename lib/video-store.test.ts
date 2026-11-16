@@ -139,3 +139,29 @@ test("trabajosDesde: los actualizados desde una fecha, del más nuevo al más vi
   assert.deepEqual((await s.trabajosDesde(T0, 10)).map((t) => t.id), ["b", "a"]);
   assert.deepEqual((await s.trabajosDesde(T0, 1)).map((t) => t.id), ["b"]);
 });
+
+test("crearTrabajos con cupo del día: suma al contador en la misma operación y no pasa del límite", async () => {
+  const s = memoryVideoStore();
+  const cupo = { negocioId: "n1", dia: DIA, nuevas: 2, limite: 3 };
+  assert.equal(await s.crearTrabajos([trabajo({ id: "a" }), trabajo({ id: "b" })], cupo), "ok");
+  assert.equal(await s.tomasDelDia("n1", DIA), 2);
+  // 2 + 2 > 3: no se crea ninguno ni cambia el contador
+  assert.equal(await s.crearTrabajos([trabajo({ id: "c" }), trabajo({ id: "d" })], cupo), "limite");
+  assert.equal(await s.tomasDelDia("n1", DIA), 2);
+  assert.equal(await s.getTrabajo("c"), null);
+  // Otro negocio u otro día: su propio contador
+  assert.equal(await s.tomasDelDia("n2", DIA), 0);
+  assert.equal(await s.tomasDelDia("n1", "2026-11-11"), 0);
+  // Una que falló (y se devolvió) deja de contar
+  await s.restarTomaDelDia("n1", DIA);
+  assert.equal(await s.tomasDelDia("n1", DIA), 1);
+  await s.restarTomaDelDia("n1", DIA);
+  await s.restarTomaDelDia("n1", DIA);
+  assert.equal(await s.tomasDelDia("n1", DIA), 0); // nunca negativo
+});
+
+test("contarEnFila cuenta sin traer los trabajos", async () => {
+  const s = memoryVideoStore();
+  await s.crearTrabajos([trabajo({ id: "a" }), trabajo({ id: "b" }), trabajo({ id: "c", estado: "listo" })]);
+  assert.equal(await s.contarEnFila(), 2);
+});

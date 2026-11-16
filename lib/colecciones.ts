@@ -33,5 +33,6 @@ export function colecciones() {
     cacheVideo: `${p}cache_video`,
     gastoVideo: `${p}gasto_video`,
     candados: `${p}candados`,
+    tomasDia: `${p}tomas_dia`,
   };
 }

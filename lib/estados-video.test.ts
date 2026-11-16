@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { firmaTomas, terminado, textoEstado } from "./estados-video";
+import { esperaConsulta, firmaTomas, terminado, textoEstado } from "./estados-video";
 
 test("subida y vista previa", () => {
   assert.equal(textoEstado({ tipo: "subiendo", pct: 42.4 }), "Subiendo… 42%");
@@ -41,4 +41,10 @@ test("terminado: todas listas o fallidas", () => {
 test("firmaTomas: misma foto y movimiento dan la misma firma (para retomar sin cobrar de nuevo)", () => {
   assert.equal(firmaTomas([{ sha256: "aa", movimiento: " Zoom  lento" }]), firmaTomas([{ sha256: "aa", movimiento: "zoom lento " }]));
   assert.notEqual(firmaTomas([{ sha256: "aa", movimiento: "zoom" }]), firmaTomas([{ sha256: "ab", movimiento: "zoom" }]));
+});
+
+test("esperaConsulta: cada 10 s si alguna se está generando; cada 30 s si solo esperan en fila", () => {
+  assert.equal(esperaConsulta([{ id: "a", estado: "enviado" }, { id: "b", estado: "en_fila" }]), 10_000);
+  assert.equal(esperaConsulta([{ id: "a", estado: "en_fila" }, { id: "b", estado: "listo" }]), 30_000);
+  assert.equal(esperaConsulta([]), 30_000);
 });

@@ -11,6 +11,10 @@ export type FaseVideo =
 export const terminado = (trabajos: readonly TrabajoVisto[]) =>
   trabajos.length > 0 && trabajos.every((t) => t.estado === "listo" || t.estado === "fallo");
 
+// Cada cuánto consultar mientras se espera (cada consulta lee Firestore): 10 s si alguna toma se está
+// generando; 30 s si solo esperan turno en la fila.
+export const esperaConsulta = (trabajos: readonly TrabajoVisto[]) => (trabajos.some((t) => t.estado === "enviado") ? 10_000 : 30_000);
+
 export function textoEstado(f: FaseVideo): string {
   if (f.tipo === "subiendo") return `Subiendo… ${Math.max(0, Math.min(100, Math.round(f.pct)))}%`;
   if (f.tipo === "previa") return "Vista previa lista";

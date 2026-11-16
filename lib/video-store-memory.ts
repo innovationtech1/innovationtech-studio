@@ -9,15 +9,28 @@ export function memoryVideoStore(semilla: { gasto?: Record<string, number> } = {
   const gasto = new Map<string, number>(Object.entries(semilla.gasto ?? {}));
   const cache = new Map<string, string>();
   const candados = new Map<string, number>();
+  const porDia = new Map<string, number>(); // negocio|día → tomas nuevas
   const copia = <T>(v: T): T => structuredClone(v);
   const todos = () => [...trabajos.values()].map(copia);
   return {
     todos,
-    async crearTrabajos(lista) {
-      for (const t of lista) {
-        if (trabajos.has(t.id)) throw new Error(`El trabajo ${t.id} ya existe`);
-        trabajos.set(t.id, copia(t));
+    async crearTrabajos(lista, cupo) {
+      for (const t of lista) if (trabajos.has(t.id)) throw new Error(`El trabajo ${t.id} ya existe`);
+      if (cupo && cupo.nuevas > 0) {
+        const k = `${cupo.negocioId}|${cupo.dia}`;
+        const ya = porDia.get(k) ?? 0;
+        if (ya + cupo.nuevas > cupo.limite) return "limite";
+        porDia.set(k, ya + cupo.nuevas);
       }
+      for (const t of lista) trabajos.set(t.id, copia(t));
+      return "ok";
+    },
+    async tomasDelDia(negocioId, dia) {
+      return porDia.get(`${negocioId}|${dia}`) ?? 0;
+    },
+    async restarTomaDelDia(negocioId, dia) {
+      const k = `${negocioId}|${dia}`;
+      if (porDia.has(k)) porDia.set(k, Math.max(0, porDia.get(k)! - 1));
     },
     async getTrabajo(id) {
       const t = trabajos.get(id);
@@ -35,10 +48,8 @@ export function memoryVideoStore(semilla: { gasto?: Record<string, number> } = {
     async borrarTrabajosDeNegocio(negocioId) {
       const ids = [...trabajos.values()].filter((t) => t.negocioId === negocioId).map((t) => t.id);
       for (const id of ids) trabajos.delete(id);
+      for (const k of [...porDia.keys()]) if (k.startsWith(`${negocioId}|`)) porDia.delete(k);
       return ids.length;
-    },
-    async trabajosDeNegocio(negocioId, desdeMs) {
-      return todos().filter((t) => t.negocioId === negocioId && t.creado >= desdeMs);
     },
     async trabajoEnCurso(cacheLlave) {
       const t = todos().filter((x) => x.cacheLlave === cacheLlave && (x.estado === "en_fila" || x.estado === "enviado")).sort((x, y) => x.creado - y.creado)[0];
@@ -49,6 +60,9 @@ export function memoryVideoStore(semilla: { gasto?: Record<string, number> } = {
     },
     async contarEnviados() {
       return todos().filter((t) => t.estado === "enviado").length;
+    },
+    async contarEnFila() {
+      return todos().filter((t) => t.estado === "en_fila").length;
     },
     async marcarEnviado(id, o) {
       const t = trabajos.get(id);

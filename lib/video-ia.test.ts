@@ -677,18 +677,88 @@ test("si el despacho truena al crear, igual se devuelven los ids (las tomas qued
   assert.ok(r.ok && r.trabajos[0].estado === "en_fila");
 });
 
-test("consultar no empuja la fila si mis tomas ya se están generando (cuida las lecturas de Firestore)", async () => {
+// Cuenta cuántas veces se llama cada método de un almacén (para cuidar las lecturas de Firestore).
+function contar<T extends object>(o: T) {
+  const veces: Record<string, number> = {};
+  const vigilado = new Proxy(o, {
+    get(obj, k) {
+      const v = Reflect.get(obj, k);
+      if (typeof v !== "function" || typeof k !== "string") return v;
+      return (...a: unknown[]) => ((veces[k] = (veces[k] ?? 0) + 1), (v as (...x: unknown[]) => unknown).apply(obj, a));
+    },
+  });
+  return { vigilado, veces, limpiar: () => Object.keys(veces).forEach((k) => delete veces[k]) };
+}
+
+test("una consulta con la toma generándose: solo lee el usuario, la configuración y las tomas", async () => {
   const m = mundo();
   const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
   assert.ok(r.ok);
-  let candados = 0;
-  const contando = { ...m.videos, tomarCandado: async (...a: Parameters<typeof m.videos.tomarCandado>) => (candados++, m.videos.tomarCandado(...a)) };
-  await consultar("u1", [r.ok ? r.trabajos[0].id : ""], { ...m.deps, videos: contando });
-  assert.equal(candados, 0);
-  // Pero sí cuando lleva más de 15 min sin aviso
-  m.estado.now = AHORA + 16 * MIN;
-  await consultar("u1", [r.ok ? r.trabajos[0].id : ""], { ...m.deps, videos: contando });
-  assert.equal(candados, 1);
+  const v = contar(m.videos);
+  const st = contar(m.store);
+  m.estado.now = AHORA + 5 * MIN;
+  await consultar("u1", [r.ok ? r.trabajos[0].id : ""], { ...m.deps, now: m.estado.now, videos: v.vigilado, store: st.vigilado });
+  assert.deepEqual(v.veces, { listarTrabajos: 1 });
+  assert.deepEqual(st.veces, { getUsuario: 1, getConfig: 1 });
+});
+
+test("una consulta con la toma en fila: no despacha; lee la fila y el gasto UNA vez", async () => {
+  // Fila llena por el tope del día
+  const m = mundo({}, { gasto: { [HOY]: 500 } });
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  assert.ok(r.ok && r.trabajos[0].estado === "en_fila");
+  // Aunque se libere el tope, consultar no empuja la fila (eso lo hacen crear, el aviso y el respaldo)
+  m.estado.now = AHORA + 24 * 60 * MIN;
+  const v = contar(m.videos);
+  const st = contar(m.store);
+  const c = await consultar("u1", [r.ok ? r.trabajos[0].id : ""], { ...m.deps, now: m.estado.now, videos: v.vigilado, store: st.vigilado });
+  assert.ok(c.ok && c.trabajos[0].estado === "en_fila" && c.trabajos[0].lugar === 1);
+  assert.deepEqual(v.veces, { listarTrabajos: 1, trabajosEnFila: 1, getGasto: 1 });
+  assert.deepEqual(st.veces, { getUsuario: 1, getConfig: 1 });
+  assert.equal(m.enviados.length, 0);
+});
+
+test("una consulta con una toma atorada empuja la fila, pero como mucho una vez por minuto (entre servidores)", async () => {
+  const m = mundo();
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, m.deps);
+  assert.ok(r.ok);
+  const id = r.ok ? r.trabajos[0].id : "";
+  const v = contar(m.videos);
+  const consulta = (min: number) => consultar("u1", [id], { ...m.deps, now: AHORA + min * MIN, videos: v.vigilado });
+  await consulta(16);
+  assert.equal(v.veces.trabajosEnviados, 1); // corrió el despacho (revisa atorados)
+  assert.equal(v.veces.listarTrabajos, 1); // no vuelve a leer mis tomas
+  v.limpiar();
+  await consulta(16.5); // 30 s después: no
+  assert.equal(v.veces.trabajosEnviados, undefined);
+  await consulta(17.1); // pasado el minuto: sí
+  assert.equal(v.veces.trabajosEnviados, 1);
+});
+
+test("despachar lee el gasto del día una vez y se detiene en cuanto la siguiente toma no cabe", async () => {
+  const AYER = AHORA - 24 * 60 * MIN;
+  const m = mundo({}, { gasto: { "2026-11-09": 500, [HOY]: 450 } });
+  m.estado.now = AYER;
+  await crearVideo(req(), { tomas: ["a", "b", "c", "d"].map((l) => ({ imagenKey: foto(l), movimiento: "" })) }, m.deps);
+  assert.equal((await m.videos.trabajosEnFila(10)).length, 4);
+  m.estado.now = AHORA;
+  const v = contar(m.videos);
+  assert.deepEqual(await despachar({ ...m.deps, now: AHORA, videos: v.vigilado }), { enviados: 2 }); // 450 + 20 + 20 ≤ 500
+  assert.equal(v.veces.getGasto, 1);
+  assert.equal(v.veces.marcarEnviado, 2); // la tercera ya no cabe: ni se intenta
+  assert.equal(await m.videos.getGasto(HOY), 490);
+});
+
+test("el límite por cliente al día no lee todas las tomas del negocio: usa un contador del día", async () => {
+  const m = mundo();
+  const cfg = await m.store.getConfig();
+  await m.store.guardarConfig({ videoIa: { ...cfg.videoIa, tomasPorNegocioDia: 2 } });
+  const v = contar(m.videos);
+  const r = await crearVideo(req(), { tomas: [{ imagenKey: foto("a"), movimiento: "" }] }, { ...m.deps, videos: v.vigilado });
+  assert.ok(r.ok);
+  assert.equal(v.veces.trabajosDeNegocio, undefined);
+  assert.equal(v.veces.tomasDelDia, 1);
+  assert.equal(await m.videos.tomasDelDia("n1", HOY), 1);
 });
 
 test("baseDePedido: el aviso de fal va a la misma versión del sitio que recibió el pedido", () => {

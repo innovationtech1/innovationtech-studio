@@ -42,8 +42,17 @@ export type OpcionesEnvio = { costo: number; dia: string; tope: number; simultan
 export type ResultadoEnvio = "ok" | "tope" | "lleno" | "no_en_fila";
 export type DatosEnvio = { falRequestId: string; statusUrl: string; responseUrl: string };
 
+// Cupo por cliente y por día (hora de Chicago): cuántas tomas nuevas suma este pedido y el límite.
+export type CupoDia = { negocioId: string; dia: string; nuevas: number; limite: number };
+
 export interface VideoStore {
-  crearTrabajos(t: TrabajoVideo[]): Promise<void>;
+  // Crea los trabajos. Con cupo, en la MISMA operación suma `nuevas` al contador del día del negocio;
+  // si se pasaría del límite no crea nada y devuelve "limite".
+  crearTrabajos(t: TrabajoVideo[], cupo?: CupoDia): Promise<"ok" | "limite">;
+  // Tomas nuevas que el negocio ya pidió ese día (sin las que salieron del caché ni las que fallaron).
+  tomasDelDia(negocioId: string, dia: string): Promise<number>;
+  // Una toma que falló del todo (y se devolvió) deja de contar para el límite de su día.
+  restarTomaDelDia(negocioId: string, dia: string): Promise<void>;
   getTrabajo(id: string): Promise<TrabajoVideo | null>;
   // Solo los que existen, en el orden pedido.
   listarTrabajos(ids: string[]): Promise<TrabajoVideo[]>;
@@ -53,13 +62,12 @@ export interface VideoStore {
   trabajosEnviados(limite: number): Promise<TrabajoVideo[]>;
   // El trabajo con esa llave que sigue en camino (en fila o enviado), o null. La llave ya incluye al negocio.
   trabajoEnCurso(cacheLlave: string): Promise<TrabajoVideo | null>;
-  // Borra todos los trabajos de un negocio (al borrar la cuenta). Devuelve cuántos eran.
+  // Borra todos los trabajos de un negocio y sus contadores del día (al borrar la cuenta). Devuelve cuántos trabajos eran.
   borrarTrabajosDeNegocio(negocioId: string): Promise<number>;
-  // Los trabajos de un negocio creados desde ese momento (para el límite por día)
-  trabajosDeNegocio(negocioId: string, desdeMs: number): Promise<TrabajoVideo[]>;
   // Los actualizados desde `ms`, del más nuevo al más viejo (para el resumen del administrador).
   trabajosDesde(ms: number, limite: number): Promise<TrabajoVideo[]>;
   contarEnviados(): Promise<number>;
+  contarEnFila(): Promise<number>;
   // Aparta el envío en UNA transacción: el trabajo pasa de en_fila a enviado y su costo se suma al
   // gasto del día. No cambia nada si ya no está en fila, si el gasto pasaría del tope o si ya hay
   // `simultaneos` enviados. Se llama ANTES de mandar a fal: así dos despachos a la vez no envían lo mismo.
@@ -99,14 +107,50 @@ export function firestoreVideoStore(): VideoStore {
   const C = colecciones();
   const trabajos = () => db().collection(C.trabajosVideo);
   const deDoc = (d: FirebaseFirestore.DocumentSnapshot) => ({ ...(d.data() as Omit<TrabajoVideo, "id">), id: d.id }) as TrabajoVideo;
-  // Sin índices compuestos: se filtra por estado y se ordena aquí (la fila es corta).
-  const porEstado = async (estado: EstadoTrabajo) => (await trabajos().where("estado", "==", estado).get()).docs.map(deDoc);
+  const contador = (negocioId: string, dia: string) => db().collection(C.tomasDia).doc(`${negocioId}_${dia}`);
+  // La fila en orden (prioridad y antigüedad) con tope de lecturas. Usa el índice compuesto de
+  // firestore.indexes.json; si todavía no está publicado, lee hasta `limite` por estado y ordena aquí.
+  let sinIndice = false;
+  const fila = async (limite: number): Promise<TrabajoVideo[]> => {
+    const base = trabajos().where("estado", "==", "en_fila");
+    if (!sinIndice) {
+      try {
+        return (await base.orderBy("prioridad").orderBy("creado").limit(limite).get()).docs.map(deDoc);
+      } catch (e) {
+        if ((e as { code?: unknown }).code !== 9) throw e; // 9 = FAILED_PRECONDITION: falta el índice
+        sinIndice = true;
+        console.warn("Video con IA: falta publicar el índice de la fila (firestore.indexes.json); se ordena en el servidor.");
+      }
+    }
+    return (await base.limit(Math.max(limite, 100)).get()).docs.map(deDoc).sort(ordenFila).slice(0, limite);
+  };
   return {
-    async crearTrabajos(lista) {
-      if (lista.length === 0) return;
-      const lote = db().batch();
-      for (const { id, ...datos } of lista) lote.create(trabajos().doc(id), sinUndefined(datos));
-      await lote.commit();
+    async crearTrabajos(lista, cupo) {
+      if (lista.length === 0) return "ok";
+      if (!cupo || cupo.nuevas <= 0) {
+        const lote = db().batch();
+        for (const { id, ...datos } of lista) lote.create(trabajos().doc(id), sinUndefined(datos));
+        await lote.commit();
+        return "ok";
+      }
+      const ref = contador(cupo.negocioId, cupo.dia);
+      return db().runTransaction(async (t) => {
+        const ya = numero((await t.get(ref)).data()?.tomas);
+        if (ya + cupo.nuevas > cupo.limite) return "limite" as const;
+        for (const { id, ...datos } of lista) t.create(trabajos().doc(id), sinUndefined(datos));
+        t.set(ref, { negocioId: cupo.negocioId, dia: cupo.dia, tomas: ya + cupo.nuevas }, { merge: true });
+        return "ok" as const;
+      });
+    },
+    async tomasDelDia(negocioId, dia) {
+      return numero((await contador(negocioId, dia).get()).data()?.tomas);
+    },
+    async restarTomaDelDia(negocioId, dia) {
+      const ref = contador(negocioId, dia);
+      await db().runTransaction(async (t) => {
+        const s = await t.get(ref);
+        if (s.exists) t.update(ref, { tomas: Math.max(0, numero(s.data()?.tomas) - 1) });
+      });
     },
     async getTrabajo(id) {
       const s = await trabajos().doc(id).get();
@@ -117,9 +161,7 @@ export function firestoreVideoStore(): VideoStore {
       const docs = await db().getAll(...ids.map((id) => trabajos().doc(id)));
       return docs.filter((d) => d.exists).map(deDoc);
     },
-    async trabajosEnFila(limite) {
-      return (await porEstado("en_fila")).sort(ordenFila).slice(0, limite);
-    },
+    trabajosEnFila: (limite) => fila(limite),
     async trabajosEnviados(limite) {
       return (await trabajos().where("estado", "==", "enviado").limit(limite).get()).docs.map(deDoc);
     },
@@ -131,11 +173,13 @@ export function firestoreVideoStore(): VideoStore {
         for (const d of docs.slice(i, i + 400)) lote.delete(d.ref);
         await lote.commit();
       }
+      const contadores = (await db().collection(C.tomasDia).where("negocioId", "==", negocioId).get()).docs;
+      for (let i = 0; i < contadores.length; i += 400) {
+        const lote = db().batch();
+        for (const d of contadores.slice(i, i + 400)) lote.delete(d.ref);
+        await lote.commit();
+      }
       return docs.length;
-    },
-    async trabajosDeNegocio(negocioId, desdeMs) {
-      // Un solo campo en la consulta (sin índice compuesto); la fecha se filtra aquí
-      return (await trabajos().where("negocioId", "==", negocioId).get()).docs.map(deDoc).filter((t) => t.creado >= desdeMs);
     },
     async trabajoEnCurso(cacheLlave) {
       // Un solo campo en la consulta (sin índice compuesto); el estado se filtra aquí
@@ -148,6 +192,9 @@ export function firestoreVideoStore(): VideoStore {
     async contarEnviados() {
       return (await trabajos().where("estado", "==", "enviado").count().get()).data().count;
     },
+    async contarEnFila() {
+      return (await trabajos().where("estado", "==", "en_fila").count().get()).data().count;
+    },
     async marcarEnviado(id, o) {
       const ref = trabajos().doc(id);
       const refGasto = db().collection(C.gastoVideo).doc(o.dia);
@@ -158,7 +205,7 @@ export function firestoreVideoStore(): VideoStore {
         if (!s.exists || s.data()?.estado !== "en_fila") return "no_en_fila";
         const gasto = numero(g.data()?.centavos);
         if (gasto + o.costo > o.tope) return "tope";
-        const enviados = await t.get(trabajos().where("estado", "==", "enviado"));
+        const enviados = await t.get(trabajos().where("estado", "==", "enviado").limit(o.simultaneos));
         if (enviados.size >= o.simultaneos) return "lleno";
         t.update(ref, { estado: "enviado", enviado: o.ahora, diaGasto: o.dia, costoCentavos: o.costo, actualizado: o.ahora });
         t.set(refGasto, { centavos: gasto + o.costo, actualizado: o.ahora }, { merge: true });

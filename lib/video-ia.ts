@@ -134,6 +134,12 @@ function mundoDe(deps: DepsVideo): Mundo {
   };
 }
 
+// Tope de gasto del día para una toma: la prueba (prioridad 3) se detiene antes, al umbral del demo.
+function topeDe(cfg: PlanesConfig, prioridad: number): number {
+  const v = cfg.videoIa;
+  return prioridad === 3 ? Math.floor(v.topeDiarioCentavos * v.umbralDemo) : v.topeDiarioCentavos;
+}
+
 // Mensaje corto para el registro: nunca claves, secretos ni enlaces firmados.
 const motivo = (e: unknown) => (e instanceof Error ? e.message : "error").replace(/https?:\/\/\S+/g, "[enlace]").slice(0, 160);
 
@@ -233,22 +239,22 @@ export async function crearVideo(
     // Cuota: solo las tomas nuevas. El guardián revisa sesión, plan y descuenta del mes o del saldo.
     nuevas = preparadas.filter((p) => !p.clipKey).length;
     // Límite por cliente y por día: un solo cliente no se gasta lo de todos. Se revisa antes de cobrar.
+    // Un contador por negocio y por día (una sola lectura); se vuelve a revisar al crear, en la misma operación.
+    const hoy = diaChicago(m.ahora);
+    const limite = cfg.videoIa.tomasPorNegocioDia;
+    const fallaLimite = (deHoy: number) => {
+      const quedan = Math.max(0, limite - deHoy);
+      return falla(
+        429,
+        quedan > 0
+          ? `Hoy puedes generar ${quedan} ${quedan === 1 ? "toma" : "tomas"} más con IA (el límite es de ${limite} al día). Mañana puedes seguir.`
+          : `Llegaste al límite de hoy: ${limite} tomas con IA. Mañana puedes seguir; tus créditos no se pierden.`,
+        "LIMITE_DIA",
+      );
+    };
     if (nuevas > 0) {
-      const hoy = diaChicago(m.ahora);
-      const deHoy = (await m.videos.trabajosDeNegocio(negocio.id, m.ahora - 36 * 60 * 60 * 1000)).filter(
-        (t) => !t.desdeCache && t.estado !== "fallo" && diaChicago(t.creado) === hoy,
-      ).length;
-      const limite = cfg.videoIa.tomasPorNegocioDia;
-      if (deHoy + nuevas > limite) {
-        const quedan = Math.max(0, limite - deHoy);
-        return falla(
-          429,
-          quedan > 0
-            ? `Hoy puedes generar ${quedan} ${quedan === 1 ? "toma" : "tomas"} más con IA (el límite es de ${limite} al día). Mañana puedes seguir.`
-            : `Llegaste al límite de hoy: ${limite} tomas con IA. Mañana puedes seguir; tus créditos no se pierden.`,
-          "LIMITE_DIA",
-        );
-      }
+      const deHoy = await m.videos.tomasDelDia(negocio.id, hoy);
+      if (deHoy + nuevas > limite) return fallaLimite(deHoy);
     }
     let delMes = 0;
     let mes = "";
@@ -297,11 +303,17 @@ export async function crearVideo(
         reserva: { mes, delMes: usaSaldo ? 0 : 1, delSaldo: usaSaldo ? 1 : 0 },
       };
     });
+    let creado: "ok" | "limite";
     try {
-      await m.videos.crearTrabajos(trabajos);
+      creado = await m.videos.crearTrabajos(trabajos, nuevas > 0 ? { negocioId: negocio.id, dia: hoy, nuevas, limite } : undefined);
     } catch (e) {
       await devolver(); // no quedó ningún trabajo: lo descontado regresa
       throw e;
+    }
+    if (creado === "limite") {
+      await devolver();
+      trabajos = [];
+      return fallaLimite(await m.videos.tomasDelDia(negocio.id, hoy));
     }
   } finally {
     await m.videos.soltarCandado(candado).catch(() => {});
@@ -325,14 +337,14 @@ export async function despachar(deps: DepsVideo = {}): Promise<{ enviados: numbe
   return despacharCon(mundoDe(deps));
 }
 
-async function despacharCon(m: Mundo): Promise<{ enviados: number }> {
+async function despacharCon(m: Mundo, cfgLeida?: PlanesConfig): Promise<{ enviados: number }> {
   // Sin cuentas no hay tomas con IA: no se toca la base de datos (el respaldo corre cada 5 min)
   if (!cuentasActivas()) return { enviados: 0 };
   if (!m.encendido || !m.r2) return { enviados: 0 };
   if (!(await m.videos.tomarCandado(CANDADO, MS_CANDADO, m.ahora))) return { enviados: 0 };
   let enviados = 0;
   try {
-    const cfg = await m.store.getConfig();
+    const cfg = cfgLeida ?? (await m.store.getConfig());
     const v = cfg.videoIa;
     await revisarAtorados(m, cfg);
     if (!m.base) {
@@ -342,14 +354,18 @@ async function despacharCon(m: Mundo): Promise<{ enviados: number }> {
     const libres = v.simultaneos - (await m.videos.contarEnviados());
     if (libres <= 0) return { enviados: 0 };
     const dia = diaChicago(m.ahora);
-    for (const t of await m.videos.trabajosEnFila(libres + 20)) {
+    // El gasto del día se lee una vez y se lleva aquí; la transacción de marcarEnviado lo vuelve a revisar.
+    let gasto = await m.videos.getGasto(dia);
+    for (const t of await m.videos.trabajosEnFila(libres + 3)) {
       if (enviados >= libres) break;
       // El modelo y el precio son los de hoy (si el administrador los cambió, el trabajo en fila los toma)
       const costo = costoTomaCentavos(cfg, t.nivel);
-      const tope = t.prioridad === 3 ? Math.floor(v.topeDiarioCentavos * v.umbralDemo) : v.topeDiarioCentavos;
+      const tope = topeDe(cfg, t.prioridad);
+      if (gasto + costo > tope) break; // no cabe hoy: los que siguen tampoco (van detrás en la fila)
       const r = await m.videos.marcarEnviado(t.id, { costo, dia, tope, simultaneos: v.simultaneos, ahora: m.ahora });
-      if (r === "lleno") break;
-      if (r !== "ok") continue; // tope del día (espera a mañana) o ya lo tomó otro despacho
+      if (r === "lleno" || r === "tope") break;
+      if (r !== "ok") continue; // ya lo tomó otro despacho
+      gasto += costo;
       const enviado = { ...t, estado: "enviado" as const };
       let e: Awaited<ReturnType<FalDeps["enviar"]>>;
       try {
@@ -371,7 +387,7 @@ async function despacharCon(m: Mundo): Promise<{ enviados: number }> {
       } catch (err) {
         // fal dijo que no con certeza (o ni se llegó a mandar): no lo corre ni lo cobra; vuelve a la fila
         console.error(`Video con IA: no se pudo enviar el trabajo ${t.id} (${motivo(err)}).`);
-        await reintentarOFallar(m, cfg, enviado, undefined, motivo(err), NO_COBRADO);
+        if (await reintentarOFallar(m, cfg, enviado, undefined, motivo(err), NO_COBRADO)) gasto -= costo;
         continue;
       }
       // fal ya lo aceptó: pase lo que pase al guardar, NUNCA vuelve a la fila
@@ -418,6 +434,10 @@ async function reintentarOFallar(
   );
   if (cambio && !reintenta && t.reserva.delMes + t.reserva.delSaldo > 0) {
     await m.store.devolverUso(t.negocioId, t.reserva.mes, "tomas_ia", { delMes: t.reserva.delMes, delSaldo: t.reserva.delSaldo });
+    // Se devolvió: deja de contar para el límite del día en que se pidió
+    await m.videos.restarTomaDelDia(t.negocioId, diaChicago(t.creado)).catch((e) =>
+      console.error(`Video con IA: no se pudo bajar el contador del día del trabajo ${t.id} (${motivo(e)}).`),
+    );
   }
   return cambio;
 }
@@ -552,7 +572,13 @@ export async function procesarAviso(url: URL, headers: Headers, cuerpo: string, 
   return { status: 200 };
 }
 
-// Estado de las tomas de un video, para quien es del negocio. También empuja la fila.
+// Estado de las tomas de un video, para quien es del negocio. Se consulta cada 10-30 s mientras se
+// espera: cada lectura de Firestore cuenta (el plan gratis se comparte con NOVA). Normalmente lee el
+// usuario, la configuración y las tomas; la fila y el gasto solo si alguna espera turno. Solo empuja la
+// fila si una de mis tomas lleva demasiado sin aviso, y como mucho una vez por minuto entre todos.
+const CANDADO_CONSULTA = "despacho_consulta";
+const MS_CONSULTA = 60_000;
+const MAX_LUGAR = 50;
 export async function consultar(
   uid: string,
   ids: string[],
@@ -565,31 +591,27 @@ export async function consultar(
   const m = mundoDe(deps);
   const usuario = await m.store.getUsuario(uid);
   if (!usuario) return falla(403, "Crea tu cuenta para empezar.");
-  const deEsteNegocio = async () => (await m.videos.listarTrabajos(ids)).filter((t) => t.negocioId === usuario.negocioId);
-  let mios = await deEsteNegocio();
-  // Solo se empuja la fila si alguna de mis tomas espera turno o lleva demasiado sin aviso
-  // (cada empujón cuesta lecturas y escrituras de Firestore, y esto se consulta cada 5 s).
-  const cfgV = (await m.store.getConfig()).videoIa;
-  const viejo = m.ahora - cfgV.minutosAtorado * 60_000;
-  if (mios.some((t) => t.estado === "en_fila" || (t.estado === "enviado" && (t.enviado ?? t.actualizado) <= viejo))) {
-    try {
-      await despacharCon(m);
-      mios = await deEsteNegocio();
-    } catch (e) {
-      console.error(`Video con IA: el despacho al consultar falló (${motivo(e)}).`);
+  const mios = (await m.videos.listarTrabajos(ids)).filter((t) => t.negocioId === usuario.negocioId);
+  const enFila = mios.some((t) => t.estado === "en_fila");
+  const generando = mios.some((t) => t.estado === "enviado");
+  const cfg = enFila || generando ? await m.store.getConfig() : null;
+  if (cfg && generando) {
+    const viejo = m.ahora - cfg.videoIa.minutosAtorado * 60_000;
+    if (mios.some((t) => t.estado === "enviado" && (t.enviado ?? t.actualizado) <= viejo)) {
+      try {
+        // Este candado no se suelta: vence solo al minuto, así frena a todos los servidores
+        if (await m.videos.tomarCandado(CANDADO_CONSULTA, MS_CONSULTA, m.ahora)) await despacharCon(m, cfg);
+      } catch (e) {
+        console.error(`Video con IA: el despacho al consultar falló (${motivo(e)}).`);
+      }
+      // Lo que cambió se ve en la siguiente consulta (no se vuelven a leer mis tomas)
     }
   }
-  const enFila = mios.some((t) => t.estado === "en_fila");
-  const fila = enFila ? await m.videos.trabajosEnFila(200) : [];
+  const fila = enFila ? await m.videos.trabajosEnFila(MAX_LUGAR) : [];
   let topeHoy = false;
-  if (enFila) {
-    const cfg = await m.store.getConfig();
+  if (cfg && enFila) {
     const gasto = await m.videos.getGasto(diaChicago(m.ahora));
-    topeHoy = mios.some((t) => {
-      if (t.estado !== "en_fila") return false;
-      const tope = t.prioridad === 3 ? Math.floor(cfg.videoIa.topeDiarioCentavos * cfg.videoIa.umbralDemo) : cfg.videoIa.topeDiarioCentavos;
-      return gasto + costoTomaCentavos(cfg, t.nivel) > tope;
-    });
+    topeHoy = mios.some((t) => t.estado === "en_fila" && gasto + costoTomaCentavos(cfg, t.nivel) > topeDe(cfg, t.prioridad));
   }
   const trabajos = mios.map((t): TrabajoPublico => {
     const r: TrabajoPublico = { id: t.id, estado: t.estado };
@@ -623,10 +645,10 @@ export async function resumenVideo(
   const m = mundoDe(deps);
   const cfg = await m.store.getConfig();
   const SEMANA = 7 * 24 * 60 * 60 * 1000;
-  const [gasto, enProceso, fila, recientes] = await Promise.all([
+  const [gasto, enProceso, enFila, recientes] = await Promise.all([
     m.videos.getGasto(diaChicago(m.ahora)),
     m.videos.contarEnviados(),
-    m.videos.trabajosEnFila(200),
+    m.videos.contarEnFila(),
     m.videos.trabajosDesde(m.ahora - SEMANA, 200),
   ]);
   const fallidos = recientes.filter((t) => t.estado === "fallo").slice(0, 10);
@@ -639,7 +661,7 @@ export async function resumenVideo(
     topeCentavos: cfg.videoIa.topeDiarioCentavos,
     tomasPorNegocioDia: cfg.videoIa.tomasPorNegocioDia,
     enProceso,
-    enFila: fila.length,
+    enFila,
     fallos: fallidos.map((t) => ({ fecha: t.actualizado, negocio: nombres.get(t.negocioId) ?? t.negocioId, motivo: t.error ?? "Sin detalle" })),
   };
 }
