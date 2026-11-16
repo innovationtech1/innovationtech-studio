@@ -744,6 +744,10 @@ export default function ReelStudio({
   const animandoYa = useRef(new Set<string>());
   // Mientras se graba o se anima una toma no se cambia de proyecto ni se empieza otro
   useEffect(() => onOcupado?.(!!busy || animando.length > 0), [busy, animando, onOcupado]);
+  // Al ocultarse el resultado mientras se trabaja, el video terminado deja de sonar.
+  useEffect(() => {
+    if (busy) videoFinal.current?.pause();
+  }, [busy]);
 
   // Consulta tomas y guarda el enlace de las que ya están listas
   async function verTomas(ids: string[]): Promise<{ vistos: TrabajoVisto[]; topeHoy: boolean }> {

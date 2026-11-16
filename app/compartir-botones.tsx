@@ -21,6 +21,7 @@ type Fuente = Blob | string;
 type EstadoDrive =
   | { fase: "listo" }
   | { fase: "esperando" } // la ventana de Google está abierta
+  | { fase: "preparando" } // ya hay permiso: carpeta y sesión de subida
   | { fase: "subiendo"; pct: number }
   | { fase: "hecho"; enlace: string }
   | { fase: "error"; mensaje: string };
@@ -218,6 +219,10 @@ export default function CompartirBotones({
   }
 
   async function subir(fuente: Fuente, primerToken: Promise<string>, control: AbortController) {
+    const conPermiso = (t: string) => {
+      if (!control.signal.aborted) setDrive({ fase: "preparando" });
+      return t;
+    };
     try {
       const a = await leer(fuente);
       if (!a) {
@@ -225,11 +230,11 @@ export default function CompartirBotones({
         return;
       }
       const hecho = await guardarEnDrive(a, nombre, {
-        token: () => primerToken,
+        token: () => primerToken.then(conPermiso),
         tokenNuevo: () => {
           olvidarToken();
           setDrive({ fase: "esperando" });
-          return pedirToken(ID_GOOGLE, { prompt: "" });
+          return pedirToken(ID_GOOGLE, { prompt: "" }).then(conPermiso);
         },
         f: (url, init) => fetch(url, init),
         carpetaGuardada: leerCarpeta(),
@@ -252,7 +257,7 @@ export default function CompartirBotones({
   const etiqueta = preparando ? "Preparando…" : "Compartir";
   const conDrive = !!ID_GOOGLE;
   const cargando = !enApp && (google === "espera" || google === "cargando");
-  const driveOcupado = drive.fase === "subiendo" || drive.fase === "esperando" || cargando;
+  const driveOcupado = drive.fase === "subiendo" || drive.fase === "esperando" || drive.fase === "preparando" || cargando;
   const etiquetaDrive = cargando ? "Preparando…" : "Guardar en Drive";
   const alFoco = ID_GOOGLE && !enApp && google === "espera" ? cargarGoogle : undefined;
 
@@ -284,9 +289,9 @@ export default function CompartirBotones({
       )}
       {drive.fase !== "listo" && (
         <span className="notice compartir-aviso drive-estado" role="status">
-          {drive.fase === "esperando" && (
+          {(drive.fase === "esperando" || drive.fase === "preparando") && (
             <>
-              <span className="drive-texto">Esperando a Google…</span>
+              <span className="drive-texto">{drive.fase === "esperando" ? "Esperando a Google…" : "Preparando Drive…"}</span>
               <button type="button" className="btn ghost small" onClick={() => cancelar.current?.abort()}>
                 Cancelar
               </button>

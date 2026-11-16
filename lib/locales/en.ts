@@ -192,6 +192,7 @@ export const EN: Record<string, string> = {
   "Guardar en Drive": "Save to Drive",
   "Guardado en Drive": "Saved to Drive",
   "Esperando a Google…": "Waiting for Google…",
+  "Preparando Drive…": "Preparing Drive…",
   "Subiendo a Drive…": "Uploading to Drive…",
   "Toca otra vez para compartir.": "Tap again to share.",
   "Se canceló la subida a Drive.": "The upload to Drive was cancelled.",
