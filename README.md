@@ -275,6 +275,7 @@ Entra a Netlify → proyecto **innovationtech-studio** → *Project configuratio
 | `VIDEO_IA` | Opcional. `off` apaga al instante las tomas con IA (los reels con animación siguen funcionando) |
 | `VIDEO_IA_TOPE_CENTAVOS` | Opcional. Tope de gasto del día en fal.ai para esa publicación, en centavos (`200` = $2); si está, manda sobre el tope del panel. Útil para que la versión de prueba gaste menos |
 | `STUDIO_COLECCION_PREFIJO` | Opcional. Inicio del nombre de las colecciones de Firestore (`studio_` si no la pones). Solo para las versiones de prueba: `prueba_studio_` (ver Paso 4). Solo letras, números, `_` y `-`: con otro carácter las cuentas de esa publicación no funcionan (a propósito, para no tocar los datos del sitio principal) |
+| `NEXT_PUBLIC_CASHAPP_TAG` | Opcional. El $cashtag de Cash App donde pagan los clientes (por ejemplo `$MiNegocio`; es público). Con él, la pantalla `/activar` muestra el botón «Pagar con Cash App»; sin él, el pago se acuerda por WhatsApp |
 | `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | Opcional. ID de cliente de Google para «Guardar en Drive» (es público; ver «Guardar en Google Drive»). Sin él, el botón no aparece |
 
 Netlify bloquea la publicación si encuentra en el código un valor igual a una variable. Como las variables no secretas sí aparecen en el sitio, agrega una variable más:
@@ -282,7 +283,7 @@ Netlify bloquea la publicación si encuentra en el código un valor igual a una 
 - `SECRETS_SCAN_OMIT_KEYS` con este valor, **separado por comas y sin espacios**:
 
 ```
-FIREBASE_PROJECT_ID,NEXT_PUBLIC_FIREBASE_API_KEY,NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,NEXT_PUBLIC_FIREBASE_PROJECT_ID,STUDIO_ADMIN_EMAILS,CF_ACCOUNT_ID,STUDIO_CUENTAS,NEXT_PUBLIC_STUDIO_CUENTAS,STUDIO_COLECCION_PREFIJO,R2_ACCOUNT_ID,R2_BUCKET,VIDEO_IA,NEXT_PUBLIC_GOOGLE_CLIENT_ID
+FIREBASE_PROJECT_ID,NEXT_PUBLIC_FIREBASE_API_KEY,NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,NEXT_PUBLIC_FIREBASE_PROJECT_ID,STUDIO_ADMIN_EMAILS,CF_ACCOUNT_ID,STUDIO_CUENTAS,NEXT_PUBLIC_STUDIO_CUENTAS,STUDIO_COLECCION_PREFIJO,R2_ACCOUNT_ID,R2_BUCKET,VIDEO_IA,NEXT_PUBLIC_GOOGLE_CLIENT_ID,NEXT_PUBLIC_CASHAPP_TAG
 ```
 
 Nunca pongas una clave secreta en una variable que empiece con `NEXT_PUBLIC_`.

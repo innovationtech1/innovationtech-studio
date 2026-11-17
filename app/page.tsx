@@ -1573,6 +1573,15 @@ function Config({
       )}
     </section>
     )}
+    <section className="card">
+      <h2>Activar con tarjeta</h2>
+      <p className="hint" style={{ marginTop: 0 }}>
+        ¿Tienes una tarjeta de InnovationTECH Studio? Actívala acercándola al celular, con su código QR o escribiendo el código.
+      </p>
+      <a className="btn" href="/activar">
+        Activar con tarjeta
+      </a>
+    </section>
     <VerificarNfc />
     <section className="card">
       <h2>Configuración avanzada</h2>
