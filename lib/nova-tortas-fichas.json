@@ -1,0 +1,454 @@
+{
+  "negocio": "Tortas Tortuga",
+  "version": "2026-11-16",
+  "nota": "Los precios de estas fichas salen del menú base de la app. Para cobrar, la app usa siempre el menú guardado en ese momento.",
+  "fichas": [
+    {
+      "id": "general-negocio",
+      "categoria": "general",
+      "titulo": "Quiénes somos: Tortas Tortuga",
+      "contenido": "Tortas Tortuga es un negocio de tortas en San Antonio, Texas, que atiende con unidades móviles (tortumóviles) y entrega a domicilio.\nLema: «Sabor a paso firme». Tortas hechas con ingredientes frescos y porciones gigantes.\nTambién atiende eventos (catering).",
+      "activa": true
+    },
+    {
+      "id": "contacto-horario",
+      "categoria": "contacto",
+      "titulo": "Contacto y horario",
+      "contenido": "Teléfono: 210-TORTA-10 (210-86782-10).\nHorario: lunes a sábado, de 10:00 AM a 6:00 PM. Domingo cerrado.",
+      "activa": true
+    },
+    {
+      "id": "combos",
+      "categoria": "menu",
+      "titulo": "Qué incluye un combo",
+      "contenido": "Todas las tortas se venden en combo: incluyen soda en lata y papas (chips). La Special Double T incluye 2 sodas en lata y papas.\nLa torta sola, sin combo, cuesta $1 menos.",
+      "activa": true
+    },
+    {
+      "id": "zonas",
+      "categoria": "entrega",
+      "titulo": "Zonas de entrega",
+      "contenido": "Se entrega a domicilio en estas zonas: Zona 211, San Antonio, Converse, Seguin, Culebra y Castroville.",
+      "activa": true
+    },
+    {
+      "id": "horarios-entrega",
+      "categoria": "entrega",
+      "titulo": "Horarios para programar una entrega",
+      "contenido": "Las entregas programadas se agendan cada 30 minutos, de 10:00 AM a 5:30 PM.\nCada horario tiene cupo limitado por zona (3 entregas). Si un horario está lleno, NOVA ofrece el siguiente libre.\nLa orden se programa con al menos 60 minutos de anticipación.",
+      "activa": true
+    },
+    {
+      "id": "regla-programar",
+      "categoria": "entrega",
+      "titulo": "Mínimo de compra y costo de envío al programar",
+      "contenido": "Para programar una orden a domicilio el pedido debe ser de $60 o más en productos (sin contar envío ni impuesto). El envío de una orden programada cuesta $5.\nSi el pedido no llega a $60, NOVA dice cuánto falta y ofrece agregar algo; no lo programa.",
+      "activa": true
+    },
+    {
+      "id": "impuesto",
+      "categoria": "cobro",
+      "titulo": "Impuesto",
+      "contenido": "Se cobra 4% de impuesto sobre el total de productos más el envío. El total siempre lo calcula la app, no NOVA.",
+      "activa": true
+    },
+    {
+      "id": "pago",
+      "categoria": "cobro",
+      "titulo": "Cómo se paga una orden programada",
+      "contenido": "Se paga con Cash App. Al confirmar el pedido, NOVA dice «puede pagar aquí» y se abre el código QR de Cash App con el total y un botón para abrir Cash App.\nEl pedido queda como «pago por confirmar» hasta que un empleado ve el pago y lo marca como pagado.",
+      "activa": true
+    },
+    {
+      "id": "como-programar",
+      "categoria": "entrega",
+      "titulo": "Cómo programar tu comida con NOVA",
+      "contenido": "1. Dile a NOVA la zona, el día y la hora.\n2. Dile qué productos quieres y cuántos.\n3. NOVA te lee el resumen con el total.\n4. Di que sí para programarlo.\n5. Paga con Cash App.",
+      "activa": true
+    },
+    {
+      "id": "producto-double-t",
+      "categoria": "menu",
+      "titulo": "Tortas: La Special Double T",
+      "contenido": "1 aguacate GRANDE entero con 15 rebanadas de carnes mixtas (jamón, queso de puerco y pavo), tomate, cebolla, mayonesa y queso fresco.\nDescripción original: 1 Whole BIG avocado with 15 slices of mix meats (ham, pork head cheese & turkey) with tomato, onions, mayo and queso fresco.\nIncluye: 2 sodas en lata y papas.\nOpciones y precios:\n- COMBO · 15 Slices: $20",
+      "activa": true,
+      "productId": "double-t",
+      "variantes": [
+        {
+          "label": "COMBO · 15 Slices — $20",
+          "precio": 20
+        }
+      ]
+    },
+    {
+      "id": "producto-original",
+      "categoria": "menu",
+      "titulo": "Tortas: Original Torta Tortuga",
+      "contenido": "1 aguacate GRANDE entero, carnes mixtas (jamón, queso de puerco y pavo), tomate, cebolla, mayonesa y queso fresco.\nDescripción original: 1 whole BIG avocado, 3 mix meat slices (ham, pork head cheese & turkey) with tomato, onions, mayo and queso fresco.\nIncluye: soda en lata y papas.\nOpciones y precios:\n- A COMBO TRIPLE MEAT · 9 Slices: $17\n- B COMBO DOUBLE MEAT · 6 Slices: $16\n- C COMBO SINGLE MEAT · 3 Slices: $14",
+      "activa": true,
+      "productId": "original",
+      "variantes": [
+        {
+          "label": "A COMBO TRIPLE MEAT · 9 Slices — $17",
+          "precio": 17
+        },
+        {
+          "label": "B COMBO DOUBLE MEAT · 6 Slices — $16",
+          "precio": 16
+        },
+        {
+          "label": "C COMBO SINGLE MEAT · 3 Slices — $14",
+          "precio": 14
+        }
+      ]
+    },
+    {
+      "id": "producto-turkey",
+      "categoria": "menu",
+      "titulo": "Tortas: Turkey or Ham Tortuga",
+      "contenido": "1 aguacate GRANDE entero, pavo, jamón o carnes mixtas, tomate, cebolla, mayonesa y queso fresco.\nDescripción original: 1 whole BIG avocado, turkey, ham or mix meat slices with tomato, onions, mayo and queso fresco.\nIncluye: soda en lata y papas.\nOpciones y precios:\n- A COMBO TRIPLE MEAT · 9 Slices: $17\n- B COMBO DOUBLE MEAT · 6 Slices: $16\n- C COMBO SINGLE MEAT · 3 Slices: $14",
+      "activa": true,
+      "productId": "turkey",
+      "variantes": [
+        {
+          "label": "A COMBO TRIPLE MEAT · 9 Slices — $17",
+          "precio": 17
+        },
+        {
+          "label": "B COMBO DOUBLE MEAT · 6 Slices — $16",
+          "precio": 16
+        },
+        {
+          "label": "C COMBO SINGLE MEAT · 3 Slices — $14",
+          "precio": 14
+        }
+      ]
+    },
+    {
+      "id": "producto-pork",
+      "categoria": "menu",
+      "titulo": "Tortas: Pork Head Chz Tortuga",
+      "contenido": "1 aguacate GRANDE entero, rebanadas de queso de puerco, tomate, cebolla, mayonesa y queso fresco.\nDescripción original: 1 whole BIG avocado, pork head cheese meat slices, with tomato, onions, mayo and queso fresco.\nIncluye: soda en lata y papas.\nOpciones y precios:\n- A COMBO TRIPLE MEAT · 12 Slices: $17\n- B COMBO DOUBLE MEAT · 8 Slices: $16\n- C COMBO SINGLE MEAT · 4 Slices: $14",
+      "activa": true,
+      "productId": "pork",
+      "variantes": [
+        {
+          "label": "A COMBO TRIPLE MEAT · 12 Slices — $17",
+          "precio": 17
+        },
+        {
+          "label": "B COMBO DOUBLE MEAT · 8 Slices — $16",
+          "precio": 16
+        },
+        {
+          "label": "C COMBO SINGLE MEAT · 4 Slices — $14",
+          "precio": 14
+        }
+      ]
+    },
+    {
+      "id": "producto-shrimp",
+      "categoria": "menu",
+      "titulo": "Tortas: Shrimp Tortuga",
+      "contenido": "1 aguacate GRANDE entero, camarón con 3 rebanadas de carnes mixtas (jamón, pavo y queso de puerco), tomate, cebolla morada, mayonesa y queso fresco.\nDescripción original: 1 whole BIG avocado, shrimp with 3 mix meat slices (ham, turkey and pork head cheese), tomato, red onions, mayo and queso fresco.\nIncluye: soda en lata y papas.\nOpciones y precios:\n- A COMBO DOUBLE SHRIMP · 10 Shrimps: $20\n- B COMBO SINGLE · 5 Shrimps: $17",
+      "activa": true,
+      "productId": "shrimp",
+      "variantes": [
+        {
+          "label": "A COMBO DOUBLE SHRIMP · 10 Shrimps — $20",
+          "precio": 20
+        },
+        {
+          "label": "B COMBO SINGLE · 5 Shrimps — $17",
+          "precio": 17
+        }
+      ]
+    },
+    {
+      "id": "producto-allmeat",
+      "categoria": "menu",
+      "titulo": "Tortas: Only Meat No Veggies",
+      "contenido": "Solo carne, sin verduras: carnes mixtas (pavo, jamón y queso de puerco) con mayonesa y queso fresco.\nDescripción original: 3 mix meat slices (turkey, ham and pork head cheese) with mayo and queso fresco.\nIncluye: soda en lata y papas.\nOpciones y precios:\n- A COMBO TRIPLE MEAT · 15 Slices: $16\n- B COMBO DOUBLE MEAT · 12 Slices: $15\n- C COMBO SINGLE MEAT · 9 Slices: $13",
+      "activa": true,
+      "productId": "allmeat",
+      "variantes": [
+        {
+          "label": "A COMBO TRIPLE MEAT · 15 Slices — $16",
+          "precio": 16
+        },
+        {
+          "label": "B COMBO DOUBLE MEAT · 12 Slices — $15",
+          "precio": 15
+        },
+        {
+          "label": "C COMBO SINGLE MEAT · 9 Slices — $13",
+          "precio": 13
+        }
+      ]
+    },
+    {
+      "id": "producto-vegan",
+      "categoria": "menu",
+      "titulo": "Tortas: Vegan Tortuga",
+      "contenido": "2 aguacates GRANDES enteros, doble tomate, doble cebolla y doble cebolla morada con mayonesa.\nDescripción original: 2 whole BIG avocados, double tomatoes, double onions and double red onions w/ mayo.\nIncluye: soda en lata y papas.\nOpciones y precios:\n- COMBO A: $13",
+      "activa": true,
+      "productId": "vegan",
+      "variantes": [
+        {
+          "label": "COMBO A — $13",
+          "precio": 13
+        }
+      ]
+    },
+    {
+      "id": "producto-kids",
+      "categoria": "menu",
+      "titulo": "Tortas: Kids Tortuga",
+      "contenido": "8 rebanadas de jamón, queso y mayonesa.\nDescripción original: 8 ham slices, cheese and mayo.\nIncluye: soda en lata y papas.\nOpciones y precios:\n- COMBO: $9",
+      "activa": true,
+      "productId": "kids",
+      "variantes": [
+        {
+          "label": "COMBO — $9",
+          "precio": 9
+        }
+      ]
+    },
+    {
+      "id": "producto-miche",
+      "categoria": "menu",
+      "titulo": "Bebidas: Miche Tortuga",
+      "contenido": "Jugo Clamato, limón fresco, Tajín y salsas. Se prepara con Squirt, Monster o Topo Chico.\nDescripción original: Clamato juice, fresh lime, Tajin, sauces. Squirt/Monster/Topo Chico.\nOpciones y precios:\n- w/ 6 shrimp: $15\n- w/ 3 shrimp: $13\n- w/ japanese nuts & red onions: $12\n- w/ cucumber & japanese nuts: $11\n- Plain: $10\n- Cup, Ice and Michelada Mix: $8",
+      "activa": true,
+      "productId": "miche",
+      "variantes": [
+        {
+          "label": "w/ 6 shrimp — $15",
+          "precio": 15
+        },
+        {
+          "label": "w/ 3 shrimp — $13",
+          "precio": 13
+        },
+        {
+          "label": "w/ japanese nuts & red onions — $12",
+          "precio": 12
+        },
+        {
+          "label": "w/ cucumber & japanese nuts — $11",
+          "precio": 11
+        },
+        {
+          "label": "Plain — $10",
+          "precio": 10
+        },
+        {
+          "label": "Cup, Ice and Michelada Mix — $8",
+          "precio": 8
+        }
+      ]
+    },
+    {
+      "id": "producto-topochico",
+      "categoria": "menu",
+      "titulo": "Bebidas: TopoChico Preparado",
+      "contenido": "Topo Chico refrescante con chamoy y Tajín encima.\nDescripción original: NEW. Refreshing TopoChico with chamoy and Tajin on top.\nOpciones y precios:\n- w/ 6 shrimp & botana: $12\n- w/ 3 shrimps & top: $10\n- Plain: $7",
+      "activa": true,
+      "productId": "topochico",
+      "variantes": [
+        {
+          "label": "w/ 6 shrimp & botana — $12",
+          "precio": 12
+        },
+        {
+          "label": "w/ 3 shrimps & top — $10",
+          "precio": 10
+        },
+        {
+          "label": "Plain — $7",
+          "precio": 7
+        }
+      ]
+    },
+    {
+      "id": "producto-squirt",
+      "categoria": "menu",
+      "titulo": "Bebidas: El Squirt Ruso",
+      "contenido": "Jugo Clamato, limón fresco, Tajín, pepino, cacahuates japoneses y chamoy encima.\nDescripción original: Clamato juice, fresh lime, Tajin, Cucumber, japanese nuts, chamoy on top.\nOpciones y precios:\n- w/ 3 shrimps & red onions: $12\n- Plain: $10",
+      "activa": true,
+      "productId": "squirt",
+      "variantes": [
+        {
+          "label": "w/ 3 shrimps & red onions — $12",
+          "precio": 12
+        },
+        {
+          "label": "Plain — $10",
+          "precio": 10
+        }
+      ]
+    },
+    {
+      "id": "producto-hangover",
+      "categoria": "menu",
+      "titulo": "Bebidas: The Hangover Monster",
+      "contenido": "Jugo Clamato, limón fresco y salsas, con cacahuates japoneses y cebolla morada encima.\nDescripción original: Clamato juice, fresh lime, sauces, with japanese nuts and red onions on top.\nOpciones y precios:\n- w/ 3 shrimps: $13\n- Plain: $11",
+      "activa": true,
+      "productId": "hangover",
+      "variantes": [
+        {
+          "label": "w/ 3 shrimps — $13",
+          "precio": 13
+        },
+        {
+          "label": "Plain — $11",
+          "precio": 11
+        }
+      ]
+    },
+    {
+      "id": "producto-bottle",
+      "categoria": "menu",
+      "titulo": "Bebidas: Bottle Drinks",
+      "contenido": "Bebidas embotelladas y en lata.\nOpciones y precios:\n- Topo Chico 600 ml: $5\n- Monster: $4\n- Mexican Coke: $4\n- Gatorade: $3\n- Can Soda: $2\n- Water Bottle: $2",
+      "activa": true,
+      "productId": "bottle",
+      "variantes": [
+        {
+          "label": "Topo Chico 600 ml — $5",
+          "precio": 5
+        },
+        {
+          "label": "Monster — $4",
+          "precio": 4
+        },
+        {
+          "label": "Mexican Coke — $4",
+          "precio": 4
+        },
+        {
+          "label": "Gatorade — $3",
+          "precio": 3
+        },
+        {
+          "label": "Can Soda — $2",
+          "precio": 2
+        },
+        {
+          "label": "Water Bottle — $2",
+          "precio": 2
+        }
+      ]
+    },
+    {
+      "id": "producto-shrimp-botana",
+      "categoria": "menu",
+      "titulo": "Botanas y extras: Shrimp Botana",
+      "contenido": "Camarones con pepino fresco, cebolla morada, cacahuates japoneses y jugo Clamato.\nDescripción original: Shrimps with Fresh cucumber, red onions, japanese nuts and Clamato juice.\nOpciones y precios:\n- LG (15 shrimps): $20\n- MD (10 shrimps): $14",
+      "activa": true,
+      "productId": "shrimp-botana",
+      "variantes": [
+        {
+          "label": "LG (15 shrimps) — $20",
+          "precio": 20
+        },
+        {
+          "label": "MD (10 shrimps) — $14",
+          "precio": 14
+        }
+      ]
+    },
+    {
+      "id": "producto-botana-platter",
+      "categoria": "menu",
+      "titulo": "Botanas y extras: Botana Platter",
+      "contenido": "Papas a elegir, cacahuates japoneses, pepino y cebolla morada con chamoy y Tajín.\nDescripción original: Choice of chips, japanese nuts, cucumbers, red onions with chamoy, Tajin.\nOpciones y precios:\n- LG: $12\n- SM: $8",
+      "activa": true,
+      "productId": "botana-platter",
+      "variantes": [
+        {
+          "label": "LG — $12",
+          "precio": 12
+        },
+        {
+          "label": "SM — $8",
+          "precio": 8
+        }
+      ]
+    },
+    {
+      "id": "producto-botana-japonesa",
+      "categoria": "menu",
+      "titulo": "Botanas y extras: Botana Japonesa",
+      "contenido": "Papas a elegir y cacahuates japoneses con chamoy, Tajín y salsa Valentina.\nDescripción original: Choice of chips and japanese nuts, with chamoy, Tajin and Valentina sauce.\nOpciones y precios:\n- LG: $10\n- SM: $6",
+      "activa": true,
+      "productId": "botana-japonesa",
+      "variantes": [
+        {
+          "label": "LG — $10",
+          "precio": 10
+        },
+        {
+          "label": "SM — $6",
+          "precio": 6
+        }
+      ]
+    },
+    {
+      "id": "producto-cucumbersitos",
+      "categoria": "menu",
+      "titulo": "Botanas y extras: Cucumbersitos",
+      "contenido": "Rebanadas de pepino con chamoy, Tajín y salsa Valentina encima.\nDescripción original: Cucumber slices with chamoy, Tajin and Valentina sauce on top.\nOpciones y precios:\n- LG: $8\n- SM: $4",
+      "activa": true,
+      "productId": "cucumbersitos",
+      "variantes": [
+        {
+          "label": "LG — $8",
+          "precio": 8
+        },
+        {
+          "label": "SM — $4",
+          "precio": 4
+        }
+      ]
+    },
+    {
+      "id": "producto-sides",
+      "categoria": "menu",
+      "titulo": "Botanas y extras: Sides & Extras",
+      "contenido": "Extras y complementos para agregar al pedido.\nOpciones y precios:\n- 6 Shrimp: $5\n- Torta Bun: $3.50\n- Chips: $2\n- 1 Shrimp: $1\n- 1 Extra Slice of Meat: $1\n- Add Cup with Ice: $1\n- Extra Salsa or Jalapeno: $0.50",
+      "activa": true,
+      "productId": "sides",
+      "variantes": [
+        {
+          "label": "6 Shrimp — $5",
+          "precio": 5
+        },
+        {
+          "label": "Torta Bun — $3.50",
+          "precio": 3.5
+        },
+        {
+          "label": "Chips — $2.00",
+          "precio": 2
+        },
+        {
+          "label": "1 Shrimp — $1.00",
+          "precio": 1
+        },
+        {
+          "label": "1 Extra Slice of Meat — $1.00",
+          "precio": 1
+        },
+        {
+          "label": "Add Cup with Ice — $1.00",
+          "precio": 1
+        },
+        {
+          "label": "Extra Salsa or Jalapeno — $0.50",
+          "precio": 0.5
+        }
+      ]
+    }
+  ]
+}
