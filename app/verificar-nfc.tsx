@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Nfc } from "lucide-react";
-import { CONSULTA_GOOGLE_PAY, revisionNfc, revisionPagoSinContacto, type Revision } from "@/lib/nfc";
+import { CONSULTA_GOOGLE_PAY, mostrarVerificarNfc, revisionNfc, revisionPagoSinContacto, type Revision } from "@/lib/nfc";
 import { CheckList } from "./setup-wizard";
 
 type LectorNfc = { scan: (o: { signal: AbortSignal }) => Promise<void> };
@@ -34,9 +34,22 @@ async function probarPago(): Promise<string> {
 }
 
 // Tarjeta de Ajustes: revisa si este celular tiene NFC y pago sin contacto.
+// Solo aparece en celulares y tabletas con NFC para páginas; en los demás equipos no se muestra.
 export default function VerificarNfc() {
   const [revisando, setRevisando] = useState(false);
   const [resultado, setResultado] = useState<Revision[] | null>(null);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const nav = navigator as Navigator & { userAgentData?: { mobile?: boolean } };
+    setVisible(
+      mostrarVerificarNfc({
+        tieneNfc: "NDEFReader" in window,
+        agente: nav.userAgent,
+        movil: nav.userAgentData?.mobile,
+        puntosTactiles: nav.maxTouchPoints,
+      }),
+    );
+  }, []);
 
   async function verificar() {
     setRevisando(true);
@@ -50,6 +63,7 @@ export default function VerificarNfc() {
     }
   }
 
+  if (!visible) return null;
   return (
     <section className="card">
       <h2>NFC y pago sin contacto</h2>
