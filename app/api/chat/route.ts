@@ -1,6 +1,7 @@
 import { jsonError } from "@/lib/replicate";
 import { clavePropiaCF, getCreds, refund } from "@/lib/cf-auth";
-import { jsonAcceso, requireAccess } from "@/lib/account";
+import { cuentasActivas, jsonAcceso, requireAccess } from "@/lib/account";
+import { elegirVelocidad, instruccionesNova, limpiarCuenta, limpiarMarca, modeloCloudflare } from "@/lib/nova";
 
 export const maxDuration = 60;
 
@@ -10,7 +11,7 @@ type Ev = { response?: unknown; choices?: { delta?: { content?: string } }[]; ty
 // Asistente de marketing en modo conversación: recuerda lo que ya se habló y responde
 // en tiempo real (se envía el texto a medida que la IA lo escribe).
 export async function POST(req: Request) {
-  const { messages, brand, provider, model } = await req.json().catch(() => ({}));
+  const { messages, brand, provider, model, nova } = await req.json().catch(() => ({}));
   const english = req.headers.get("x-lang") === "en";
   const history: Msg[] = (Array.isArray(messages) ? messages : [])
     .filter((m: Msg) => (m?.role === "user" || m?.role === "assistant") && typeof m.content === "string" && m.content.trim())
@@ -18,16 +19,13 @@ export async function POST(req: Request) {
     .slice(-20); // las últimas 20 intervenciones
   if (!history.length || history[history.length - 1].role !== "user") return jsonError("Escribe tu mensaje.");
 
-  const system = [
-    "Eres el asistente creativo de InnovationTECH Studio: un experto en marketing digital, redes sociales y redacción publicitaria que ayuda a pequeños negocios.",
-    "Conversa de forma natural y cercana. Recuerda lo que ya se dijo en la conversación y, cuando te pidan cambios, ajusta tu respuesta anterior en lugar de empezar de cero.",
-    "Entrega textos listos para publicar: concretos, persuasivos y adaptados a la red social. Usa formato Markdown (negritas, listas, títulos cortos) cuando ayude a leer.",
-    "Si falta un dato importante (producto, público, oferta, red social), haz una sola pregunta breve antes de escribir.",
-    "Cuando propongas una imagen, agrega al final una línea que empiece con 'PROMPT DE IMAGEN:' con la descripción en inglés en una sola línea.",
-    "No inventes testimonios, cifras ni datos de clientes. No uses lenguaje engañoso.",
-    english ? "Write in English unless the user writes in another language." : "Responde en el idioma del usuario (por defecto, español).",
-    brand ? `\nContexto de la marca del usuario (úsalo siempre):\n${brand}` : "",
-  ].join("\n");
+  // NOVA: persona, manual de Studio y los datos del plan que manda el navegador (limpios: solo claves conocidas)
+  // (Una cuenta falsificada solo engaña a quien la manda: los límites reales los revisa requireAccess.)
+  const cuentasOn = cuentasActivas();
+  const cuenta = cuentasOn ? limpiarCuenta(nova?.cuenta) : null;
+  const atajo = typeof nova?.atajo === "string" ? nova.atajo : undefined;
+  const velocidad = elegirVelocidad(history[history.length - 1].content, atajo);
+  const system = instruccionesNova({ english, marca: limpiarMarca(brand), cuenta, cuentasOn, velocidad });
 
   // Guardián: sesión, plan y límite diario, antes de llamar a cualquier proveedor.
   const acceso = await requireAccess(req, {
@@ -47,11 +45,12 @@ export async function POST(req: Request) {
       await acceso.devolver();
       return jsonError(c.error, c.status);
     }
-    const m = (!c.demo && model) || "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+    // Rápido para dudas de uso o del plan, creativo para textos; el modelo elegido en Configuración manda
+    const { modelo: m, maxTokens } = modeloCloudflare(velocidad, !c.demo && typeof model === "string" ? model : undefined);
     const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(c.accountId)}/ai/run/${m}`, {
       method: "POST",
       headers: { Authorization: `Bearer ${c.token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: [{ role: "system", content: system }, ...history], max_tokens: 1800, temperature: 0.75, stream: true }),
+      body: JSON.stringify({ messages: [{ role: "system", content: system }, ...history], max_tokens: maxTokens, temperature: 0.75, stream: true }),
     });
     if (!res.ok || !res.body) {
       if (c.demo) refund(req, "text");

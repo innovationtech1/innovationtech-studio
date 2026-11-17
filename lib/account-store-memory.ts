@@ -9,6 +9,7 @@ import type {
   Reserva,
   Usuario,
   Uso,
+  CuentaBorrada,
 } from "./account-store";
 import type { Contador, Negocio, PlanesConfig } from "./plans";
 import { aplicarCambios, cantidadSegura, mezclarConfig, repartirReserva, sumarSaldo } from "./plans";
@@ -46,6 +47,8 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
     Object.entries(seed.invitaciones ?? {}).map(([k, v]) => [k.toLowerCase(), { ...v }]),
   );
   const claves = new Map<string, Cifrado>();
+  const borrados: CuentaBorrada[] = [];
+  const huellas = new Set<string>();
   let contador = 0;
 
   const fila = (negocioId: string, mes: string) => {
@@ -212,6 +215,27 @@ export function memoryStore(seed: SemillaMemoria = {}): MemoryStore {
     },
     async borrarClaveIA(negocioId) {
       claves.delete(negocioId);
+    },
+    async borrarNegocio(negocioId) {
+      for (const k of [...uso.keys()]) if (k.startsWith(`${negocioId}_`)) uso.delete(k);
+      for (const [e, i] of [...invitaciones]) if (i.negocioId === negocioId) invitaciones.delete(e);
+      claves.delete(negocioId);
+      negocios.delete(negocioId);
+    },
+    async borrarUsuario(uid, negocioId) {
+      if (usuarios.get(uid)?.negocioId === negocioId) usuarios.delete(uid);
+    },
+    async anotarBorrado(b) {
+      borrados.push(copia(b));
+    },
+    async listarBorrados() {
+      return borrados.map(copia).sort((a, b) => b.fecha - a.fecha);
+    },
+    async guardarHuella(huella) {
+      huellas.add(huella);
+    },
+    async tieneHuella(huella) {
+      return huellas.has(huella);
     },
     eventoMarcado(id: string) {
       return eventos.has(id);

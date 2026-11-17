@@ -92,6 +92,8 @@ async function pedir(url: string, init?: RequestInit): Promise<{ ok: boolean; da
 
 function Lista() {
   const [filas, setFilas] = useState<FilaNegocio[] | null>(null);
+  // Cuentas que sus dueños borraron (solo la anotación, sin nombre ni correo)
+  const [borradas, setBorradas] = useState<{ negocioId: string; fecha: number; customerId?: string; personas: number; pendientes: string[] }[]>([]);
   const [error, setError] = useState("");
   const [buscar, setBuscar] = useState("");
 
@@ -99,6 +101,7 @@ function Lista() {
     const r = await pedir("/api/admin/negocios", { cache: "no-store" });
     if (r.ok) {
       setFilas(r.datos.negocios as FilaNegocio[]);
+      setBorradas(Array.isArray(r.datos.borradas) ? (r.datos.borradas as typeof borradas) : []);
       setError("");
     } else {
       setError(String(r.datos.error ?? "No pudimos cargar los negocios."));
@@ -147,6 +150,35 @@ function Lista() {
           ))}
         </>
       )}
+
+      {borradas.length > 0 && (
+        <details className="adm-borradas">
+          <summary>{borradas.length === 1 ? "1 cuenta borrada por su dueño" : `${borradas.length} cuentas borradas por sus dueños`}</summary>
+          <ul>
+            {borradas.map((b) => (
+              <li key={`${b.negocioId}-${b.fecha}`}>
+                <span data-no-translate>{new Date(b.fecha).toLocaleString("es-MX", { timeZone: "America/Chicago" })}</span>
+                {" · "}
+                <span data-no-translate>{b.negocioId}</span>
+                {" · "}
+                {b.personas === 1 ? "1 persona" : `${b.personas} personas`}
+                {b.customerId && (
+                  <>
+                    {" · Stripe: "}
+                    <span data-no-translate>{b.customerId}</span>
+                  </>
+                )}
+                {b.pendientes.length > 0 && (
+                  <strong className="adm-error">
+                    {" · Revisar a mano: "}
+                    <span data-no-translate>{b.pendientes.join("; ")}</span>
+                  </strong>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </main>
   );
 }
@@ -157,6 +189,8 @@ function ResumenVideo() {
     encendido: boolean;
     gastoHoyCentavos: number;
     topeCentavos: number;
+    topeGuardadoCentavos: number;
+    topeDeEntorno: boolean;
     tomasPorNegocioDia: number;
     enProceso: number;
     enFila: number;
@@ -174,7 +208,7 @@ function ResumenVideo() {
     if (r.ok) {
       const d = r.datos as unknown as Resumen;
       setDatos(d);
-      setTope(String(d.topeCentavos / 100));
+      setTope(String(d.topeGuardadoCentavos / 100));
       setPorCliente(String(d.tomasPorNegocioDia));
     } else setError(String(r.datos.error ?? "No se pudo leer el resumen de video."));
   }
@@ -224,6 +258,7 @@ function ResumenVideo() {
             </button>{" "}
             {guardado}
           </p>
+          {datos.topeDeEntorno && <p>Este sitio usa VIDEO_IA_TOPE_CENTAVOS: el tope que manda es el de esa variable de Netlify, no el de aquí.</p>}
           {datos.fallos.length === 0 ? (
             <p>Sin fallos en los últimos 7 días.</p>
           ) : (
@@ -260,11 +295,31 @@ function PrepararStripe() {
     }
   }
 
+  // Impuesto sobre ventas con Stripe Tax: apagado hasta tener el permiso de impuestos
+  const [impuestos, setImpuestos] = useState<boolean | null>(null);
+  useEffect(() => {
+    void pedir("/api/admin/stripe", { cache: "no-store" }).then((r) => r.ok && setImpuestos(r.datos.impuestos === true));
+  }, []);
+  async function cambiarImpuestos(activo: boolean) {
+    if (activo && !confirm("¿Encender el cobro de impuestos? Hazlo solo si ya tienes tu permiso de impuestos y Stripe Tax configurado en tu cuenta de Stripe. Si no, los cobros nuevos pueden fallar.")) return;
+    setOcupado(true);
+    const r = await pedir("/api/admin/stripe", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ activo }) });
+    setOcupado(false);
+    if (r.ok) setImpuestos(r.datos.impuestos === true);
+    else setResultado({ ok: false, texto: String(r.datos.error ?? "No se pudo cambiar el cobro de impuestos.") });
+  }
+
   return (
     <>
       <button className="btn small" disabled={ocupado} onClick={() => void preparar()}>
         {ocupado ? "Preparando…" : "Preparar Stripe"}
       </button>
+      {impuestos !== null && (
+        <label className="check" style={{ margin: 0 }}>
+          <input type="checkbox" checked={impuestos} disabled={ocupado} onChange={(e) => void cambiarImpuestos(e.target.checked)} />
+          Cobrar impuesto sobre ventas (Stripe Tax)
+        </label>
+      )}
       {resultado && (
         <p className={resultado.ok ? "adm-ok" : "adm-error"} role="status" data-no-translate>
           {resultado.texto}

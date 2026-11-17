@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Brand, brandAccent, brandContext, brandVisual } from "@/lib/brand";
 import { friendlyError } from "@/lib/errors";
+import CompartirBotones from "./compartir-botones";
 import { fileToResizedDataUrl } from "@/lib/resize";
 import { ReelFormat, ReelOptions, renderReel, supportedRecording, vistaPrevia } from "@/lib/reel";
 import type { Item, Settings } from "@/lib/types";
 import { clearDrafts, usePersistentState } from "@/lib/persist";
-import { deleteFile, getFile, putFile, toBlob, toDataUrl } from "@/lib/media-store";
-import { AVISO_SIN_ESPACIO, guardarConfirmado } from "@/lib/guardado";
+import { deleteFile, getFile, putFile, storageUsage, toBlob, toDataUrl } from "@/lib/media-store";
+import { avisoDeGuardado, guardarConfirmado, type FalloGuardado } from "@/lib/guardado";
 
 const blobToDataUrl = (b: Blob) =>
   new Promise<string>((res, rej) => {
@@ -21,9 +22,10 @@ import { describeVersion, MUSIC_STYLES, MusicStyleId, renderMusic } from "@/lib/
 import MusicPicker from "./music-picker";
 import LibraryPicker from "./library-picker";
 import { loadSong } from "@/lib/library";
-import { DEFAULT_VOICE, VOICES, findVoice } from "@/lib/voices";
-import { getLang } from "@/lib/i18n";
-import VoicePicker from "./voice-picker";
+import { DEFAULT_VOICE, SAMPLE, VOICES, findVoice } from "@/lib/voices";
+import { ESTILOS_VOZ, aplicarEstilo, estiloVoz, type EstiloVoz } from "@/lib/estilos-voz";
+import { getLang, tr } from "@/lib/i18n";
+import VoicePicker, { muestrasVoz } from "./voice-picker";
 import { marcarDemoALaVista, ProTag, refrescarCuenta, useCuenta, usePuede } from "./account-context";
 import {
   MAX_VIDEO,
@@ -63,6 +65,7 @@ import { anotar, deshacer, rehacer } from "@/lib/historial";
 import LineaTiempo from "./linea-tiempo";
 import Director from "./director";
 import {
+  MAX_ORDEN,
   aplicarAcciones,
   costoDe,
   resumenProyecto,
@@ -74,23 +77,48 @@ import {
   type Pendiente,
   type Resultado,
 } from "@/lib/director";
-import { terminado, textoEstado, type TrabajoVisto } from "@/lib/estados-video";
+import { esperarEnFondo, siguienteEspera, terminado, textoEstado, type TrabajoVisto } from "@/lib/estados-video";
 import { consultarTomas, pedirTomas, prepararFoto, subirFoto } from "@/lib/video-ia-cliente";
+import { DURACIONES_SECUENCIA } from "@/lib/secuencia";
+import { quedanDe } from "@/lib/secuencia-pantalla";
+import {
+  clipsDeSecuencia,
+  duracionParaFotos,
+  tieneContenido,
+  limpiarEntrante,
+  repartirEnFotos,
+  textoConfirmarVoz,
+  type DuracionSecuencia,
+  type SecuenciaEntrante,
+} from "@/lib/secuencia-video";
+import { vozNova } from "@/lib/nova-voz";
+import NovaAvatar from "./nova-avatar";
 
-import { Clapperboard, Dices, Download, Eye, Mic, Play, Redo2, Sparkles, Square, Undo2, Video } from "lucide-react";
+import { Clapperboard, Dices, Download, Eye, Loader2, Mic, Play, Redo2, Sparkles, Square, Undo2, Video } from "lucide-react";
 // Cada clip guarda su foto en el dispositivo (IndexedDB) con imageId, para que no se pierda
 // al cambiar de sección, editar, cerrar o recargar la app. El modelo está en lib/linea-tiempo.ts.
 
 // Tomas con IA que siguen en proceso (se guardan para retomarlas sin pedirlas ni descontarlas otra vez)
 type TomasPendientes = { ids: string[]; firma: string } | null;
-const ESPERA_TOMAS = 5000; // cada cuánto se consulta
-const MAX_ESPERA = 20 * 60 * 1000;
 
 // Los 4 clips vacíos con los que se empieza (ids fijos: igual en el servidor y en el navegador)
 const clipsIniciales = (): Clip[] => Array.from({ length: 4 }, (_, i) => nuevoClip({ id: `inicial-${i}` }));
 // ¿Lo guardado ya tiene la forma nueva? (las escenas de antes no traían id, tipo ni duración)
 const esClip = (c: unknown): c is Clip =>
   !!c && typeof c === "object" && typeof (c as Clip).id === "string" && !!(c as Clip).tipo && typeof (c as Clip).segundos === "number";
+
+// Un ajuste guardado de otra sección (la voz y el estilo de NOVA): se lee al momento de usarlo
+function leerAjuste(llave: string): unknown {
+  try {
+    const raw = localStorage.getItem(`its-draft:${llave}`);
+    return raw === null ? undefined : JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+}
+
+// En qué va NOVA armando el video de una secuencia de fotos
+type FaseNova = "escribiendo" | "guion" | "voz" | "lista" | "error_guion" | "error_voz" | "omitida";
 
 export default function ReelStudio({
   settings,
@@ -101,15 +129,21 @@ export default function ReelStudio({
   handoff,
   sceneUpdate,
   incomingTopic,
+  incomingSecuencia,
   onEditScene,
   onOpenBrand,
   videosDeOtros = [],
   onOcupado,
+  onSubiendoDrive,
 }: {
   videosDeOtros?: string[]; // videos subidos que usan otros proyectos guardados: no se borran al limpiar
   onOcupado?: (ocupado: boolean) => void; // avisa cuando está grabando o generando (para no cambiar de proyecto a medias)
+  onSubiendoDrive?: (activo: boolean) => void; // hay una subida a Drive en curso (para preguntar antes de cambiar de proyecto)
   sceneUpdate: { scene: number; url: string; n: number } | null;
   incomingTopic?: { text: string; n: number } | null;
+  // Fotos de «Secuencia de fotos» para armar el video con NOVA (n cambia en cada envío). ReelProyectos ya
+  // decidió si van en este video o en uno nuevo: aquí se cargan.
+  incomingSecuencia?: SecuenciaEntrante | null;
   onEditScene: (i: number, src: string) => void;
   onOpenBrand: () => void;
   onVideo: (blob: Blob, prompt: string) => void;
@@ -179,7 +213,9 @@ export default function ReelStudio({
   const restored = useRef(false);
   const [recuperado, setRecuperado] = useState(false); // ya se recuperaron las fotos guardadas
   const [avisosVideo, setAvisosVideo] = useState<string[]>([]); // lo que no salió como se pidió en el último video
-  const [sinEspacio, setSinEspacio] = useState(false); // un guardado en el dispositivo no entró
+  const [avisoGuardado, setAvisoGuardado] = useState(""); // un guardado en el dispositivo no entró: qué decirle
+  // Dice la causa real: sin espacio (con cuánto hay ocupado), navegador en modo privado, o una foto que no se pudo leer
+  const noSeGuardo = (causa: FalloGuardado) => void storageUsage().then((uso) => setAvisoGuardado(avisoDeGuardado(causa, uso)));
   const guardando = useRef(new Map<string, string>()); // id del clip → foto que se está guardando
   const noGuardadas = useRef(new Map<string, string>()); // id del clip → foto que no se pudo guardar (no se reintenta sola)
 
@@ -290,9 +326,10 @@ export default function ReelStudio({
           vigente: () => clipsRef.current.some((x) => x.id === sc.id && x.image === imagen),
         });
         if (guardando.current.get(sc.id) === imagen) guardando.current.delete(sc.id);
-        if (r === "fallo") {
+        if (r === "sin_leer" || r === "sin_espacio") {
           noGuardadas.current.set(sc.id, imagen);
-          setSinEspacio(true);
+          // Una imagen que es un enlace de internet no necesita copia: el enlace mismo queda guardado en el proyecto
+          if (!(r === "sin_leer" && /^https?:/.test(imagen))) noSeGuardo(r);
           return;
         }
         if (r !== "ok") return;
@@ -309,12 +346,20 @@ export default function ReelStudio({
   const [estadoIa, setEstadoIa] = useState("");
   const [invitarPlan, setInvitarPlan] = useState(false);
   const subidas = useRef(new Map<string, string>()); // sha256 → llave de la foto ya subida
-  // Voces ya generadas en esta sesión (voz + guion → audio): cambiar entre ellas es al instante y no gasta
+  // Voces ya generadas en esta sesión (voz + guion → audio sin estilo): cambiar entre ellas es al instante y no gasta
   const vocesHechas = useRef(new Map<string, string>());
+  // La misma voz ya con un estilo aplicado (voz + estilo + guion → audio): cambiar de estilo no vuelve a pedirla
+  const vocesConEstilo = useRef(new Map<string, string>());
+  // Cada caja guarda solo las 3 voces más recientes (son audios grandes en la memoria)
+  const guardarReciente = (caja: Map<string, string>, llave: string, audio: string) => {
+    caja.delete(llave);
+    caja.set(llave, audio);
+    while (caja.size > 3) caja.delete(caja.keys().next().value as string);
+  };
   // Los clips de IA del último video: para volver a grabarlo (otra voz, música o texto) sin pedirlos de nuevo
   const ultimosClips = useRef<{ firma: string; clips: (string | null)[]; cuando: number } | null>(null);
   const [vozCambio, setVozCambio] = useState(false);
-  const { activo: cuentasOn, cuenta, abrirPlanes } = useCuenta();
+  const { activo: cuentasOn, cuenta, abrirPlanes, abrirMiCuenta } = useCuenta();
   const conCuenta = cuentasOn && !!cuenta?.usuario;
   const esDemo = !!cuenta?.usuario && cuenta.efectivo.plan === "prueba";
   const tomasMarcadas = clips.filter((s) => s.image && s.tipo === "toma").length;
@@ -434,15 +479,39 @@ export default function ReelStudio({
       if (anterior) deleteFile(anterior).catch(() => {});
       if (r === "ok") return setVozArchivo({ id });
       setVozArchivo(null);
-      setSinEspacio(true);
+      noSeGuardo(r === "sin_leer" ? "sin_leer" : "sin_espacio");
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voice]);
   const [voiceId, setVoiceId] = usePersistentState<string>("reel:voz", DEFAULT_VOICE[getLang()]);
+  const [estiloGuardado, setEstiloGuardado] = usePersistentState<string>("reel:estilo-voz", "natural");
+  const estiloActual = estiloVoz(estiloGuardado);
   const [picking, setPicking] = useState<number | null>(null);
   const [busy, setBusy] = useState("");
   const [progress, setProgress] = useState(0);
-  const [result, setResult] = useState<{ url: string; ext: string; seconds: number } | null>(null);
+  const [result, setResult] = useState<{ url: string; blob: Blob; ext: string; seconds: number } | null>(null);
+  // Subidas a Drive del video o la portada: quitar el resultado las cancela, así que se pregunta antes.
+  const subidasDrive = useRef(0);
+  const [avisoDrive, setAvisoDrive] = useState("");
+  const alSubirDrive = useCallback(
+    (activo: boolean) => {
+      subidasDrive.current = Math.max(0, subidasDrive.current + (activo ? 1 : -1));
+      onSubiendoDrive?.(subidasDrive.current > 0);
+    },
+    [onSubiendoDrive],
+  );
+  // true = se puede quitar el resultado (no hay subida, o la persona aceptó cancelarla)
+  function soltarResultado(): boolean {
+    if (subidasDrive.current <= 0) return true;
+    if (!confirm(tr("La subida a Drive sigue en curso. ¿Cancelarla?"))) return false;
+    setAvisoDrive("Se canceló la subida a Drive.");
+    return true;
+  }
+  useEffect(() => {
+    if (!avisoDrive) return;
+    const t = setTimeout(() => setAvisoDrive(""), 7000);
+    return () => clearTimeout(t);
+  }, [avisoDrive]);
   const [error, setError] = useState("");
   const preview = useRef<HTMLCanvasElement>(null);
 
@@ -452,15 +521,21 @@ export default function ReelStudio({
   // Al empezar a grabar y al terminar, la pantalla baja a donde se ve el video
   const aLaVista = (el: HTMLElement | null) => el?.scrollIntoView({ behavior: "smooth", block: "center" });
   const [momentoPortada, setMomentoPortada] = useState(0);
-  function descargarPortada() {
+  // La portada es el cuadro del video que se ve ahora (JPG en data URL).
+  function capturarPortada(): string | null {
     const v = videoFinal.current;
-    if (!v || !v.videoWidth) return;
+    if (!v || !v.videoWidth) return null;
     const c = document.createElement("canvas");
     c.width = v.videoWidth;
     c.height = v.videoHeight;
     c.getContext("2d")!.drawImage(v, 0, 0);
+    return c.toDataURL("image/jpeg", 0.92);
+  }
+  function descargarPortada() {
+    const url = capturarPortada();
+    if (!url) return;
     const a = document.createElement("a");
-    a.href = c.toDataURL("image/jpeg", 0.92);
+    a.href = url;
     a.download = "portada-innovationtech.jpg";
     a.click();
   }
@@ -584,11 +659,19 @@ export default function ReelStudio({
       if (failed) throw failed;
     });
 
-  // Genera la voz (o la recupera al instante si esa voz ya se generó con ese mismo guion)
-  async function generarVoz(id: string, texto: string) {
+  // Aplica un estilo de voz (en el aparato) a un audio en data URL; «Natural» lo deja igual
+  async function conEstilo(audio: string, estilo: EstiloVoz): Promise<string> {
+    if (estilo === "natural") return audio;
+    const bytes = await (await fetch(audio)).arrayBuffer();
+    return blobToDataUrl(await aplicarEstilo(bytes, estilo));
+  }
+
+  // Genera la voz (o la recupera al instante si esa voz ya se generó con ese mismo guion) y le aplica el estilo
+  async function generarVoz(id: string, texto: string, estilo: EstiloVoz = estiloActual) {
     if (!texto.trim()) throw new Error("Escribe el guion de la voz en off.");
     const voz = findVoice(id)?.lang === getLang() ? id : DEFAULT_VOICE[getLang()];
     const llave = `${voz}|${texto}`;
+    const llaveEstilo = `${voz}|${estilo}|${texto}`;
     let audio = vocesHechas.current.get(llave);
     if (!audio) {
       const res = await fetch("/api/voice", {
@@ -596,12 +679,21 @@ export default function ReelStudio({
         headers: { "content-type": "application/json", ...cfHeaders },
         body: JSON.stringify({ text: texto, lang: getLang(), voice: voz }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      // Si el servidor responde vacío (se cortó), se dice algo claro en vez de un error técnico
+      const data = await res.json().catch(() => ({ error: "La voz no se pudo generar. Intenta de nuevo; si se repite, usa un guion más corto." }));
+      if (!res.ok || !data.audio) throw new Error(data.error || "La voz no se pudo generar. Intenta de nuevo.");
       audio = data.audio as string;
-      vocesHechas.current.set(llave, audio);
+      guardarReciente(vocesHechas.current, llave, audio);
     }
-    setVoice(audio);
+    let final = vocesConEstilo.current.get(llaveEstilo);
+    if (!final) {
+      final = await conEstilo(audio, estilo);
+      guardarReciente(vocesConEstilo.current, llaveEstilo, final);
+    }
+    // lo que se acaba de usar pasa a ser lo más reciente
+    guardarReciente(vocesHechas.current, llave, audio);
+    guardarReciente(vocesConEstilo.current, llaveEstilo, final);
+    setVoice(final);
     if (result) setVozCambio(true);
   }
   const makeVoice = (id: string = voiceId) => run("Generando voz…", () => generarVoz(id, script));
@@ -613,6 +705,60 @@ export default function ReelStudio({
     if (!voice) return;
     if (busy) return setVoice(""); // ocupado (grabando): se genera después con «Generar voz»
     void makeVoice(id);
+  }
+
+  // Elegir otro estilo: si ya había voz, se vuelve a hacer con el audio guardado (sin pedirlo otra vez)
+  function elegirEstilo(valor: string) {
+    const estilo = estiloVoz(valor);
+    setEstiloGuardado(estilo);
+    if (!voice) return;
+    void run("Aplicando el estilo…", () => generarVoz(voiceId, script, estilo));
+  }
+
+  // «Probar» del estilo: la frase de muestra de la voz elegida, con ese estilo (tocar otra vez la detiene)
+  const [probandoEstilo, setProbandoEstilo] = useState<"" | "cargando" | "sonando">("");
+  const audioPrueba = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => () => audioPrueba.current?.pause(), []); // al salir, se calla
+  async function probarEstilo() {
+    if (probandoEstilo) {
+      audioPrueba.current?.pause();
+      audioPrueba.current = null;
+      return setProbandoEstilo("");
+    }
+    setError("");
+    setProbandoEstilo("cargando");
+    try {
+      const lang = getLang();
+      const voz = findVoice(voiceId)?.lang === lang ? voiceId : DEFAULT_VOICE[lang];
+      let muestra = muestrasVoz.get(voz); // la misma que usa ▶ del selector de voz
+      if (!muestra) {
+        const res = await fetch("/api/voice", {
+          method: "POST",
+          headers: { "content-type": "application/json", ...cfHeaders },
+          body: JSON.stringify({ text: SAMPLE[lang], lang, voice: voz }),
+        });
+        const data = await res.json().catch(() => ({ error: "La voz no se pudo generar. Intenta de nuevo." }));
+        if (!res.ok || !data.audio) throw new Error(data.error || "La voz no se pudo generar. Intenta de nuevo.");
+        muestra = data.audio as string;
+        muestrasVoz.set(voz, muestra);
+      }
+      const llave = `muestra|${voz}|${estiloActual}`;
+      let src = vocesConEstilo.current.get(llave);
+      if (!src) {
+        src = await conEstilo(muestra, estiloActual);
+        guardarReciente(vocesConEstilo.current, llave, src);
+      }
+      const a = new Audio(src);
+      audioPrueba.current = a;
+      a.onended = a.onerror = () => {
+        if (audioPrueba.current === a) setProbandoEstilo("");
+      };
+      setProbandoEstilo("sonando");
+      await a.play();
+    } catch (e) {
+      setProbandoEstilo("");
+      setError(friendlyError((e as Error).message));
+    }
   }
 
   // Lo que comparten grabar y la vista previa: las escenas con su duración, la marca, la voz y la música.
@@ -703,12 +849,18 @@ export default function ReelStudio({
   // Cada clip animado guarda el id de su toma (trabajoId): así se puede retomar, duplicar y volver a
   // grabar sin pedirla ni cobrarla de nuevo. Los enlaces de los clips caducan en 1 hora: se piden frescos.
   const enlacesToma = useRef(new Map<string, { url: string; cuando: number }>());
+  // Tomas cuyo clip ya se borró (las de la prueba gratis duran 30 días) o que el servidor ya no tiene
+  const tomasVencidas = useRef(new Set<string>());
   const [estadoToma, setEstadoToma] = useState<Record<string, string>>({}); // id del clip → qué está pasando
   const [animando, setAnimando] = useState<string[]>([]); // clips con una toma en camino
   // El mismo dato, pero al instante: dos toques seguidos no deben pedir (ni cobrar) dos tomas
   const animandoYa = useRef(new Set<string>());
   // Mientras se graba o se anima una toma no se cambia de proyecto ni se empieza otro
   useEffect(() => onOcupado?.(!!busy || animando.length > 0), [busy, animando, onOcupado]);
+  // Al ocultarse el resultado mientras se trabaja, el video terminado deja de sonar.
+  useEffect(() => {
+    if (busy) videoFinal.current?.pause();
+  }, [busy]);
 
   // Consulta tomas y guarda el enlace de las que ya están listas
   async function verTomas(ids: string[]): Promise<{ vistos: TrabajoVisto[]; topeHoy: boolean }> {
@@ -721,6 +873,14 @@ export default function ReelStudio({
       topeHoy = topeHoy || r.topeHoy;
     }
     for (const t of vistos) if (t.estado === "listo" && t.clipUrl) enlacesToma.current.set(t.id, { url: t.clipUrl, cuando: Date.now() });
+    const vistosIds = new Set(vistos.map((t) => t.id));
+    for (const id of ids) {
+      const t = vistos.find((x) => x.id === id);
+      if (!vistosIds.has(id) || t?.vencido) {
+        tomasVencidas.current.add(id);
+        enlacesToma.current.delete(id);
+      } else tomasVencidas.current.delete(id);
+    }
     return { vistos, topeHoy };
   }
 
@@ -740,6 +900,8 @@ export default function ReelStudio({
   async function pedirTomaDe(c: Clip): Promise<string> {
     const f = await prepararFoto(c.image);
     let llave = subidas.current.get(f.sha256);
+    // Una foto subida durante la prueba gratis (demo/) ya no sirve si la cuenta cambió de plan: se sube otra vez
+    if (llave && llave.startsWith("demo/") !== esDemo) llave = undefined;
     if (!llave) {
       llave = await subirFoto(f, () => {});
       subidas.current.set(f.sha256, llave);
@@ -748,18 +910,135 @@ export default function ReelStudio({
     return id;
   }
 
-  // Espera a que terminen las tomas. enProceso = se acabó la espera (o el cupo del día) y siguen en camino.
-  async function esperarTomas(ids: string[], pinta: (t: string) => void): Promise<{ vistos: TrabajoVisto[]; enProceso: boolean; texto: string }> {
+  // Espera a que terminen las tomas. enProceso = se acabó la espera y siguen en camino.
+  // soltarAlTope: si hoy ya no hay cupo (y nada se genera), vuelve al momento con alTope (sigue en segundo plano).
+  async function esperarTomas(
+    ids: string[],
+    pinta: (t: string) => void,
+    opciones: { soltarAlTope?: boolean } = {},
+  ): Promise<{ vistos: TrabajoVisto[]; enProceso: boolean; texto: string; alTope?: boolean }> {
     const inicio = Date.now();
-    for (;;) {
-      const r = await verTomas(ids);
-      if (r.vistos.length === 0) return { vistos: [], enProceso: false, texto: "" };
-      const texto = textoEstado({ tipo: "trabajos", trabajos: r.vistos, topeHoy: r.topeHoy });
-      pinta(texto);
-      if (terminado(r.vistos)) return { vistos: r.vistos, enProceso: false, texto };
-      const hayCupo = !(r.topeHoy && !r.vistos.some((t) => t.estado === "enviado"));
-      if (!hayCupo || Date.now() - inicio > MAX_ESPERA) return { vistos: r.vistos, enProceso: true, texto: hayCupo ? "" : texto };
-      await new Promise((res) => setTimeout(res, ESPERA_TOMAS));
+    // Mientras aquí se consultan estas tomas, la espera de fondo no las consulta (no se lee dos veces)
+    for (const id of ids) primerPlano.current.set(id, (primerPlano.current.get(id) ?? 0) + 1);
+    try {
+      for (;;) {
+        const r = await verTomas(ids);
+        if (r.vistos.length === 0) return { vistos: [], enProceso: false, texto: "" };
+        const texto = textoEstado({ tipo: "trabajos", trabajos: r.vistos, topeHoy: r.topeHoy });
+        pinta(texto);
+        if (terminado(r.vistos)) return { vistos: r.vistos, enProceso: false, texto };
+        if (opciones.soltarAlTope && esperarEnFondo(r.vistos, r.topeHoy)) return { vistos: r.vistos, enProceso: true, texto, alTope: true };
+        // Se espera hasta el límite duro del servidor (45 min) para que resuelva una toma atorada.
+        const espera = siguienteEspera(r.vistos, r.topeHoy, Date.now() - inicio);
+        if (espera === null) return { vistos: r.vistos, enProceso: true, texto: "" };
+        await new Promise((res) => setTimeout(res, espera));
+        if (!montado.current) return { vistos: r.vistos, enProceso: true, texto: "" }; // se cerró el editor
+      }
+    } finally {
+      for (const id of ids) {
+        const n = (primerPlano.current.get(id) ?? 1) - 1;
+        if (n > 0) primerPlano.current.set(id, n);
+        else primerPlano.current.delete(id);
+      }
+    }
+  }
+
+  // Sin cupo hoy: el editor (y «Animar») quedan libres y aquí se sigue consultando en segundo plano, cada
+  // 30 min mientras dure el tope (hasta 24 h). Una sola espera para todas las tomas: las nuevas se suman.
+  // clips: toma → clip que la pidió con «Animar» (para pintar su estado al terminar).
+  const fondo = useRef({ ids: new Set<string>(), clips: new Map<string, string>(), corriendo: false });
+  const primerPlano = useRef(new Map<string, number>()); // tomas que una espera del editor consulta ahora
+  const montado = useRef(true);
+  const [revisar, setRevisar] = useState<string[] | null>(null); // se dejó de esperar a las 24 h
+  useEffect(() => {
+    montado.current = true;
+    return () => {
+      montado.current = false;
+    };
+  }, []);
+  const pintaClip = (clipId: string, t: string) => setEstadoToma((e) => ({ ...e, [clipId]: t }));
+  function aFondo(ids: string[], clipId?: string, ahora = false) {
+    for (const id of ids) {
+      fondo.current.ids.add(id);
+      if (clipId) fondo.current.clips.set(id, clipId);
+    }
+    setRevisar(null);
+    void seguirEnFondo(ahora);
+  }
+  async function seguirEnFondo(ahora = false) {
+    const f = fondo.current;
+    if (f.corriendo) return;
+    f.corriendo = true;
+    const desde = Date.now(); // desde cuándo se espera el cupo (para las 24 h)
+    let desdeCupo = Date.now(); // desde cuándo hay cupo (para el límite de 45 min)
+    let espera: number | null = ahora ? 0 : 30 * 60 * 1000;
+    let hayFallo = false;
+    try {
+      while (montado.current && f.ids.size > 0 && espera !== null) {
+        await new Promise((res) => setTimeout(res, espera!));
+        if (!montado.current) return;
+        const ids = [...f.ids].filter((id) => !primerPlano.current.has(id));
+        if (ids.length === 0) {
+          espera = 30_000; // el editor las está consultando: se revisa después
+          continue;
+        }
+        let r: Awaited<ReturnType<typeof verTomas>>;
+        try {
+          r = await verTomas(ids);
+        } catch {
+          espera = 30 * 60 * 1000; // sin conexión: más tarde
+          continue;
+        }
+        const porId = new Map(r.vistos.map((t) => [t.id, t]));
+        for (const id of ids) {
+          const t = porId.get(id);
+          if (t && t.estado !== "listo" && t.estado !== "fallo") continue;
+          // Terminó (o el servidor ya no la tiene)
+          const clipId = f.clips.get(id);
+          if (clipId) {
+            if (t?.estado === "listo") pintaClip(clipId, t.desdeCache ? "Listo al instante" : "Listo");
+            else {
+              interno((l) => quitarToma(l, id));
+              pintaClip(clipId, "");
+              if (t) setError("No se pudo generar la toma, te devolvimos tu crédito");
+            }
+          } else if (t?.estado === "fallo") hayFallo = true;
+          f.ids.delete(id);
+          f.clips.delete(id);
+        }
+        const siguen = r.vistos.filter((t) => f.ids.has(t.id));
+        if (f.ids.size === 0) {
+          setEstadoIa(hayFallo ? "No se pudo generar la toma, te devolvimos tu crédito" : "Tus tomas con IA ya están listas. Toca «Generar con IA» para grabar tu video.");
+          void refrescarCuenta();
+          return;
+        }
+        if (siguen.length === 0) {
+          espera = 30_000; // las que faltan las consulta el editor ahora
+          continue;
+        }
+        if (r.topeHoy) desdeCupo = Date.now();
+        espera = siguienteEspera(siguen, r.topeHoy, r.topeHoy ? Date.now() - desde : Date.now() - desdeCupo);
+        const texto = textoEstado({ tipo: "trabajos", trabajos: siguen, topeHoy: r.topeHoy });
+        if (espera === null) {
+          // Se acabó el tiempo: nada de «Generando…» viejo a la vista
+          const pendientes = [...f.ids];
+          for (const clipId of f.clips.values()) pintaClip(clipId, "");
+          f.ids.clear();
+          f.clips.clear();
+          if (r.topeHoy) {
+            setEstadoIa("Vuelve a revisar mañana.");
+            setRevisar(pendientes);
+          } else setEstadoIa("");
+          return;
+        }
+        setEstadoIa(texto);
+        for (const t of siguen) {
+          const clipId = f.clips.get(t.id);
+          if (clipId) pintaClip(clipId, textoEstado({ tipo: "trabajos", trabajos: [t], topeHoy: r.topeHoy }));
+        }
+      }
+    } finally {
+      f.corriendo = false;
     }
   }
 
@@ -790,7 +1069,13 @@ export default function ReelStudio({
         interno((l) => ponerToma(l, lugar(), pedida));
         void refrescarCuenta(); // actualiza «te quedan X tomas»
       }
-      const r = await esperarTomas([id], pinta);
+      const r = await esperarTomas([id], pinta, { soltarAlTope: true });
+      if (r.alTope) {
+        // Hoy ya no hay cupo: el clip deja de estar «animando» y se sigue esperando en segundo plano
+        pinta(r.texto);
+        aFondo([id], clipId);
+        return;
+      }
       if (r.enProceso) return pinta(r.texto || "Sigue en proceso. Vuelve en unos minutos y toca «Animar» otra vez: no se cobra de nuevo.");
       const t = r.vistos[0];
       if (!t || t.estado === "fallo") {
@@ -818,6 +1103,7 @@ export default function ReelStudio({
   async function grabar(lista: Clip[]) {
     const problema = validar(lista);
     if (problema) throw new Error(problema);
+    if (!soltarResultado()) throw new Error("Espera a que termine la subida a Drive y vuelve a intentarlo.");
     detenerPrevia();
     setResult(null);
     setAvisosVideo([]);
@@ -829,13 +1115,18 @@ export default function ReelStudio({
     // Si los videos del proyecto aún se están abriendo (recién cargada la app), se espera un momento
     const idsVideo = lista.flatMap((c) => (c.tipo === "video" && c.archivoId ? [c.archivoId] : []));
     for (let k = 0; k < 50 && idsVideo.some((id) => !(id in urlsRef.current)); k++) await new Promise((r) => setTimeout(r, 100));
-    const faltan = sinFuente(lista, { tomas, videos: urlsRef.current });
+    const faltan = sinFuente(lista, { tomas, videos: urlsRef.current, vencidas: tomasVencidas.current });
     if (faltan.videos.length) {
       throw new Error(`El video del clip ${faltan.videos.join(", ")} no está en este dispositivo. Vuelve a subirlo o quita ese clip.`);
     }
-    const avisos = faltan.tomas.length
-      ? [`No se pudo traer la toma con IA del clip ${faltan.tomas.join(", ")} (revisa tu conexión): ahí la foto se ve con zoom. Vuelve a crear el video cuando tengas señal; no se cobra de nuevo.`]
-      : [];
+    const avisos = [
+      ...(faltan.tomas.length
+        ? [`No se pudo traer la toma con IA del clip ${faltan.tomas.join(", ")} (revisa tu conexión): ahí la foto se ve con zoom. Vuelve a crear el video cuando tengas señal; no se cobra de nuevo.`]
+        : []),
+      ...(faltan.vencidas.length
+        ? [`La toma con IA del clip ${faltan.vencidas.join(", ")} ya venció y se borró: ahí la foto se ve con zoom. Toca «Rehacer» en ese clip para animarla otra vez.`]
+        : []),
+    ];
     aLaVista(salida.current);
     const r = await renderReel({
       // Las opciones se leen AHORA (no las de cuando se tocó el botón): tras esperar las tomas con IA,
@@ -845,7 +1136,7 @@ export default function ReelStudio({
       onProgress: setProgress,
       previewCanvas: preview.current || undefined,
     });
-    setResult({ url: r.url, ext: r.ext, seconds: r.seconds });
+    setResult({ url: r.url, blob: r.blob, ext: r.ext, seconds: r.seconds });
     setAvisosVideo([...avisos, ...r.avisos]);
     setVozCambio(false);
     setTimeout(() => aLaVista(salida.current), 100);
@@ -896,7 +1187,13 @@ export default function ReelStudio({
       }
       if (pedidas.size) void refrescarCuenta();
       const ids = [...new Set(clipsRef.current.flatMap((c) => (c.tipo === "toma" && c.image && c.trabajoId ? [c.trabajoId] : [])))];
-      const r = await esperarTomas(ids, setBusy);
+      const r = await esperarTomas(ids, setBusy, { soltarAlTope: true });
+      if (r.alTope) {
+        // Hoy ya no hay cupo: el editor queda libre con el aviso de «mañana»; se sigue esperando en segundo plano
+        setEstadoIa(r.texto);
+        aFondo(ids);
+        return;
+      }
       if (r.enProceso) {
         // Quedan guardadas en cada clip: al volver y tocar «Generar con IA» se retoman sin costo
         setEstadoIa(r.texto || "Tus tomas siguen en proceso. Vuelve en unos minutos y toca «Generar con IA» para terminar tu video.");
@@ -1112,6 +1409,239 @@ export default function ReelStudio({
     else void buildReel();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alFinal, busy, viendo, cola, voice, vozSegundos]);
+
+  // ---------- «Hacer el video con NOVA»: las fotos de la secuencia, el guion y la voz de NOVA ----------
+  const [secNova, setSecNova] = useState<{ tema: string; momentos: string[] } | null>(null);
+  const [faseNova, setFaseNova] = useState<FaseNova>("escribiendo");
+  const [segNova, setSegNova] = useState<DuracionSecuencia>(15);
+  const [errorNova, setErrorNova] = useState("");
+  const tarjetaNova = useRef<HTMLDivElement>(null);
+  const tituloClips = useRef<HTMLHeadingElement>(null);
+  // Cómo estaba el video antes de «Reemplazar»: «Volver al video anterior» lo devuelve todo (clips, tema,
+  // formato, guion, voz y música), no solo los clips
+  const antesDeSecuencia = useRef<{ clips: Clip[]; ajustes: Ajustes; voice: string } | null>(null);
+  const [hayVolverSecuencia, setHayVolverSecuencia] = useState(false);
+  const quedanVoces = cuentasOn && cuenta && "limites" in cuenta ? quedanDe(cuenta, "voces") : undefined;
+
+  const pedidoGuion = useRef(0); // un guion que llega tarde (tras «Empezar nuevo» u otro pedido) no se usa
+  async function escribirGuion(tema: string, momentos: string[], segundos: DuracionSecuencia) {
+    const pedido = ++pedidoGuion.current;
+    setFaseNova("escribiendo");
+    setErrorNova("");
+    try {
+      const res = await fetch("/api/text", {
+        method: "POST",
+        headers:
+          settings.textProvider === "cloudflare"
+            ? { "content-type": "application/json", ...cfHeaders }
+            : { "content-type": "application/json", "x-anthropic-key": settings.anthropicKey },
+        body: JSON.stringify({
+          mode: "guion_secuencia",
+          prompt: (tema || momentos.join(", ")).slice(0, MAX_ORDEN),
+          momentos,
+          segundos,
+          brand: brandContext(brand),
+          provider: settings.textProvider,
+          model: settings.textProvider === "cloudflare" ? settings.cfTextModel : settings.textModel,
+        }),
+      });
+      const data = await res.json().catch(() => ({ error: "NOVA no pudo escribir el guion. Intenta de nuevo." }));
+      if (pedido !== pedidoGuion.current) return;
+      if (!res.ok || typeof data.guion !== "string" || !data.guion.trim()) throw new Error(data.error || "NOVA no pudo escribir el guion. Intenta de nuevo.");
+      setScript(data.guion);
+      setVoice(""); // la voz de antes ya no corresponde al guion
+      setFaseNova("guion");
+      void refrescarCuenta();
+    } catch (e) {
+      if (pedido !== pedidoGuion.current) return;
+      setErrorNova(friendlyError((e as Error).message));
+      setFaseNova("error_guion");
+    }
+  }
+
+  // Pone las fotos en orden (una por clip), el tema y el formato; música encendida; NOVA escribe el guion
+  function cargarSecuencia(s: SecuenciaEntrante) {
+    if (!soltarResultado()) return setError("Espera a que termine la subida a Drive y vuelve a tocar «Hacer el video con NOVA».");
+    detenerPrevia();
+    stopListen();
+    const viejos = clipsRef.current;
+    antesDeSecuencia.current = tieneContenido(viejos, script) ? { clips: viejos, ajustes: ajustesActuales(), voice } : null;
+    setHayVolverSecuencia(!!antesDeSecuencia.current);
+    const total = duracionParaFotos(s.fotos.length);
+    editar(() => clipsDeSecuencia(s.fotos, s.momentos, total)); // se puede deshacer
+    // Las fotos del video anterior se quitan del aparato (si se deshace, se vuelven a guardar solas)
+    for (const c of viejos) if (c.imageId && !clipsRef.current.some((x) => x.imageId === c.imageId)) olvidarFoto(c.imageId);
+    setElegido(-1);
+    setTopic(s.tema);
+    setFormat(s.formato);
+    setScript("");
+    setVoice("");
+    setMusicOn(true);
+    if (result) URL.revokeObjectURL(result.url);
+    setResult(null);
+    setVozCambio(false);
+    setAvisosVideo([]);
+    setError("");
+    setSecNova({ tema: s.tema, momentos: s.momentos });
+    setSegNova(total);
+    setTimeout(() => aLaVista(tarjetaNova.current), 50);
+    void escribirGuion(s.tema, s.momentos, total);
+  }
+
+  // Lo que llega de la secuencia se carga una sola vez, después de leer el borrador guardado (fotos y voz)
+  const secuenciaVista = useRef(-1);
+  useEffect(() => {
+    const s = limpiarEntrante(incomingSecuencia);
+    if (!s || secuenciaVista.current === s.n) return;
+    const t = setTimeout(() => {
+      if (secuenciaVista.current === s.n) return;
+      secuenciaVista.current = s.n;
+      cargarSecuencia(s);
+    }, 500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incomingSecuencia]);
+
+  function volverAntesDeSecuencia() {
+    const a = antesDeSecuencia.current;
+    if (!a || busy) return;
+    antesDeSecuencia.current = null;
+    setHayVolverSecuencia(false);
+    pedidoGuion.current++; // un guion que siga en camino ya no se usa
+    ajustarTrasVoz.current = false;
+    editar(() => reconciliar(a.clips)); // las fotos de antes se vuelven a guardar solas
+    ponerAjustes(a.ajustes);
+    setVoice(a.voice);
+    setElegido(-1);
+    setSecNova(null);
+  }
+
+  // Otra duración: las fotos se reparten al momento; el guion se puede escribir otra vez
+  function cambiarDuracionNova(d: DuracionSecuencia) {
+    setSegNova(d);
+    editar((c) => repartirEnFotos(c, d));
+  }
+
+  // La voz de NOVA (la que eligió en sus Ajustes) con su estilo, por el mismo camino que «Generar voz»
+  async function generarVozNova() {
+    const lang = getLang();
+    const voz = vozNova(leerAjuste("nova:voz"), lang).id;
+    const estilo = estiloVoz(leerAjuste("nova:estilo"));
+    setVoiceId(voz);
+    setEstiloGuardado(estilo);
+    setFaseNova("voz");
+    setErrorNova("");
+    setError("");
+    setBusy("NOVA está generando la voz…");
+    try {
+      await generarVoz(voz, script, estilo);
+      ajustarTrasVoz.current = true; // al medir la voz, las fotos se alargan si hace falta para cubrirla
+      setFaseNova("lista");
+      void refrescarCuenta();
+    } catch (e) {
+      setErrorNova(friendlyError((e as Error).message));
+      setFaseNova("error_voz");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  const tarjetaDeNova = secNova && (
+    <div ref={tarjetaNova} className="notice" role="status" aria-live="polite" style={{ display: "grid", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <NovaAvatar estado={faseNova === "escribiendo" || faseNova === "voz" ? "pensando" : faseNova === "lista" ? "aviso" : "quieta"} tamano={36} />
+        <strong>Video de NOVA</strong>
+      </div>
+      <label htmlFor="nova-duracion" style={{ margin: 0 }}>Duración de la voz</label>
+      <div className="seg" id="nova-duracion" role="radiogroup" aria-label="Duración de la voz">
+        {DURACIONES_SECUENCIA.map((d) => (
+          <button key={d} role="radio" aria-checked={segNova === d} className={segNova === d ? "active" : ""} disabled={!!busy || faseNova === "escribiendo"} onClick={() => cambiarDuracionNova(d)} data-no-translate>
+            {d} s
+          </button>
+        ))}
+      </div>
+      {faseNova === "escribiendo" && (
+        <span>
+          <Loader2 size={15} className="spin" aria-hidden /> NOVA está escribiendo el guion…
+        </span>
+      )}
+      {faseNova === "error_guion" && <div className="error">{errorNova}</div>}
+      {(faseNova === "error_guion" || (faseNova !== "escribiendo" && faseNova !== "voz" && !!script.trim())) && (
+        <div className="actions">
+          <button className="btn ghost small" disabled={!!busy} onClick={() => void escribirGuion(secNova.tema, secNova.momentos, segNova)}>
+            {faseNova === "error_guion" ? "Intentar otra vez" : "Escribir el guion otra vez"}
+          </button>
+        </div>
+      )}
+      {faseNova === "guion" && <span>NOVA escribió el guion. Puedes cambiarlo en «Sonido».</span>}
+      {faseNova === "guion" && !puedeVoz && (
+        <div className="acct-upsell">
+          <span>Tu plan no incluye voz en off. El guion quedó listo en «Sonido»: puedes leerlo tú o mejorar tu plan.</span>
+          <button className="btn small" onClick={abrirPlanes}>
+            Ver planes
+          </button>
+        </div>
+      )}
+      {faseNova === "guion" && puedeVoz && quedanVoces === 0 && (
+        <div className="acct-upsell">
+          <span>Ya no te quedan voces en off este mes.</span>
+          <button className="btn small" onClick={abrirMiCuenta}>
+            Mi cuenta
+          </button>
+        </div>
+      )}
+      {faseNova === "guion" && puedeVoz && quedanVoces !== 0 && (
+        <>
+          <span>{textoConfirmarVoz(quedanVoces)}</span>
+          <div className="actions">
+            <button className="btn small" disabled={!!busy || !script.trim()} onClick={() => void generarVozNova()}>
+              <Mic size={15} aria-hidden /> Sí, generarla
+            </button>
+            <button className="btn ghost small" onClick={() => setFaseNova("omitida")}>
+              Ahora no
+            </button>
+          </div>
+        </>
+      )}
+      {faseNova === "voz" && (
+        <span>
+          <Loader2 size={15} className="spin" aria-hidden /> NOVA está generando la voz…
+        </span>
+      )}
+      {faseNova === "error_voz" && (
+        <>
+          <div className="error">{errorNova}</div>
+          <span className="muted">Si prefieres, elige otra voz en «Sonido» y toca «Generar voz».</span>
+          <div className="actions">
+            <button className="btn small" disabled={!!busy || !script.trim()} onClick={() => void generarVozNova()}>
+              Intentar otra vez
+            </button>
+          </div>
+        </>
+      )}
+      {faseNova === "lista" && <span>La voz está lista.</span>}
+      {(faseNova === "lista" || faseNova === "omitida" || (faseNova === "guion" && !puedeVoz)) && (
+        <>
+          <span>Marca «Con IA» en las fotos que quieras animar y presiona «Generar con IA». Después graba el video.</span>
+          <div className="actions">
+            <button className="btn ghost small" onClick={() => tituloClips.current?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+              Ir a los clips
+            </button>
+            <button className="btn ghost small" onClick={() => setSecNova(null)}>
+              Entendido
+            </button>
+          </div>
+        </>
+      )}
+      {hayVolverSecuencia && (
+        <div className="actions">
+          <button className="btn ghost small" disabled={!!busy} onClick={volverAntesDeSecuencia}>
+            <Undo2 size={15} aria-hidden /> Volver al video anterior
+          </button>
+        </div>
+      )}
+    </div>
+  );
 
   // ---------- Videos propios en los clips ----------
   const galleryVideos = gallery.filter((g) => g.kind === "video" && g.id);
@@ -1331,6 +1861,7 @@ export default function ReelStudio({
           disabled={!!busy || animando.length > 0}
           onClick={() => {
             if (!confirm("¿Empezar un reel nuevo? Se borrarán el tema, las escenas y el guion actuales.")) return;
+            if (!soltarResultado()) return;
             clearDrafts("reel:");
             setTopic("");
             detenerPrevia();
@@ -1345,7 +1876,7 @@ export default function ReelStudio({
             // La canción propia también se quita del dispositivo (si no, se queda ocupando espacio)
             if (cancionPropia?.id) deleteFile(cancionPropia.id).catch(() => {});
             setCancionPropia(null);
-            setSinEspacio(false);
+            setAvisoGuardado("");
             setAvisosVideo([]);
             setResult(null);
             setError("");
@@ -1365,6 +1896,10 @@ export default function ReelStudio({
             setAlFinal(null);
             antesDeOrden.current = null;
             setHayDeshacerOrden(false);
+            setSecNova(null);
+            pedidoGuion.current++;
+            antesDeSecuencia.current = null;
+            setHayVolverSecuencia(false);
           }}
         >
           Empezar nuevo
@@ -1385,8 +1920,10 @@ export default function ReelStudio({
         onDeshacer={hayDeshacerOrden ? deshacerOrden : null}
       />
 
+      {tarjetaDeNova}
+
       {/* 2. Escenas: la línea de tiempo */}
-      <h3 className="step">Clips</h3>
+      <h3 className="step" ref={tituloClips}>Clips</h3>
       <div className="lt-barra">
         <span className={`lt-tiempo${total > MAX_VIDEO ? " pasado" : ""}`} data-no-translate aria-label={`${formatoTiempo(total)} / ${formatoTiempo(MAX_VIDEO)}`}>
           {formatoTiempo(total)} / {formatoTiempo(MAX_VIDEO)}
@@ -1513,6 +2050,21 @@ export default function ReelStudio({
       />
       <label>Elige la voz (toca ▶ para escucharla)</label>
       <VoicePicker value={voiceId} onChange={elegirVoz} headers={cfHeaders} />
+      <label htmlFor="reel-estilo-voz">Estilo</label>
+      <div className="actions" style={{ alignItems: "center", flexWrap: "nowrap" }}>
+        <select id="reel-estilo-voz" value={estiloActual} onChange={(e) => elegirEstilo(e.target.value)} disabled={!!busy} style={{ flex: 1, minWidth: 0 }}>
+          {ESTILOS_VOZ.map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.nombre}
+            </option>
+          ))}
+        </select>
+        <button className="btn ghost small" onClick={probarEstilo} disabled={probandoEstilo === "cargando"} aria-label={probandoEstilo === "sonando" ? "Detener" : "Probar el estilo"}>
+          {probandoEstilo === "cargando" ? <Loader2 size={16} className="spin" aria-hidden /> : probandoEstilo === "sonando" ? <Square size={14} aria-hidden /> : <Play size={16} aria-hidden />}
+          {probandoEstilo === "sonando" ? "Detener" : "Probar"}
+        </button>
+      </div>
+      <p className="hint" style={{ marginTop: 6 }}>{ESTILOS_VOZ.find((x) => x.id === estiloActual)!.descripcion}</p>
       <p className="hint" style={{ marginTop: 6 }}>
         Para que suene más natural, escribe como hablas: usa comas para las pausas, puntos para respirar y signos de ¡exclamación! o ¿pregunta? para dar emoción.
       </p>
@@ -1657,13 +2209,15 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
           className="reel-canvas"
           style={{ aspectRatio: ratioStyle, display: busy.startsWith("Grabando") ? "block" : "none" }}
         />
-        {result && !busy && (
-          <div className="media" style={{ maxWidth: format === "16:9" ? 640 : 360 }}>
+        {/* Mientras se trabaja, el resultado solo se oculta: si se quitara, se cortaría una subida a Drive */}
+        {result && (
+          <div className="media" style={{ maxWidth: format === "16:9" ? 640 : 360, display: busy ? "none" : undefined }}>
             <video ref={videoFinal} src={result.url} controls playsInline onTimeUpdate={(e) => setMomentoPortada(e.currentTarget.currentTime)} />
             <div className="meta actions">
               <a href={result.url} download={`reel-innovationtech.${result.ext}`}>
                 <Download size={16} aria-hidden /> Descargar video ({result.seconds} s, {result.ext.toUpperCase()})
               </a>
+              <CompartirBotones key={result.url} src={result.blob} nombre={`reel-innovationtech.${result.ext}`} alSubir={alSubirDrive} />
               <span className="muted">· Guardado en tu galería</span>
             </div>
             <div className="portada">
@@ -1692,6 +2246,7 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
               <button className="btn ghost small" onClick={descargarPortada}>
                 <Download size={15} aria-hidden /> Descargar portada
               </button>
+              <CompartirBotones key={result.url} src={capturarPortada} nombre="portada-innovationtech.jpg" alSubir={alSubirDrive} />
             </div>
           </div>
         )}
@@ -1704,6 +2259,7 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
       )}
       {/* Crear: barra fija abajo, siempre a la vista */}
       <div className="reel-barra">
+        {avisoDrive && <div className="notice">{avisoDrive}</div>}
         {!busy && vozCambio && (
           <div className="acct-upsell">
             <span>Cambiaste la voz. Actualiza el video para escucharla: no gasta tomas con IA.</span>
@@ -1712,7 +2268,19 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
             </button>
           </div>
         )}
-        {!busy && estadoIa && tomasMarcadas > 0 && <div className="notice">{estadoIa}</div>}
+        {!busy && estadoIa && tomasMarcadas > 0 && (
+          <div className="notice">
+            {estadoIa}
+            {revisar && revisar.length > 0 && (
+              <>
+                {" "}
+                <button type="button" className="btn ghost small" onClick={() => aFondo(revisar, undefined, true)}>
+                  Revisar otra vez
+                </button>
+              </>
+            )}
+          </div>
+        )}
         {!busy && invitarPlan && (
           <div className="acct-upsell">
             <span>Elige un plan para seguir creando videos con IA</span>
@@ -1740,10 +2308,10 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
             {a}
           </div>
         ))}
-        {sinEspacio && (
+        {avisoGuardado && (
           <div className="notice">
-            {AVISO_SIN_ESPACIO}{" "}
-            <button className="btn ghost small" onClick={() => setSinEspacio(false)}>
+            {avisoGuardado}{" "}
+            <button className="btn ghost small" onClick={() => setAvisoGuardado("")}>
               Entendido
             </button>
           </div>

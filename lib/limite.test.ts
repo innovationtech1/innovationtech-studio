@@ -25,7 +25,7 @@ test("sinFuente: nada falta cuando cada video y cada toma tienen su archivo", ()
     nuevoClip({ id: "b", tipo: "video", archivoId: "reelvid-1", image: "p", duracionOriginal: 5 }),
     nuevoClip({ id: "c", tipo: "toma", image: "f", trabajoId: "t1" }),
   ];
-  assert.deepEqual(sinFuente(clips, { tomas: { c: "https://x/clip.mp4" }, videos: { "reelvid-1": "blob:1" } }), { videos: [], tomas: [] });
+  assert.deepEqual(sinFuente(clips, { tomas: { c: "https://x/clip.mp4" }, videos: { "reelvid-1": "blob:1" } }), { videos: [], tomas: [], vencidas: [] });
 });
 
 test("sinFuente: dice qué clips de video no tienen su archivo (número de clip, desde 1)", () => {
@@ -39,4 +39,14 @@ test("sinFuente: dice qué tomas ya generadas no se pudieron traer; las que nunc
     nuevoClip({ id: "b", tipo: "toma", image: "f" }),
   ];
   assert.deepEqual(sinFuente(clips, { tomas: { a: null }, videos: {} }).tomas, [1]);
+});
+
+test("sinFuente: las tomas que ya vencieron (se borraron) se dicen aparte, no como falta de conexión", () => {
+  const clips = [
+    nuevoClip({ id: "a", tipo: "toma", image: "f", trabajoId: "t1" }),
+    nuevoClip({ id: "b", tipo: "toma", image: "f", trabajoId: "t2" }),
+  ];
+  const r = sinFuente(clips, { tomas: { a: null, b: null }, videos: {}, vencidas: new Set(["t2"]) });
+  assert.deepEqual(r.tomas, [1]);
+  assert.deepEqual(r.vencidas, [2]);
 });

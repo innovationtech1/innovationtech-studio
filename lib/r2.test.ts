@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { configR2, firmarUrl, pedirSubida, prefirmar, subirDesdeUrl } from "./r2";
+import { borrarCarpeta, carpetaFotos, carpetasNegocio, configR2, firmarUrl, llaveClip, pedirSubida, prefirmar, subirDesdeUrl } from "./r2";
 import type { Usuario } from "./account-store";
 import { memoryStore } from "./account-store-memory";
 import type { Negocio } from "./plans";
@@ -131,4 +131,129 @@ test("subirDesdeUrl: falla si la descarga o la subida fallan, o si el origen no 
   const mal = (async () => new Response("", { status: 500 })) as typeof fetch;
   await assert.rejects(subirDesdeUrl("https://v3.fal.media/x.mp4", "k.mp4", "video/mp4", mal, CFG));
   await assert.rejects(subirDesdeUrl("http://169.254.169.254/x", "k.mp4", "video/mp4", mal, CFG));
+});
+
+// ---------- Borrar la carpeta de un negocio (al borrar la cuenta) ----------
+
+test("prefirmar: los datos extra de la consulta van firmados y en orden", () => {
+  const base = {
+    metodo: "GET" as const,
+    host: "examplebucket.s3.amazonaws.com",
+    ruta: "/",
+    region: "us-east-1",
+    accessKeyId: "AKIAIOSFODNN7EXAMPLE",
+    secretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+    segundos: 60,
+    ahora: new Date("2013-05-24T00:00:00Z"),
+  };
+  const a = prefirmar({ ...base, consulta: { prefix: "negocios/n1/", "list-type": "2" } });
+  const b = prefirmar({ ...base, consulta: { "list-type": "2", prefix: "negocios/n1/" } });
+  assert.equal(a, b); // el orden en que se pasan no importa
+  assert.match(a, /X-Amz-SignedHeaders=host&list-type=2&prefix=negocios%2Fn1%2F&X-Amz-Signature=[0-9a-f]{64}$/);
+  const otra = prefirmar({ ...base, consulta: { "list-type": "2", prefix: "negocios/n2/" } });
+  assert.notEqual(a.split("Signature=")[1], otra.split("Signature=")[1]); // cambiar la consulta cambia la firma
+});
+
+const R2P = { accountId: "acc", accessKeyId: "AK", secretAccessKey: "SK", bucket: "studio" };
+const xml = (llaves: string[], sigue?: string) =>
+  `<?xml version="1.0"?><ListBucketResult><IsTruncated>${sigue ? "true" : "false"}</IsTruncated>` +
+  llaves.map((k) => `<Contents><Key>${k.replace(/&/g, "&amp;")}</Key></Contents>`).join("") +
+  (sigue ? `<NextContinuationToken>${sigue}</NextContinuationToken>` : "") +
+  `</ListBucketResult>`;
+
+function r2Falso(paginas: string[][], o: { borrarFalla?: boolean; listarFalla?: boolean } = {}) {
+  const pedidos: { metodo: string; url: URL }[] = [];
+  const traer = async (url: string, init?: { method?: string }) => {
+    const u = new URL(url);
+    const metodo = init?.method ?? "GET";
+    pedidos.push({ metodo, url: u });
+    if (metodo === "DELETE") return new Response(null, { status: o.borrarFalla ? 500 : 204 });
+    if (o.listarFalla) return new Response("no", { status: 403 });
+    const token = u.searchParams.get("continuation-token");
+    const i = token ? Number(token) : 0;
+    return new Response(xml(paginas[i] ?? [], i + 1 < paginas.length ? String(i + 1) : undefined), { status: 200 });
+  };
+  return { pedidos, traer: traer as typeof fetch };
+}
+
+test("borrarCarpeta: lista todas las páginas y borra cada archivo de esa carpeta", async () => {
+  const f = r2Falso([["negocios/n1/fotos/a.jpg", "negocios/n1/clips/t1.mp4"], ["negocios/n1/fotos/b&c.jpg"]]);
+  const n = await borrarCarpeta("negocios/n1/", { cfg: R2P, traer: f.traer });
+  assert.equal(n, 3);
+  const listas = f.pedidos.filter((p) => p.metodo === "GET");
+  assert.equal(listas.length, 2);
+  assert.equal(listas[0].url.searchParams.get("prefix"), "negocios/n1/");
+  assert.equal(listas[0].url.searchParams.get("list-type"), "2");
+  const borrados = f.pedidos.filter((p) => p.metodo === "DELETE").map((p) => decodeURIComponent(p.url.pathname));
+  assert.deepEqual(borrados.sort(), ["/studio/negocios/n1/clips/t1.mp4", "/studio/negocios/n1/fotos/a.jpg", "/studio/negocios/n1/fotos/b&c.jpg"]);
+});
+
+test("borrarCarpeta: solo acepta la carpeta de UN negocio (nunca el almacén entero ni la de todos)", async () => {
+  const f = r2Falso([["x"]]);
+  for (const malo of ["", "/", "negocios/", "demo/", "negocios/n1", "negocios/n1/fotos/", "otros/n1/", "negocios/../", "negocios/n1/../n2/"]) {
+    await assert.rejects(borrarCarpeta(malo, { cfg: R2P, traer: f.traer }), /carpeta/i, malo);
+  }
+  assert.equal(f.pedidos.length, 0);
+  assert.equal(await borrarCarpeta("demo/negocios/n1/", { cfg: R2P, traer: r2Falso([[]]).traer }), 0);
+});
+
+test("borrarCarpeta: nunca borra un archivo que no sea de esa carpeta, aunque la lista lo traiga", async () => {
+  const f = r2Falso([["negocios/n1/fotos/a.jpg", "negocios/n2/fotos/ajena.jpg"]]);
+  await assert.rejects(borrarCarpeta("negocios/n1/", { cfg: R2P, traer: f.traer }));
+  assert.ok(!f.pedidos.some((p) => p.metodo === "DELETE" && p.url.pathname.includes("n2")));
+});
+
+test("borrarCarpeta: si no se puede listar o borrar, falla (para que quede anotado)", async () => {
+  await assert.rejects(borrarCarpeta("negocios/n1/", { cfg: R2P, traer: r2Falso([["negocios/n1/a"]], { listarFalla: true }).traer }));
+  await assert.rejects(borrarCarpeta("negocios/n1/", { cfg: R2P, traer: r2Falso([["negocios/n1/a"]], { borrarFalla: true }).traer }));
+  await assert.rejects(borrarCarpeta("negocios/n1/", { cfg: null }), /R2/);
+});
+
+// ---------- Pruebas y producción comparten el bucket: cada una en su carpeta ----------
+
+async function conPrefijo<T>(prefijo: string | undefined, f: () => Promise<T> | T): Promise<T> {
+  const antes = process.env.STUDIO_COLECCION_PREFIJO;
+  if (prefijo === undefined) delete process.env.STUDIO_COLECCION_PREFIJO;
+  else process.env.STUDIO_COLECCION_PREFIJO = prefijo;
+  try {
+    return await f();
+  } finally {
+    if (antes === undefined) delete process.env.STUDIO_COLECCION_PREFIJO;
+    else process.env.STUDIO_COLECCION_PREFIJO = antes;
+  }
+}
+
+test("llaves de R2 en producción: las de siempre", async () => {
+  await conPrefijo(undefined, () => {
+    assert.equal(carpetaFotos("n1", "pro"), "negocios/n1/fotos/");
+    assert.equal(carpetaFotos("n1", "prueba"), "demo/negocios/n1/fotos/");
+    assert.equal(llaveClip("n1", "pro", "t1"), "negocios/n1/clips/t1.mp4");
+    assert.equal(llaveClip("n1", "prueba", "t1"), "demo/negocios/n1/clips/t1.mp4");
+    assert.deepEqual(carpetasNegocio("n1"), ["negocios/n1/", "demo/negocios/n1/"]);
+  });
+});
+
+test("llaves de R2 en la versión de prueba: bajo pruebas/ (y demo/pruebas/ para la prueba gratis)", async () => {
+  await conPrefijo("prueba_studio_", async () => {
+    assert.equal(carpetaFotos("n1", "pro"), "pruebas/negocios/n1/fotos/");
+    assert.equal(carpetaFotos("n1", "prueba"), "demo/pruebas/negocios/n1/fotos/");
+    assert.equal(llaveClip("n1", "basico", "t1"), "pruebas/negocios/n1/clips/t1.mp4");
+    assert.equal(llaveClip("n1", "prueba", "t1"), "demo/pruebas/negocios/n1/clips/t1.mp4");
+    assert.deepEqual(carpetasNegocio("n1"), ["pruebas/negocios/n1/", "demo/pruebas/negocios/n1/"]);
+    const r = await pedirSubida("u1", { tipo: "image/jpeg", bytes: 1000, sha256: SHA }, { store: tienda(), now: AHORA, cfg: CFG, stripeLive: false });
+    assert.ok(r.ok && r.imagenKey === `pruebas/negocios/n1/fotos/${SHA}.jpg`);
+  });
+});
+
+test("borrarCarpeta: cada versión solo borra sus propias carpetas (pruebas nunca borra producción)", async () => {
+  const R2P = { ...CFG, bucket: "studio" };
+  const vacio = () => r2Falso([[]]).traer;
+  await conPrefijo("prueba_studio_", async () => {
+    for (const ajena of ["negocios/n1/", "demo/negocios/n1/"]) await assert.rejects(borrarCarpeta(ajena, { cfg: R2P, traer: vacio() }), /no permitida/, ajena);
+    assert.equal(await borrarCarpeta("pruebas/negocios/n1/", { cfg: R2P, traer: vacio() }), 0);
+    assert.equal(await borrarCarpeta("demo/pruebas/negocios/n1/", { cfg: R2P, traer: vacio() }), 0);
+  });
+  await conPrefijo(undefined, async () => {
+    for (const ajena of ["pruebas/negocios/n1/", "demo/pruebas/negocios/n1/"]) await assert.rejects(borrarCarpeta(ajena, { cfg: R2P, traer: vacio() }), /no permitida/, ajena);
+  });
 });

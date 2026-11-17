@@ -19,7 +19,7 @@ export function useGallery() {
       if (!urls.current.has(s.id)) urls.current.set(s.id, URL.createObjectURL(s.blob));
       url = urls.current.get(s.id)!;
     }
-    return { id: s.id, kind: s.kind, prompt: s.prompt, date: s.date, url, external: !s.blob, mime: s.blob?.type };
+    return { id: s.id, kind: s.kind, prompt: s.prompt, date: s.date, url, external: !s.blob, mime: s.blob?.type, blob: s.blob };
   };
 
   const reload = useCallback(async () => {
@@ -58,7 +58,7 @@ export function useGallery() {
         ...pending.map((p) => {
           const url = p.source.blob ? URL.createObjectURL(p.source.blob) : p.source.url || "";
           if (p.source.blob) urls.current.set(p.id, url);
-          return { id: p.id, kind: p.kind, prompt: p.prompt, date: p.date, url, mime: p.source.blob?.type };
+          return { id: p.id, kind: p.kind, prompt: p.prompt, date: p.date, url, mime: p.source.blob?.type, blob: p.source.blob };
         }),
         ...cur,
       ]);

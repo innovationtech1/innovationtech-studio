@@ -60,3 +60,22 @@ test("CREDITOS nombra a los autores que piden reconocimiento y las fuentes de m�
     }
   }
 });
+
+test("PRIVACIDAD explica «Guardar en Drive»: tu propio Drive, permiso limitado y sin guardar el token ni copia, en es y en", () => {
+  const es = JSON.stringify(PRIVACIDAD.es);
+  assert.match(es, /Guardar en Drive/);
+  assert.match(es, /tu propio Google Drive/);
+  assert.match(es, /limitado a los archivos que Studio crea/);
+  assert.match(es, /no recibe ni guarda el permiso \(token\) de Google ni una copia del archivo/);
+  assert.match(es, /carga el servicio de inicio de sesión de Google/);
+  const en = JSON.stringify(PRIVACIDAD.en);
+  assert.match(en, /Save to Drive/);
+  assert.match(en, /your own Google Drive/);
+  assert.match(en, /limited to the files Studio creates/);
+  assert.match(en, /does not receive or keep the Google permission \(token\) or a copy of the file/);
+  assert.match(en, /loads Google’s sign-in service/);
+});
+
+test("VERSION_LEGAL subió con el aviso de Google Drive", () => {
+  assert.ok(VERSION_LEGAL >= "2026-11-15", VERSION_LEGAL);
+});

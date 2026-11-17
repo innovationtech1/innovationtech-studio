@@ -2,7 +2,7 @@
 // BORRADOR del 13 de noviembre de 2026: debe revisarlo un abogado o contador antes del lanzamiento.
 // Si cambia el contenido de fondo, sube VERSION_LEGAL: las cuentas nuevas guardan qué versión aceptaron.
 
-export const VERSION_LEGAL = "2026-11-13";
+export const VERSION_LEGAL = "2026-11-15";
 export const CONTACTO_LEGAL = "hectordehoyos053@gmail.com";
 
 export type Seccion = { titulo: string; parrafos: string[] };
@@ -218,7 +218,7 @@ export const TERMINOS: Record<"es" | "en", DocumentoLegal> = {
 export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
   es: {
     titulo: "Política de privacidad",
-    actualizado: "Última actualización: 10 de noviembre de 2026",
+    actualizado: "Última actualización: 15 de noviembre de 2026",
     secciones: [
       {
         titulo: "1. Quién es responsable",
@@ -244,6 +244,7 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
           "Para generar contenido, lo que escribes o subes (por ejemplo, una descripción, una foto de referencia o un audio para subtítulos) se envía al servicio de IA que corresponda: Cloudflare Workers AI, o Replicate o Anthropic si usas tus propias claves. Esos servicios lo procesan según sus propias políticas.",
           "Si usas las tomas de video con IA, la foto que marcas y el movimiento que escribes se envían a fal.ai para generar el clip. Esa foto y el clip que resulta se guardan en nuestro almacenamiento privado (Cloudflare R2), ligados a tu negocio, para armar tu video y no cobrarte dos veces la misma toma. Los de la prueba gratis se borran a los 30 días; los demás se conservan hasta que nos pidas borrarlos.",
           "No subas datos personales sensibles de otras personas en tus pedidos a la IA.",
+          "Si eliges «Guardar en Drive», el archivo se sube directo desde tu dispositivo a tu propio Google Drive, con un permiso limitado a los archivos que Studio crea (no puede ver ni abrir el resto de tu Drive). InnovationTECH no recibe ni guarda el permiso (token) de Google ni una copia del archivo; el archivo queda bajo las condiciones de tu cuenta de Google. Para pedir ese permiso, tu navegador carga el servicio de inicio de sesión de Google (Google Identity Services), que recibe datos técnicos como tu dirección IP.",
         ],
       },
       {
@@ -262,13 +263,14 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
       {
         titulo: "6. Cuánto tiempo los guardamos",
         parrafos: [
-          "Mientras tengas una cuenta. Si nos pides borrarla, eliminamos los datos de tu cuenta y de tu negocio en un plazo razonable, salvo lo que debamos conservar por ley (por ejemplo, registros de pagos).",
+          "Mientras tengas una cuenta. Puedes borrarla tú en cualquier momento desde Mi cuenta → «Borrar mi cuenta»: se cancela tu suscripción y eliminamos los datos de tu cuenta y de tu negocio, incluidas las fotos y los clips de video con IA guardados en nuestro almacenamiento. Si eres el dueño del negocio, las personas de tu equipo pierden el acceso.",
+          "Después de borrar la cuenta conservamos solo lo que debemos guardar por ley (por ejemplo, registros de pagos), sin tu nombre ni tu correo, y una huella cifrada de tu correo que no permite reconstruirlo; sirve únicamente para no volver a dar la prueba gratis al mismo correo.",
         ],
       },
       {
         titulo: "7. Tus derechos",
         parrafos: [
-          `Puedes pedirnos ver, corregir o borrar tus datos. El dueño del negocio puede desconectar la cuenta de Cloudflare en cualquier momento desde Mi cuenta. Escríbenos a ${CONTACTO_LEGAL}; te responderemos en un plazo razonable.`,
+          `Puedes borrar tu cuenta y tus datos tú mismo desde Mi cuenta → «Borrar mi cuenta». También puedes pedirnos ver o corregir tus datos, o que los borremos por ti: escríbenos a ${CONTACTO_LEGAL} y te responderemos en un plazo razonable. El dueño del negocio puede desconectar la cuenta de Cloudflare en cualquier momento desde Mi cuenta.`,
           "Al cerrar sesión puedes pedir que Studio borre de ese navegador tus claves guardadas, tu galería y «Mi marca». Hazlo si usas un dispositivo compartido.",
         ],
       },
@@ -294,7 +296,7 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
   },
   en: {
     titulo: "Privacy Policy",
-    actualizado: "Last updated: November 10, 2026",
+    actualizado: "Last updated: November 15, 2026",
     secciones: [
       {
         titulo: "1. Who is responsible",
@@ -320,6 +322,7 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
           "To generate content, what you type or upload (for example, a description, a reference photo or an audio file for subtitles) is sent to the relevant AI service: Cloudflare Workers AI, or Replicate or Anthropic if you use your own keys. Those services process it under their own policies.",
           "If you use AI video shots, the photo you mark and the motion you describe are sent to fal.ai to generate the clip. That photo and the resulting clip are stored in our private storage (Cloudflare R2), linked to your business, to build your video and avoid charging you twice for the same shot. Those from the free trial are deleted after 30 days; the rest are kept until you ask us to delete them.",
           "Do not include other people’s sensitive personal data in your AI requests.",
+          "If you choose “Save to Drive”, the file is uploaded directly from your device to your own Google Drive, with a permission limited to the files Studio creates (it cannot see or open the rest of your Drive). InnovationTECH does not receive or keep the Google permission (token) or a copy of the file; the file is subject to your Google account’s terms. To request that permission, your browser loads Google’s sign-in service (Google Identity Services), which receives technical data such as your IP address.",
         ],
       },
       {
@@ -338,13 +341,14 @@ export const PRIVACIDAD: Record<"es" | "en", DocumentoLegal> = {
       {
         titulo: "6. How long we keep it",
         parrafos: [
-          "While you have an account. If you ask us to delete it, we remove your account and business data within a reasonable time, except what we must keep by law (for example, payment records).",
+          "While you have an account. You can delete it yourself at any time from My account → “Delete my account”: your subscription is canceled and we remove your account and business data, including the photos and AI video clips kept in our storage. If you are the business owner, the people on your team lose access.",
+          "After the account is deleted we keep only what we must keep by law (for example, payment records), without your name or email, and an encrypted fingerprint of your email that cannot be turned back into it; it is used only so the same email does not get the free trial again.",
         ],
       },
       {
         titulo: "7. Your rights",
         parrafos: [
-          `You can ask us to access, correct or delete your data. The business owner can disconnect the Cloudflare account at any time from My account. Write to ${CONTACTO_LEGAL}; we will reply within a reasonable time.`,
+          `You can delete your account and your data yourself from My account → “Delete my account”. You can also ask us to access or correct your data, or to delete it for you: write to ${CONTACTO_LEGAL} and we will reply within a reasonable time. The business owner can disconnect the Cloudflare account at any time from My account.`,
           "When you sign out you can ask Studio to delete your saved keys, your gallery and “My brand” from that browser. Do this if you use a shared device.",
         ],
       },

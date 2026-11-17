@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { Brand, brandAccent, brandContext, brandVisual, emptyBrand, normalizeBrand, textOn } from "@/lib/brand";
 import { FONTS } from "@/lib/editor-model";
@@ -11,7 +11,7 @@ import { fileToResizedDataUrl } from "@/lib/resize";
 import { usePersistentState } from "@/lib/persist";
 import { useGallery } from "@/lib/use-gallery";
 import { useDemo } from "@/lib/use-demo";
-import { getLang, installLangHeader, locale, setLang, startDomTranslation } from "@/lib/i18n";
+import { getLang, installLangHeader, locale, setLang, startDomTranslation, tr } from "@/lib/i18n";
 import { Bug, Languages, MessagesSquare } from "lucide-react";
 import MicButton from "./mic-button";
 import Director from "./director";
@@ -22,10 +22,12 @@ import { CheckList, CloudflareCuenta, CloudflareWizard, testCloudflare, Welcome 
 import { EVENTO_AJUSTES } from "@/lib/limpiar-dispositivo";
 import { formatBytes, storageUsage, toDataUrl } from "@/lib/media-store";
 import type { Item, Settings } from "@/lib/types";
+import type { SecuenciaParaVideo } from "./secuencia-fotos";
 import AssistantChat from "./assistant-chat";
 import { extract, phrases } from "@/lib/phrases";
 import { BotonCuenta, CUENTAS_ON, MejorarPro, ProTag, useCuenta } from "./account-context";
 import Camara from "./camara";
+import CompartirBotones from "./compartir-botones";
 import VerificarNfc from "./verificar-nfc";
 import { dataUrlReducida } from "@/lib/resize";
 
@@ -39,6 +41,11 @@ const ShapeCrop = dynamic(() => import("./shape-crop"), { ssr: false });
 const ReelProyectos = dynamic(() => import("./reel-proyectos"), {
   ssr: false,
   loading: () => <section className="card">Cargando el creador de videos…</section>,
+});
+// Secuencia de fotos (pestaña Videos)
+const SecuenciaFotos = dynamic(() => import("./secuencia-fotos"), {
+  ssr: false,
+  loading: () => <section className="card">Cargando…</section>,
 });
 const ContentCalendar = dynamic(() => import("./content-calendar"), {
   ssr: false,
@@ -139,6 +146,14 @@ export default function Home() {
   // Diapositiva editada que vuelve al carrusel
   const [slideUpdate, setSlideUpdate] = useState<{ slide: number; url: string; n: number } | null>(null);
   const [imageMode, setImageMode] = usePersistentState<"ia" | "carrusel">("imagen:modo", "ia");
+  // Pestaña Videos: el Creador de Reels o «Secuencia de fotos»
+  const [videoMode, setVideoMode] = usePersistentState<"video" | "secuencia">("video:modo", "video");
+  // Fotos de la secuencia que van al Creador de Reels con «Hacer el video con NOVA» (n cambia en cada envío)
+  const [secuenciaVideo, setSecuenciaVideo] = useState<(SecuenciaParaVideo & { n: number }) | null>(null);
+  // Lo que llega al Creador de Reels desde otra sección (o desde la secuencia) abre «Video»
+  useEffect(() => {
+    if (handoff || reelTopic || sceneUpdate || secuenciaVideo) setVideoMode("video");
+  }, [handoff, reelTopic, sceneUpdate, secuenciaVideo, setVideoMode]);
   const [ready, setReady] = useState(false);
   const { status: demo } = useDemo();
   const [welcomeDone, setWelcomeDone] = usePersistentState("bienvenida", false);
@@ -211,7 +226,7 @@ export default function Home() {
   };
   // Las secciones pesadas se montan la primera vez que se abren y después se quedan (no se pierde nada al cambiar de pestaña)
   const [abiertas, setAbiertas] = useState<string[]>([]);
-  const marca = `${tab}|${tab === "video" ? "reel" : tab === "texto" ? textMode : ""}`;
+  const marca = `${tab}|${tab === "video" ? (videoMode === "secuencia" ? "secuencia" : "reel") : tab === "texto" ? textMode : ""}`;
   useEffect(() => setAbiertas((a) => (a.includes(marca) ? a : [...a, marca])), [marca]);
   const abierta = (m: string) => abiertas.includes(m) || marca === m;
   const go = (id: Tab) => {
@@ -394,7 +409,28 @@ export default function Home() {
         )}
       </div>
       <div hidden={tab !== "video"}>
-          <div>
+        <div className="mode-switch" role="tablist">
+          <button role="tab" aria-selected={videoMode === "video"} className={videoMode === "video" ? "active" : ""} onClick={() => setVideoMode("video")}>
+            <Clapperboard size={16} aria-hidden /> Video
+          </button>
+          <button role="tab" aria-selected={videoMode === "secuencia"} className={videoMode === "secuencia" ? "active" : ""} onClick={() => setVideoMode("secuencia")}>
+            <Images size={16} aria-hidden /> Secuencia de fotos
+          </button>
+        </div>
+        <div hidden={videoMode !== "secuencia"}>
+          {abierta("video|secuencia") && (
+            <SecuenciaFotos
+              settings={settings}
+              brand={brand}
+              onImages={addToGallery}
+              onHacerVideo={(s) => {
+                setSecuenciaVideo((v) => ({ ...s, n: (v?.n || 0) + 1 }));
+                go("video");
+              }}
+            />
+          )}
+        </div>
+          <div hidden={videoMode !== "video"}>
             <MejorarPro h="reels" />
             {abierta("video|reel") && (
             <ReelProyectos
@@ -406,6 +442,7 @@ export default function Home() {
               handoff={handoff}
               sceneUpdate={sceneUpdate}
               incomingTopic={reelTopic}
+              incomingSecuencia={secuenciaVideo}
               onEditScene={(i, src) => openInEditor(src, { scene: i })}
               onOpenBrand={() => go("marca")}
             />
@@ -1192,6 +1229,13 @@ function Gallery({
   const [filter, setFilter] = useState<"todo" | "imagen" | "video">("todo");
   const [usage, setUsage] = useState<{ used: number; quota: number } | null>(null);
   const [open, setOpen] = useState<Item | null>(null);
+  // Cerrar la vista en grande cancela una subida a Drive en curso: se pregunta antes.
+  const subiendoDrive = useRef(false);
+  const cerrarVista = () => {
+    if (subiendoDrive.current && !confirm(tr("La subida a Drive sigue en curso. ¿Cancelarla?"))) return false;
+    setOpen(null);
+    return true;
+  };
 
   useEffect(() => {
     if (visible) storageUsage().then(setUsage);
@@ -1261,6 +1305,7 @@ function Gallery({
                 <a title="Descargar" href={it.url} download={`innovationtech-${it.kind}.${ext(it)}`}>
                   <Download size={17} aria-hidden />
                 </a>
+                <CompartirBotones compacto src={it.blob ?? it.url} nombre={`innovationtech-${it.kind}.${ext(it)}`} />
                 <button
                   title="Eliminar"
                   onClick={() => it.id && confirm("¿Eliminar este elemento de la galería?") && onRemove(it.id)}
@@ -1284,20 +1329,26 @@ function Gallery({
       )}
 
       {open && (
-        <div className="lightbox" onClick={() => setOpen(null)}>
+        <div className="lightbox" onClick={cerrarVista}>
           <div className="lightbox-inner" onClick={(e) => e.stopPropagation()}>
             {open.kind === "imagen" ? <img src={open.url} alt={open.prompt} /> : <video src={open.url} controls autoPlay playsInline />}
             <p className="muted">{open.prompt}</p>
             <div className="actions">
               {open.kind === "imagen" && (
-                <button className="btn small" onClick={() => (onEdit(open.url), setOpen(null))}>
+                <button className="btn small" onClick={() => cerrarVista() && onEdit(open.url)}>
                   <Pencil size={16} aria-hidden /> Editar
                 </button>
               )}
               <a className="btn ghost small" href={open.url} download={`innovationtech-${open.kind}.${ext(open)}`}>
                 <Download size={16} aria-hidden /> Descargar
               </a>
-              <button className="btn ghost small" onClick={() => setOpen(null)}>
+              <CompartirBotones
+                key={open.url}
+                src={open.blob ?? open.url}
+                nombre={`innovationtech-${open.kind}.${ext(open)}`}
+                alSubir={(activo) => (subiendoDrive.current = activo)}
+              />
+              <button className="btn ghost small" onClick={cerrarVista}>
                 Cerrar
               </button>
             </div>

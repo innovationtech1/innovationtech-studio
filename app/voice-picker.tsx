@@ -9,6 +9,8 @@ import { friendlyError } from "@/lib/errors";
 // Selector de voz: cada voz se puede escuchar antes de elegirla.
 // Las muestras se guardan en memoria para no gastar uso gratis al repetirlas.
 const samples = new Map<string, string>();
+// La misma caja de muestras, para el «Probar» del estilo de voz del reel (así no se pide dos veces)
+export const muestrasVoz = samples;
 
 export default function VoicePicker({
   value,

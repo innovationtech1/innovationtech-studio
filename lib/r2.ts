@@ -1,6 +1,7 @@
 import "server-only";
 import { createHash, createHmac } from "node:crypto";
 import { firestoreStore, type AccountStore } from "./account-store";
+import { esEntornoPrincipal } from "./colecciones";
 import { stripeModoLive } from "./stripe-server";
 import { estadoEfectivo, type Negocio, type Plan } from "./plans";
 
@@ -26,7 +27,7 @@ const hmac = (llave: Buffer | string, dato: string) => createHmac("sha256", llav
 const sha256hex = (dato: string) => createHash("sha256").update(dato, "utf8").digest("hex");
 
 export type Prefirma = {
-  metodo: "GET" | "PUT";
+  metodo: "GET" | "PUT" | "DELETE";
   host: string;
   ruta: string; // ya codificada, empieza con /
   region: string;
@@ -36,6 +37,8 @@ export type Prefirma = {
   ahora?: Date;
   // Encabezados que quedan firmados además de host (el que use el enlace debe mandarlos iguales)
   encabezados?: Record<string, string>;
+  // Datos extra de la consulta (por ejemplo, para listar una carpeta). Quedan firmados.
+  consulta?: Record<string, string>;
 };
 
 // Enlace prefirmado SigV4 (firma en la consulta, contenido sin firmar).
@@ -52,8 +55,14 @@ export function prefirmar(p: Prefirma): string {
     ["X-Amz-Date", fecha],
     ["X-Amz-Expires", String(p.segundos)],
     ["X-Amz-SignedHeaders", nombres.join(";")],
+    ...Object.entries(p.consulta ?? {}),
   ];
-  const consultaTexto = consulta.map(([k, v]) => `${codificar(k)}=${codificar(v)}`).join("&");
+  // La firma exige la consulta ordenada por nombre (ya codificado)
+  const consultaTexto = consulta
+    .map(([k, v]) => [codificar(k), codificar(v)] as const)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([k, v]) => `${k}=${v}`)
+    .join("&");
   const canonica = [
     p.metodo,
     p.ruta,
@@ -92,6 +101,74 @@ export function firmarUrl(metodo: "GET" | "PUT", llave: string, segundos: number
   });
 }
 
+// ---------- Borrar la carpeta de un negocio (al borrar su cuenta) ----------
+
+// Producción y las versiones de prueba comparten el bucket de R2. Cada versión de prueba (con su propio
+// STUDIO_COLECCION_PREFIJO) guarda todo bajo pruebas/; producción, como siempre. Las de la prueba gratis
+// siguen empezando con demo/ (la regla de R2 las borra a los 30 días): demo/pruebas/… en las de prueba.
+//   producción:  negocios/<id>/…          demo/negocios/<id>/…
+//   pruebas:     pruebas/negocios/<id>/…  demo/pruebas/negocios/<id>/…
+export const carpetaEntorno = () => (esEntornoPrincipal() ? "" : "pruebas/");
+
+// Las dos carpetas de un negocio en ESTA versión (para borrarlas con la cuenta).
+export function carpetasNegocio(negocioId: string): [string, string] {
+  const e = carpetaEntorno();
+  return [`${e}negocios/${negocioId}/`, `demo/${e}negocios/${negocioId}/`];
+}
+
+// Solo la carpeta completa de UN negocio de esta versión. Nada más amplio, nada de la otra versión.
+const carpetaNegocioValida = (prefijo: string) =>
+  new RegExp(`^(demo/)?${carpetaEntorno().replace(/\//g, "\\/")}negocios/[A-Za-z0-9_-]+/$`).test(prefijo);
+
+type OpcionesBorrar = { cfg?: ConfigR2 | null; traer?: typeof fetch; ahora?: Date };
+
+function firmarBucket(cfg: ConfigR2, metodo: "GET" | "DELETE", llave: string, consulta: Record<string, string> | undefined, ahora?: Date) {
+  return prefirmar({
+    metodo,
+    host: `${cfg.accountId}.r2.cloudflarestorage.com`,
+    ruta: `/${codificar(cfg.bucket)}${llave ? `/${llave.split("/").map(codificar).join("/")}` : ""}`,
+    region: "auto",
+    accessKeyId: cfg.accessKeyId,
+    secretAccessKey: cfg.secretAccessKey,
+    segundos: 120,
+    ahora,
+    consulta,
+  });
+}
+
+const deXml = (t: string) => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+
+// Borra todos los archivos de la carpeta de un negocio. Devuelve cuántos borró; si algo falla, lanza
+// un error (quien llama lo anota para revisarlo a mano).
+export async function borrarCarpeta(prefijo: string, opts: OpcionesBorrar = {}): Promise<number> {
+  if (!carpetaNegocioValida(prefijo)) throw new Error("Carpeta no permitida: solo se borra la carpeta de un negocio.");
+  const cfg = opts.cfg === undefined ? configR2() : opts.cfg;
+  if (!cfg) throw new Error("R2 sin configurar");
+  const traer = opts.traer ?? fetch;
+  let borrados = 0;
+  let token: string | undefined;
+  // Tope de vueltas: 200 páginas de 1,000 archivos es mucho más de lo que un negocio puede tener
+  for (let vuelta = 0; vuelta < 200; vuelta++) {
+    const consulta: Record<string, string> = { "list-type": "2", prefix: prefijo };
+    if (token) consulta["continuation-token"] = token;
+    const lista = await traer(firmarBucket(cfg, "GET", "", consulta, opts.ahora));
+    if (!lista.ok) throw new Error(`R2 no dejó listar la carpeta (${lista.status}).`);
+    const texto = await lista.text();
+    const llaves = [...texto.matchAll(/<Key>([\s\S]*?)<\/Key>/g)].map((m) => deXml(m[1]));
+    // Doble seguro: jamás se borra algo que no empiece con la carpeta pedida
+    if (llaves.some((k) => !k.startsWith(prefijo))) throw new Error("R2 devolvió archivos de otra carpeta; no se borró nada más.");
+    for (const llave of llaves) {
+      const r = await traer(firmarBucket(cfg, "DELETE", llave, undefined, opts.ahora), { method: "DELETE" });
+      if (!r.ok && r.status !== 404) throw new Error(`R2 no dejó borrar un archivo (${r.status}).`);
+      borrados++;
+    }
+    token = /<IsTruncated>true<\/IsTruncated>/.test(texto) ? /<NextContinuationToken>([\s\S]*?)<\/NextContinuationToken>/.exec(texto)?.[1] : undefined;
+    if (!token) return borrados;
+    token = deXml(token);
+  }
+  throw new Error("La carpeta tiene demasiados archivos; quedó a medias.");
+}
+
 const MAX_CLIP = 100 * 1024 * 1024;
 
 // Descarga un archivo (el clip que entrega fal.ai) y lo guarda en R2.
@@ -121,11 +198,12 @@ export const MAX_FOTO = 8 * 1024 * 1024;
 const SEGUNDOS_SUBIDA = 300;
 
 // Carpeta de las fotos de un negocio. Las de la prueba gratis van bajo demo/ (R2 las borra a los 30 días).
+// (Las de una versión de prueba van bajo pruebas/; ver carpetaEntorno.)
 export function carpetaFotos(negocioId: string, plan: Plan): string {
-  return `${plan === "prueba" ? "demo/" : ""}negocios/${negocioId}/fotos/`;
+  return `${plan === "prueba" ? "demo/" : ""}${carpetaEntorno()}negocios/${negocioId}/fotos/`;
 }
 export function llaveClip(negocioId: string, plan: Plan, trabajoId: string): string {
-  return `${plan === "prueba" ? "demo/" : ""}negocios/${negocioId}/clips/${trabajoId}.mp4`;
+  return `${plan === "prueba" ? "demo/" : ""}${carpetaEntorno()}negocios/${negocioId}/clips/${trabajoId}.mp4`;
 }
 
 export type DepsR2 = { store?: AccountStore; now?: number; cfg?: ConfigR2 | null; stripeLive?: boolean };

@@ -16,4 +16,14 @@ export type Settings = {
   videoModel: string;
 };
 
-export type Item = { id?: string; kind: "imagen" | "video"; url: string; prompt: string; date: string; external?: boolean; mime?: string };
+export type Item = {
+  id?: string;
+  kind: "imagen" | "video";
+  url: string;
+  prompt: string;
+  date: string;
+  external?: boolean;
+  mime?: string;
+  /** El archivo guardado en el aparato (para compartirlo o subirlo a Drive sin volver a leer el enlace blob:). */
+  blob?: Blob;
+};

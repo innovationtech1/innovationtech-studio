@@ -1,5 +1,5 @@
 import "server-only";
-import { firestoreStore, type AccountStore, type MovimientoPaquete, type PagoManual } from "./account-store";
+import { firestoreStore, type AccountStore, type CuentaBorrada, type MovimientoPaquete, type PagoManual } from "./account-store";
 import { esCorreoAdmin, type Falla } from "./account-api";
 import {
   estadoEfectivo,
@@ -63,7 +63,7 @@ export async function listar(
   adminEmail: string,
   emailVerified: boolean,
   deps: DepsAdmin = {},
-): Promise<{ ok: true; negocios: FilaNegocio[] } | Falla> {
+): Promise<{ ok: true; negocios: FilaNegocio[]; borradas: CuentaBorrada[] } | Falla> {
   if (!esCorreoAdmin(adminEmail, emailVerified)) return NO_ADMIN();
   const store = deps.store ?? firestoreStore();
   const ahora = deps.now ?? Date.now();
@@ -80,7 +80,8 @@ export async function listar(
       };
     }),
   );
-  return { ok: true, negocios: filas };
+  // Cuentas que sus dueños borraron: solo la anotación (sin nombre ni correo) y lo que quedó por revisar
+  return { ok: true, negocios: filas, borradas: await store.listarBorrados() };
 }
 
 export async function obtenerNegocio(

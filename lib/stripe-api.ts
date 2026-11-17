@@ -28,6 +28,7 @@ export type ClienteStripe = {
     retrieve(id: string): Promise<Stripe.Subscription>;
     list(p: Stripe.SubscriptionListParams): Promise<{ data: Stripe.Subscription[] }>;
     update(id: string, p: Stripe.SubscriptionUpdateParams): Promise<Stripe.Subscription>;
+    cancel(id: string): Promise<Stripe.Subscription>;
   };
 };
 
@@ -220,6 +221,43 @@ async function suscripcionViva(
   return { viva: null, ajeno: subFalta };
 }
 
+// Al borrar la cuenta: cancela DE INMEDIATO todo lo que todavía puede cobrarle a este negocio
+// (la suscripción viva, una segunda si la hubiera, y la sesión de pago que quedó abierta).
+// Si algo no se puede cancelar devuelve una falla: quien llama no debe borrar la cuenta.
+export async function cancelarSuscripciones(
+  negocio: Negocio,
+  deps: DepsStripe = {},
+): Promise<{ ok: true; canceladas: number } | Falla> {
+  const live = deps.stripeLive ?? stripeModoLive();
+  const n = vistaDelModo(negocio, live); // lo del otro modo (prueba vs real) no se toca
+  const s = n.stripe;
+  if (!s?.customerId && !s?.subscriptionId && !s?.checkoutPendiente) return { ok: true, canceladas: 0 };
+  const cliente = clienteDe(deps);
+  if (!cliente) return NO_CONFIGURADO();
+  let canceladas = 0;
+  try {
+    // La sesión pendiente: si sigue abierta se vence; si ya la pagaron, su suscripción se cancela abajo
+    const dePendiente = s.checkoutPendiente ? await revisarPendiente(cliente, s.checkoutPendiente) : null;
+    if (dePendiente && SUSCRIPCION_VIVA.has(dePendiente.status)) {
+      await cliente.subscriptions.cancel(dePendiente.id);
+      canceladas++;
+    }
+    // Hasta 5 vueltas: en el caso raro de dos suscripciones vivas, se cancelan todas
+    for (let k = 0; k < 5; k++) {
+      const { viva } = await suscripcionViva(cliente, n);
+      if (!viva) break;
+      await cliente.subscriptions.cancel(viva.id);
+      canceladas++;
+    }
+    const { viva } = await suscripcionViva(cliente, n);
+    if (viva) return ERROR_STRIPE();
+  } catch (e) {
+    console.error(`Stripe: no se pudo cancelar al borrar la cuenta (${mensaje(e)}).`);
+    return ERROR_STRIPE();
+  }
+  return { ok: true, canceladas };
+}
+
 // La sesión de pago que quedó pendiente (la última que abrimos para este negocio):
 //  - pagada (complete): devuelve su suscripción si sigue viva, para no abrir otra encima;
 //  - abierta (open): la vence (expire) para que no se pueda pagar junto con la nueva;
@@ -287,7 +325,7 @@ export function crearCheckout(
   email: string,
   priceId: string,
   origin: string,
-  opciones: { trialEnd?: number } = {},
+  opciones: { trialEnd?: number; impuestos?: boolean } = {},
 ) {
   const customer = negocio.stripe?.customerId;
   const correo = email.trim();
@@ -297,6 +335,7 @@ export function crearCheckout(
     line_items: [{ price: priceId, quantity: 1 }],
     client_reference_id: negocio.id,
     ...(customer ? { customer } : correo ? { customer_email: correo } : {}),
+    ...conImpuestos(opciones.impuestos === true, !!customer),
     success_url: `${origin}/?pago=ok`,
     cancel_url: `${origin}/?pago=cancelado`,
     metadata: { negocioId: negocio.id },
@@ -305,6 +344,28 @@ export function crearCheckout(
       ...(trialEnd !== undefined ? { trial_end: trialEnd } : {}),
     },
   });
+}
+
+// Impuesto sobre ventas con Stripe Tax (interruptor `impuestos` de la configuración).
+// Con un cliente ya existente, Stripe exige guardar en él la dirección que escriba en el pago.
+function conImpuestos(activo: boolean, conCliente: boolean): Partial<Stripe.Checkout.SessionCreateParams> {
+  if (!activo) return {};
+  return { automatic_tax: { enabled: true }, ...(conCliente ? { customer_update: { address: "auto" } } : {}) };
+}
+
+// El administrador enciende o apaga el cálculo de impuestos en los cobros nuevos.
+export async function ajustarImpuestos(
+  adminEmail: string,
+  emailVerified: boolean,
+  cuerpo: unknown,
+  deps: DepsStripe = {},
+): Promise<{ ok: true; activo: boolean } | Falla> {
+  if (!esCorreoAdmin(adminEmail, emailVerified)) return falla(403, "No tienes permiso para el panel de administrador.", "NO_ADMIN");
+  const activo = (cuerpo as { activo?: unknown } | null)?.activo;
+  if (typeof activo !== "boolean") return falla(400, "Indica si el cálculo de impuestos va encendido o apagado.");
+  const store = deps.store ?? firestoreStore();
+  await store.guardarConfig({ impuestos: activo });
+  return { ok: true, activo };
 }
 
 // Pagado en efectivo y vigente (sin suscripción que cobre): solo el mismo plan y sin cobrar hoy.
@@ -415,7 +476,7 @@ export async function pagarPlan(
       trialEnd = r;
     }
 
-    const sesion = await crearCheckout(cliente, negocio, email, priceId, origin, { trialEnd });
+    const sesion = await crearCheckout(cliente, negocio, email, priceId, origin, { trialEnd, impuestos: cfg.impuestos });
     if (!sesion.url) return ERROR_STRIPE();
     // Se guarda como pendiente para revisarla si vuelven a pulsar «Elegir»
     let otra: string | undefined;
@@ -489,6 +550,7 @@ export async function comprarPaquete(
       invoice_creation: { enabled: true },
       client_reference_id: negocio.id,
       ...(customer ? { customer } : correo ? { customer_email: correo } : {}),
+      ...conImpuestos(cfg.impuestos, !!customer),
       success_url: `${origin}/?paquete=ok`,
       cancel_url: `${origin}/?paquete=cancelado`,
       metadata: { negocioId: negocio.id, paquete },
