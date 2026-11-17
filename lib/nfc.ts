@@ -70,3 +70,14 @@ export const CONSULTA_GOOGLE_PAY = {
     ],
   },
 };
+
+// ¿Se muestra la tarjeta «NFC y pago sin contacto»? Solo en celulares y tabletas cuyo navegador
+// tiene NFC para páginas (hoy: Chrome en Android). En computadora y en iPhone/iPad no aparece.
+// `movil` es lo que dice el navegador (userAgentData.mobile) cuando lo dice.
+export function mostrarVerificarNfc(o: { tieneNfc: boolean; agente: string; movil?: boolean; puntosTactiles?: number }): boolean {
+  if (!o.tieneNfc) return false;
+  if (o.movil) return true;
+  if (/Android|iPhone|iPad|iPod|Mobile|Tablet/i.test(o.agente)) return true;
+  // Tabletas que se presentan como computadora: se reconocen por la pantalla táctil
+  return (o.puntosTactiles ?? 0) > 1 && /Macintosh|CrOS/i.test(o.agente);
+}
