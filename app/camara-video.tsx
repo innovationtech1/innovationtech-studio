@@ -5,6 +5,7 @@ import { Check, Circle, RotateCcw, Square, SwitchCamera, X } from "lucide-react"
 import { MAX_GRABACION, formatoGrabacion, mensajeCamara, relojGrabacion } from "@/lib/camara";
 import { usarCamara } from "./usar-camara";
 import { CamaraNoAbre, SelectorCamara } from "./camara-ayuda";
+import { CasillaGuardarCelular, guardarEnCelular, usarGuardarCelular } from "./guardar-celular";
 
 // Cámara de video dentro de Studio: graba con imagen y sonido (hasta 60 s) sin salir de la app.
 // Al terminar se puede repetir o usar; el video se entrega con onVideo.
@@ -15,6 +16,8 @@ export default function CamaraVideo({ onVideo, onCerrar }: { onVideo: (video: Bl
   const [segundos, setSegundos] = useState(0);
   const [hecho, setHecho] = useState<{ blob: Blob; url: string } | null>(null);
   const [guardando, setGuardando] = useState(false);
+  const celular = usarGuardarCelular();
+  const copiado = useRef<Blob | null>(null); // el video que ya se copió al celular (para no repetirlo)
   // La cámara con micrófono; mientras se revisa lo grabado, descansa
   const cam = usarCamara({ sonido: true, ancho: 1280, alto: 720, pausada: !!hecho });
   const { video: vista, flujo, listo: lista, error, aviso, setError } = cam;
@@ -71,6 +74,10 @@ export default function CamaraVideo({ onVideo, onCerrar }: { onVideo: (video: Bl
   async function usar() {
     if (!hecho) return;
     setGuardando(true);
+    if (celular.encendido && copiado.current !== hecho.blob) {
+      guardarEnCelular("video", hecho.blob); // copia en la memoria del celular
+      copiado.current = hecho.blob;
+    }
     try {
       await onVideo(hecho.blob);
       onCerrar();
@@ -106,6 +113,7 @@ export default function CamaraVideo({ onVideo, onCerrar }: { onVideo: (video: Bl
         {aviso && !error && <p className="hint">{aviso}</p>}
         {!error && !hecho && <SelectorCamara lista={cam.lista} activa={cam.activa} onElegir={cam.elegir} bloqueado={grabando} />}
         {!hecho && !error && <p className="hint">Graba hasta 1 minuto. Después eliges si lo usas o lo repites.</p>}
+        {!error && <CasillaGuardarCelular encendido={celular.encendido} onCambiar={celular.cambiar} bloqueado={guardando} />}
         <div className="actions camara-botones">
           {hecho ? (
             <>

@@ -28,6 +28,7 @@ import { extract, phrases } from "@/lib/phrases";
 import { BotonCuenta, CUENTAS_ON, MejorarPro, ProTag, useCuenta } from "./account-context";
 import Camara from "./camara";
 import CompartirBotones from "./compartir-botones";
+import VerificarNfc from "./verificar-nfc";
 import { dataUrlReducida } from "@/lib/resize";
 
 type Tab = "texto" | "imagen" | "editor" | "video" | "galeria" | "marca" | "config";
@@ -1572,6 +1573,7 @@ function Config({
       )}
     </section>
     )}
+    <VerificarNfc />
     <section className="card">
       <h2>Configuración avanzada</h2>
       <p className="hint">
