@@ -2,7 +2,8 @@
 // Stripe pide que los Términos y la Política de privacidad se puedan leer sin cuenta.
 // Si agregas una aquí, agrégala también en public/sw.js (LEGALES).
 
-export const RUTAS_PUBLICAS = ["/terminos", "/privacidad", "/creditos"] as const;
+// «/activar» también: la tarjeta la abre alguien que todavía no tiene cuenta.
+export const RUTAS_PUBLICAS = ["/terminos", "/privacidad", "/creditos", "/activar"] as const;
 
 export function esRutaPublica(ruta: string | null | undefined): boolean {
   if (!ruta) return false;
