@@ -1057,6 +1057,29 @@ body.acct-con-aviso .rail { top: var(--acct-espacio, var(--acct-aviso)); }
 .adm-encabezado { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .adm-encabezado h1 { margin: 0; }
 .adm-encabezado .btn { margin-top: 0; }
+.adm h2 { font: 700 18px var(--display); letter-spacing: -0.02em; margin: 0 0 10px; }
+.adm-titulo { margin-top: 22px !important; }
+.adm-tarjeta { background: var(--deck); border: 1px solid var(--line); border-radius: var(--radius-inner); padding: 16px; margin-bottom: 14px; }
+.adm-tarjeta .btn { margin-top: 0; }
+.adm-resumen { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.adm-dato { background: var(--console); border: 1px solid var(--line-soft); border-radius: var(--radius-inner); padding: 12px; display: grid; gap: 2px; min-width: 0; }
+.adm-dato strong { font: 750 22px var(--display); letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.adm-dato span { color: var(--fog); font-size: 13px; }
+.adm-bien { color: var(--go); }
+.adm-mal { color: #ff9aa6; }
+.adm-barrita { display: block; height: 6px; border-radius: 99px; background: var(--line-soft); overflow: hidden; margin-top: 6px; }
+.adm-barrita b { display: block; height: 100%; background: var(--go); border-radius: 99px; }
+.adm-vacio { color: var(--fog); font-size: 14px; margin: 0 0 12px; max-width: 70ch; }
+.adm-precios { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 6px; font-size: 15px; }
+.adm-precios em { font-style: normal; color: var(--fog); margin-left: 6px; }
+.adm-codigos { font-size: 13px; color: var(--fog); margin: 6px 0 4px; }
+.adm-codigos summary { cursor: pointer; min-height: 32px; }
+.adm-codigos ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; overflow-wrap: anywhere; }
+.adm-impuestos { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line-soft); display: grid; gap: 6px; }
+.adm-impuestos .adm-vacio { margin: 0; }
+.adm-limites { border-top: 0; padding-top: 0; margin-bottom: 12px; }
+.adm-tarjeta .adm-acciones { margin-bottom: 4px; }
+.adm-fallos { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13.5px; overflow-wrap: anywhere; }
 .adm-barra { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
 .adm-barra input { flex: 1; min-width: 160px; }
 .adm-barra p { flex-basis: 100%; margin: 0; overflow-wrap: anywhere; }
