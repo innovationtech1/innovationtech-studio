@@ -15,7 +15,7 @@ import {
   type Catalogo,
   type Estado,
 } from "./director";
-import { clipDeVideo, nuevoClip, type Clip } from "./linea-tiempo";
+import { clipDeVideo, duracionTotal, nuevoClip, type Clip } from "./linea-tiempo";
 
 const cat: Catalogo = {
   estilos: ["pop", "lofi", "cumbia"],
@@ -628,4 +628,20 @@ test("duplicar tampoco pasa del tope de clips", () => {
   const r = aplicar(e, [{ tipo: "duplicar_clip", clip: 1 }]);
   assert.equal(r.estado.clips.length, TOPE_CLIPS);
   assert.equal(r.avisos.length, 1);
+});
+
+test("«que dure 30 segundos»: con fotos ya puestas se reparte el tiempo y no se agregan clips", () => {
+  // Cuatro fotos y un clip vacío al final: el vacío no cuenta ni se llena
+  const r = aplicar(estado([foto(), foto(), foto(), foto(), nuevoClip()]), [
+    { tipo: "duracion_total", segundos: 30 },
+    { tipo: "musica", activar: true, estilo: "pop" },
+  ]);
+  assert.equal(r.estado.clips.length, 5);
+  // Cada foto se redondea a décimas de segundo, así que el total queda a menos de medio segundo de lo pedido
+  assert.ok(Math.abs(duracionTotal(r.estado.clips.slice(0, 4)) - 30) < 0.5);
+  assert.equal(r.pendientes.filter((p) => p.tipo === "imagen").length, 0);
+  // Las instrucciones del Director lo piden así
+  const { system } = instr();
+  assert.match(system, /usa SOLO "duracion_total"/);
+  assert.match(system, /"que dure 30 segundos con música alegre"/);
 });
