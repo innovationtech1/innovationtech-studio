@@ -275,6 +275,7 @@ Entra a Netlify → proyecto **innovationtech-studio** → *Project configuratio
 | `VIDEO_IA` | Opcional. `off` apaga al instante las tomas con IA (los reels con animación siguen funcionando) |
 | `VIDEO_IA_TOPE_CENTAVOS` | Opcional. Tope de gasto del día en fal.ai para esa publicación, en centavos (`200` = $2); si está, manda sobre el tope del panel. Útil para que la versión de prueba gaste menos |
 | `STUDIO_COLECCION_PREFIJO` | Opcional. Inicio del nombre de las colecciones de Firestore (`studio_` si no la pones). Solo para las versiones de prueba: `prueba_studio_` (ver Paso 4). Solo letras, números, `_` y `-`: con otro carácter las cuentas de esa publicación no funcionan (a propósito, para no tocar los datos del sitio principal) |
+| `ANDROID_PACKAGE`, `ANDROID_SHA256` | Opcional. Para la app de Google Play: nombre del paquete de Android y la huella SHA-256 de su firma. Con las dos, el sitio publica `/.well-known/assetlinks.json`. Ver [docs/google-play.md](docs/google-play.md) |
 | `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | Opcional. ID de cliente de Google para «Guardar en Drive» (es público; ver «Guardar en Google Drive»). Sin él, el botón no aparece |
 
 Netlify bloquea la publicación si encuentra en el código un valor igual a una variable. Como las variables no secretas sí aparecen en el sitio, agrega una variable más:
