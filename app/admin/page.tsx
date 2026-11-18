@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { CUENTAS_ON, useCuenta } from "../account-context";
 import type { FilaNegocio } from "@/lib/admin-api";
 import type { MovimientoPaquete, PagoManual } from "@/lib/account-store";
+import { resumenNegocios } from "@/lib/admin-resumen";
 import { DEFAULT_CONFIG, diaChicago, type Contador, type Negocio, type PaqueteId, type Saldo } from "@/lib/plans";
 
 // Panel mínimo del administrador: activar planes pagados a mano, pausar y reactivar negocios.
@@ -123,6 +124,19 @@ function Lista() {
         <h1>Panel de administrador</h1>
         <a className="btn small ghost" href="/">← Volver a Studio</a>
       </div>
+      {filas && <Resumen filas={filas} />}
+
+      <section className="adm-tarjeta">
+        <h2>Cobros con Stripe</h2>
+        <PrepararStripe />
+      </section>
+
+      <section className="adm-tarjeta">
+        <h2>Video con IA</h2>
+        <ResumenVideo />
+      </section>
+
+      <h2 className="adm-titulo">Negocios</h2>
       <div className="adm-barra">
         <input
           type="search"
@@ -132,12 +146,13 @@ function Lista() {
           aria-label="Buscar negocio"
         />
         <button className="btn small ghost" onClick={() => void cargar()}>Actualizar</button>
-        <PrepararStripe />
-        <ResumenVideo />
       </div>
       {error && <p className="adm-error" role="alert">{error}</p>}
       {!filas && !error && <p>Cargando negocios…</p>}
-      {filas && visibles.length === 0 && <p>No hay negocios que mostrar.</p>}
+      {filas && filas.length === 0 && (
+        <p className="adm-vacio">Todavía no hay negocios. Cuando un cliente se registre, aparecerá aquí con su plan y su uso.</p>
+      )}
+      {filas && filas.length > 0 && visibles.length === 0 && <p className="adm-vacio">Ningún negocio coincide con la búsqueda.</p>}
 
       {visibles.length > 0 && (
         <>
@@ -180,6 +195,28 @@ function Lista() {
         </details>
       )}
     </main>
+  );
+}
+
+// Los números de arriba: cuántos negocios hay y cuánto entra al mes
+function Resumen({ filas }: { filas: FilaNegocio[] }) {
+  const r = resumenNegocios(filas, PRECIOS);
+  const datos: [string, string][] = [
+    ["Negocios", String(r.total)],
+    ["Activos", String(r.activos)],
+    ["En prueba", String(r.prueba)],
+    ["En pausa o sin plan", String(r.pausados)],
+    ["Ingreso al mes", `$${r.ingresoMensual}`],
+  ];
+  return (
+    <div className="adm-resumen">
+      {datos.map(([rotulo, valor]) => (
+        <div key={rotulo} className="adm-dato">
+          <strong data-no-translate>{valor}</strong>
+          <span>{rotulo}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -231,38 +268,67 @@ function ResumenVideo() {
     setDatos((d) => (d ? { ...d, topeCentavos: Number(r.datos.topeCentavos), tomasPorNegocioDia: Number(r.datos.tomasPorNegocioDia) } : d));
   }
   const dolares = (c: number) => `$${(c / 100).toFixed(2)}`;
+  // Al abrir el panel se lee el estado, sin tener que tocar nada
+  useEffect(() => {
+    void ver();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const gastado = datos && datos.topeCentavos > 0 ? Math.min(100, Math.round((datos.gastoHoyCentavos / datos.topeCentavos) * 100)) : 0;
 
   return (
     <>
-      <button className="btn ghost small" disabled={ocupado} onClick={() => void ver()}>
-        {ocupado ? "Leyendo…" : "Video con IA: ver estado"}
-      </button>
       {error && <p className="adm-error" role="status">{error}</p>}
+      {!datos && !error && <p className="adm-vacio">Leyendo el estado…</p>}
       {datos && (
-        <div className="adm-ok" role="status">
-          <p>
-            {datos.encendido ? "Encendido" : "En pausa (falta configuración o VIDEO_IA=off)"} · Gasto de hoy:{" "}
-            {dolares(datos.gastoHoyCentavos)} de {dolares(datos.topeCentavos)} · Generando: {datos.enProceso} · En fila: {datos.enFila}
-          </p>
-          <p>
+        <div role="status">
+          <div className="adm-resumen">
+            <div className="adm-dato">
+              <strong className={datos.encendido ? "adm-bien" : "adm-mal"}>{datos.encendido ? "Encendido" : "En pausa"}</strong>
+              <span>Estado</span>
+            </div>
+            <div className="adm-dato">
+              <strong data-no-translate>{dolares(datos.gastoHoyCentavos)}</strong>
+              <span>
+                Gasto de hoy, de <span data-no-translate>{dolares(datos.topeCentavos)}</span>
+              </span>
+              <i className="adm-barrita" aria-hidden>
+                <b style={{ width: `${gastado}%` }} />
+              </i>
+            </div>
+            <div className="adm-dato">
+              <strong data-no-translate>{datos.enProceso}</strong>
+              <span>Generando</span>
+            </div>
+            <div className="adm-dato">
+              <strong data-no-translate>{datos.enFila}</strong>
+              <span>En fila</span>
+            </div>
+          </div>
+          {!datos.encendido && <p className="adm-vacio">En pausa: falta configuración o VIDEO_IA=off.</p>}
+          <div className="adm-form adm-limites">
             <label>
-              Gasto máximo por día (USD){" "}
-              <input type="number" min={1} max={1000} step={1} value={tope} onChange={(e) => setTope(e.target.value)} style={{ width: 90 }} />
-            </label>{" "}
+              Gasto máximo por día (USD)
+              <input type="number" min={1} max={1000} step={1} value={tope} onChange={(e) => setTope(e.target.value)} />
+            </label>
             <label>
-              Tomas por cliente al día{" "}
-              <input type="number" min={1} max={500} step={1} value={porCliente} onChange={(e) => setPorCliente(e.target.value)} style={{ width: 70 }} />
-            </label>{" "}
-            <button className="btn ghost small" disabled={ocupado} onClick={() => void guardarLimites()}>
+              Tomas por cliente al día
+              <input type="number" min={1} max={500} step={1} value={porCliente} onChange={(e) => setPorCliente(e.target.value)} />
+            </label>
+          </div>
+          <div className="adm-acciones">
+            <button className="btn small" disabled={ocupado} onClick={() => void guardarLimites()}>
               Guardar límites
-            </button>{" "}
-            {guardado}
-          </p>
-          {datos.topeDeEntorno && <p>Este sitio usa VIDEO_IA_TOPE_CENTAVOS: el tope que manda es el de esa variable de Netlify, no el de aquí.</p>}
+            </button>
+            <button className="btn ghost small" disabled={ocupado} onClick={() => void ver()}>
+              {ocupado ? "Leyendo…" : "Actualizar estado"}
+            </button>
+          </div>
+          {guardado && <p className="adm-ok">{guardado}</p>}
+          {datos.topeDeEntorno && <p className="adm-vacio">Este sitio usa VIDEO_IA_TOPE_CENTAVOS: el tope que manda es el de esa variable de Netlify, no el de aquí.</p>}
           {datos.fallos.length === 0 ? (
-            <p>Sin fallos en los últimos 7 días.</p>
+            <p className="adm-ok">Sin fallos en los últimos 7 días.</p>
           ) : (
-            <ul>
+            <ul className="adm-fallos">
               {datos.fallos.map((f, i) => (
                 <li key={i} data-no-translate>
                   {new Date(f.fecha).toLocaleString("es-MX", { timeZone: "America/Chicago", dateStyle: "short", timeStyle: "short" })} · {f.negocio} · {f.motivo}
@@ -280,6 +346,8 @@ function ResumenVideo() {
 function PrepararStripe() {
   const [ocupado, setOcupado] = useState(false);
   const [resultado, setResultado] = useState<{ ok: boolean; texto: string } | null>(null);
+  // Lo que quedó creado en Stripe: nombre, precio y su código
+  const [creados, setCreados] = useState<{ nombre: string; precio: string; id: string }[] | null>(null);
 
   async function preparar() {
     setOcupado(true);
@@ -289,8 +357,19 @@ function PrepararStripe() {
     const precios = r.datos.precios as { basico?: string; pro?: string } | undefined;
     const paquetes = r.datos.paquetes as { creativo?: string; voz?: string; video?: string } | undefined;
     if (r.ok && precios) {
-      setResultado({ ok: true, texto: `Stripe listo. Básico: ${precios.basico} · Pro: ${precios.pro}${paquetes ? ` · Creativo: ${paquetes.creativo} · Voz: ${paquetes.voz} · Video: ${paquetes.video}` : ""}` });
+      const cfg = DEFAULT_CONFIG;
+      setCreados(
+        [
+          { nombre: "Plan Básico", precio: `$${cfg.precios.basico.monto} al mes`, id: precios.basico },
+          { nombre: "Plan Pro", precio: `$${cfg.precios.pro.monto} al mes`, id: precios.pro },
+          { nombre: "Paquete Creativo", precio: `$${cfg.paquetes.creativo.monto}`, id: paquetes?.creativo },
+          { nombre: "Paquete Voz", precio: `$${cfg.paquetes.voz.monto}`, id: paquetes?.voz },
+          { nombre: "Paquete Video", precio: `$${cfg.paquetes.video.monto}`, id: paquetes?.video },
+        ].filter((c): c is { nombre: string; precio: string; id: string } => !!c.id),
+      );
+      setResultado({ ok: true, texto: "Stripe listo: planes y paquetes creados." });
     } else {
+      setCreados(null);
       setResultado({ ok: false, texto: String(r.datos.error ?? "No se pudo preparar Stripe.") });
     }
   }
@@ -311,19 +390,46 @@ function PrepararStripe() {
 
   return (
     <>
-      <button className="btn small" disabled={ocupado} onClick={() => void preparar()}>
-        {ocupado ? "Preparando…" : "Preparar Stripe"}
-      </button>
-      {impuestos !== null && (
-        <label className="check" style={{ margin: 0 }}>
-          <input type="checkbox" checked={impuestos} disabled={ocupado} onChange={(e) => void cambiarImpuestos(e.target.checked)} />
-          Cobrar impuesto sobre ventas (Stripe Tax)
-        </label>
-      )}
+      <p className="adm-vacio">Crea en tu cuenta de Stripe los planes y los paquetes de Studio. Puedes tocarlo otra vez cuando quieras: no duplica nada.</p>
+      <div className="adm-acciones">
+        <button className="btn small" disabled={ocupado} onClick={() => void preparar()}>
+          {ocupado ? "Preparando…" : "Preparar Stripe"}
+        </button>
+      </div>
       {resultado && (
-        <p className={resultado.ok ? "adm-ok" : "adm-error"} role="status" data-no-translate>
+        <p className={resultado.ok ? "adm-ok" : "adm-error"} role="status">
           {resultado.texto}
         </p>
+      )}
+      {creados && (
+        <>
+          <ul className="adm-precios">
+            {creados.map((c) => (
+              <li key={c.id}>
+                <span className="adm-bien" aria-hidden>✓</span> {c.nombre} <em data-no-translate>{c.precio}</em>
+              </li>
+            ))}
+          </ul>
+          <details className="adm-codigos">
+            <summary>Ver códigos de Stripe</summary>
+            <ul>
+              {creados.map((c) => (
+                <li key={c.id}>
+                  {c.nombre}: <span data-no-translate>{c.id}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        </>
+      )}
+      {impuestos !== null && (
+        <div className="adm-impuestos">
+          <label className="check" style={{ margin: 0 }}>
+            <input type="checkbox" checked={impuestos} disabled={ocupado} onChange={(e) => void cambiarImpuestos(e.target.checked)} />
+            Cobrar impuesto sobre ventas (Stripe Tax)
+          </label>
+          <p className="adm-vacio">Déjalo apagado hasta tener tu permiso de impuestos y Stripe Tax configurado.</p>
+        </div>
       )}
     </>
   );
