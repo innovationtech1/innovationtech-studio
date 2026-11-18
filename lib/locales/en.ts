@@ -1255,6 +1255,8 @@ export const EN: Record<string, string> = {
   "2. Paga con Cash App": "2. Pay with Cash App",
   "Paga el plan que viene con tu tarjeta. Si ya pagaste, pasa al paso 3.": "Pay for the plan that comes with your card. If you already paid, go to step 3.",
   "Pagar con Cash App": "Pay with Cash App",
+  "Se paga a": "Paid to",
+  "(InnovationTECH).": "(InnovationTECH).",
   "El pago con Cash App se acuerda por WhatsApp con InnovationTECH en el paso 3.": "Payment with Cash App is arranged over WhatsApp with InnovationTECH in step 3.",
   "3. Pide tu activación": "3. Request your activation",
   "Envía tu código a InnovationTECH por WhatsApp. Activamos tu cuenta al confirmar tu pago.": "Send your code to InnovationTECH over WhatsApp. We activate your account once your payment is confirmed.",

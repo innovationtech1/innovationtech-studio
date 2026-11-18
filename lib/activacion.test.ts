@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { codigoDe, codigoValido, enlaceActivacion, enlaceCashApp, enlaceWhatsAppActivacion, limpiarCodigo, mostrarCodigo } from "./activacion";
+import { CASHTAG_INNOVATIONTECH, codigoDe, codigoValido, enlaceActivacion, enlaceCashApp, enlaceWhatsAppActivacion, limpiarCodigo, mostrarCodigo } from "./activacion";
 
 test("limpiarCodigo y mostrarCodigo: sin guiones para guardar, con guion para leer", () => {
   assert.equal(limpiarCodigo(" abcd-2345 "), "ABCD2345");
@@ -37,6 +37,7 @@ test("enlaceCashApp: solo con un cashtag bien escrito", () => {
   assert.equal(enlaceCashApp(undefined), null);
   assert.equal(enlaceCashApp(""), null);
   assert.equal(enlaceCashApp("mal escrito/"), null);
+  assert.equal(enlaceCashApp(CASHTAG_INNOVATIONTECH), "https://cash.app/$lilhector210");
 });
 
 test("enlaceWhatsAppActivacion: abre WhatsApp con el código ya escrito", () => {

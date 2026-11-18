@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CircleCheck, Keyboard, Nfc, QrCode, X } from "lucide-react";
 import { startDomTranslation } from "@/lib/i18n";
-import { LARGO_CODIGO, codigoDe, enlaceCashApp, enlaceWhatsAppActivacion, limpiarCodigo, mostrarCodigo } from "@/lib/activacion";
+import { CASHTAG_INNOVATIONTECH, LARGO_CODIGO, codigoDe, enlaceCashApp, enlaceWhatsAppActivacion, limpiarCodigo, mostrarCodigo } from "@/lib/activacion";
 import { revisionNfc } from "@/lib/nfc";
 import { usarCamara } from "../usar-camara";
 import { CamaraNoAbre } from "../camara-ayuda";
@@ -16,7 +16,8 @@ type LectorNfc = {
 };
 type DetectorQr = { detect: (v: HTMLVideoElement) => Promise<{ rawValue: string }[]> };
 
-const CASH_APP = enlaceCashApp(process.env.NEXT_PUBLIC_CASHAPP_TAG);
+const CASHTAG = process.env.NEXT_PUBLIC_CASHAPP_TAG || CASHTAG_INNOVATIONTECH;
+const CASH_APP = enlaceCashApp(CASHTAG);
 
 // Lo que trae cada registro del chip (enlace o texto)
 function textoDe(r: RegistroNfc): string {
@@ -222,9 +223,14 @@ export default function ActivarTarjeta() {
         <h2>2. Paga con Cash App</h2>
         <p className="hint">Paga el plan que viene con tu tarjeta. Si ya pagaste, pasa al paso 3.</p>
         {CASH_APP ? (
-          <a className="btn" href={CASH_APP} target="_blank" rel="noreferrer">
-            Pagar con Cash App
-          </a>
+          <>
+            <a className="btn" href={CASH_APP} target="_blank" rel="noreferrer">
+              Pagar con Cash App
+            </a>
+            <p className="hint activar-cashtag">
+              Se paga a <strong data-no-translate>${CASHTAG.replace(/^\$/, "")}</strong> (InnovationTECH).
+            </p>
+          </>
         ) : (
           <p className="hint">El pago con Cash App se acuerda por WhatsApp con InnovationTECH en el paso 3.</p>
         )}

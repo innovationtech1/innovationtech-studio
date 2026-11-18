@@ -44,6 +44,10 @@ export function enlaceActivacion(sitio: string, codigo: string): string {
   return `${sitio.replace(/\/+$/, "")}/activar?c=${limpiarCodigo(codigo)}`;
 }
 
+// El $cashtag de Cash App de InnovationTECH (dato público: es el que se le da al cliente para pagar).
+// La variable NEXT_PUBLIC_CASHAPP_TAG, si está puesta, manda sobre este.
+export const CASHTAG_INNOVATIONTECH = "$lilhector210";
+
 // Enlace para pagar por Cash App a un $cashtag. null = el cashtag no está configurado o está mal escrito.
 export function enlaceCashApp(cashtag: string | undefined): string | null {
   const tag = (cashtag ?? "").trim().replace(/^\$/, "");
