@@ -98,7 +98,7 @@ export function MejorarPro({ h, soloPro }: { h: Herramienta; soloPro?: boolean }
       <span>
         <span className="acct-pro">Pro</span> Esta herramienta es del plan Pro.
       </span>
-      <button className="btn small" onClick={abrirPlanes}>
+      <button className="btn small solo-web" onClick={abrirPlanes}>
         Mejorar a Pro
       </button>
     </div>

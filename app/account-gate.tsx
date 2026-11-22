@@ -333,7 +333,7 @@ export default function AccountGate({ children }: { children: React.ReactNode })
           (demoVisible ? (
             <div className="acct-upsell">
               <span>Tu prueba gratis terminó. Descarga tu video y elige un plan para seguir creando.</span>
-              <button className="btn small" onClick={() => marcarDemoALaVista(false)}>
+              <button className="btn small solo-web" onClick={() => marcarDemoALaVista(false)}>
                 Ver planes
               </button>
             </div>
@@ -371,12 +371,12 @@ export default function AccountGate({ children }: { children: React.ReactNode })
         <div className="acct-toast" role="status">
           <span>{aviso.texto}</span>
           {aviso.pro && conNegocio?.esDueno && (
-            <button className="btn small" onClick={() => (setAviso(null), setModal("planes"))}>
+            <button className="btn small solo-web" onClick={() => (setAviso(null), setModal("planes"))}>
               Mejorar a Pro
             </button>
           )}
           {aviso.paquetes && conNegocio?.esDueno && (
-            <button className="btn small" onClick={() => (setAviso(null), setModal("cuenta"))}>
+            <button className="btn small solo-web" onClick={() => (setAviso(null), setModal("cuenta"))}>
               Ver paquetes
             </button>
           )}

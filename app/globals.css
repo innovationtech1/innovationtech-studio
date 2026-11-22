@@ -1150,3 +1150,7 @@ body.acct-con-aviso .rail { top: var(--acct-espacio, var(--acct-aviso)); }
 .activar-codigo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 17px; color: var(--go); }
 .activar-codigo strong { font-size: 22px; letter-spacing: 0.08em; color: var(--paper); }
 .activar .activar-cashtag { margin: 12px 0 0; }
+/* App de Google Play «solo para usar» (lib/app-play.ts): sin precios, compras ni instrucciones de pago */
+html[data-app-play="1"] .solo-web { display: none !important; }
+.solo-play { display: none; }
+html[data-app-play="1"] .solo-play { display: block; }

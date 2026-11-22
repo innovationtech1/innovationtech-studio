@@ -1628,6 +1628,7 @@ export const EN: Record<string, string> = {
   "Ya no te quedan voces en off este mes.": "You have no voice-overs left this month.",
   "Volver al video anterior": "Go back to the previous video",
   "La foto se creó, pero no se pudo guardar en este dispositivo: si recargas la página se perderá. Descárgala o libera espacio.": "The photo was created, but it couldn't be saved on this device: if you reload the page it will be lost. Download it or free up space.",
+  "Desde esta app no se contratan ni se cambian planes. Aquí usas lo que tu plan ya incluye.": "Plans can't be purchased or changed from this app. Here you use what your plan already includes.",
 };
 
 // Textos con números u otras partes que cambian

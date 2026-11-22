@@ -150,10 +150,16 @@ export function ErrorCarga({ mensaje, onReintentar, onSalir }: { mensaje: string
   );
 }
 
+// Solo se ve cuando Studio está abierta desde la app de Google Play (lib/app-play.ts): ahí no hay precios,
+// compras ni instrucciones de pago; la persona usa lo que ya tiene.
+export function SoloPlay() {
+  return <p className="muted solo-play">Desde esta app no se contratan ni se cambian planes. Aquí usas lo que tu plan ya incluye.</p>;
+}
+
 // Pago en efectivo, Zelle o Cash App: InnovationTECH activa la cuenta a mano
 export function PagoManual() {
   return (
-    <div className="acct-manual">
+    <div className="acct-manual solo-web">
       <p>¿Pagas en efectivo, Zelle o Cash App? Escríbenos e InnovationTECH activará tu cuenta al confirmar tu pago.</p>
       <div className="acct-contacto">
         <a className="btn ghost small" href={`mailto:${CORREO}`}>
@@ -492,8 +498,9 @@ export function ElegirPlan({
             </button>
           )}
           <h2>{titulo}</h2>
-          <p className="muted acct-pitch">{texto}</p>
-          <div className="acct-planes">
+          <p className="muted acct-pitch solo-web">{texto}</p>
+          <SoloPlay />
+          <div className="acct-planes solo-web">
             <PlanCard nombre="Básico" precio={precios.basico} incluye={INCLUYE_BASICO}>
               <button className="btn ghost acct-ancho" disabled={!!ocupado} onClick={() => elegir("basico")}>
                 {ocupado === "basico" ? "Abriendo…" : "Elegir Básico"}
@@ -578,7 +585,8 @@ export function PagoPendiente({ onCerrar, mensaje = SIN_TARJETA }: { onCerrar: (
           <X size={20} aria-hidden />
         </button>
         <h2>Reactiva tu cuenta</h2>
-        <p className="muted">{mensaje}</p>
+        <p className="muted solo-web">{mensaje}</p>
+        <SoloPlay />
         <PagoManual />
       </div>
     </div>
@@ -884,7 +892,8 @@ export function MiCuenta({
             Se reinicia el <span data-no-translate>{fechaReinicio.format(cuenta.reinicio)}</span>
           </p>
 
-          <div className="acct-acciones">
+          <SoloPlay />
+          <div className="acct-acciones solo-web">
             {efectivo.plan !== "pro" && (
               <button className="btn small" onClick={onPlanes}>
                 {efectivo.plan === "basico" ? "Mejorar a Pro" : "Elegir plan"}
@@ -903,13 +912,13 @@ export function MiCuenta({
           </div>
           {manual && (
             <>
-              <div className="notice">{manual}</div>
+              <div className="notice solo-web">{manual}</div>
               <PagoManual />
             </>
           )}
 
           {cuenta.esDueno && cuenta.paquetes.length > 0 && (
-            <>
+            <div className="solo-web">
               <h3 className="acct-sub">Paquetes extra</h3>
               <p className="muted">Se pagan una sola vez y no vencen. Se usan cuando se acaba lo incluido en el mes.</p>
               <div className="acct-acciones col acct-paquetes">
@@ -920,7 +929,7 @@ export function MiCuenta({
                 ))}
               </div>
               {errorPaquete && <div className="error">{errorPaquete}</div>}
-            </>
+            </div>
           )}
 
           <CloudflareCuenta
