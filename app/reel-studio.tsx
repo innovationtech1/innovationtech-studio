@@ -1577,7 +1577,7 @@ export default function ReelStudio({
       {faseNova === "guion" && !puedeVoz && (
         <div className="acct-upsell">
           <span>Tu plan no incluye voz en off. El guion quedó listo en «Sonido»: puedes leerlo tú o mejorar tu plan.</span>
-          <button className="btn small" onClick={abrirPlanes}>
+          <button className="btn small solo-web" onClick={abrirPlanes}>
             Ver planes
           </button>
         </div>
@@ -2284,7 +2284,7 @@ Si la voz dura más que el video, te avisamos en el paso 2 para alargar las foto
         {!busy && invitarPlan && (
           <div className="acct-upsell">
             <span>Elige un plan para seguir creando videos con IA</span>
-            <button className="btn small" onClick={abrirPlanes}>
+            <button className="btn small solo-web" onClick={abrirPlanes}>
               Ver planes
             </button>
           </div>

@@ -31,9 +31,10 @@ inscribirse, reportar las ventas y **pagarle a Google una comisión** (alrededor
 según lo publicado en 2026; confirma la cifra vigente). Dos caminos:
 
 - **A. Vender dentro de la app de Play** con Stripe, inscrito en el programa de Google y pagando su comisión.
-- **B. App «solo para usar»:** la app de Play no muestra precios ni botones de compra; el cliente contrata
-  en el sitio web o contigo (Cash App, efectivo) y en la app solo inicia sesión. Requiere un cambio en
-  Studio para ocultar las compras cuando se abre desde la app de Play.
+- **B. App «solo para usar» (la elegida, ya programada):** la app de Play no muestra precios, botones de
+  compra ni instrucciones de pago; el cliente contrata en el sitio web o contigo (Cash App, efectivo) y en
+  la app solo inicia sesión. Studio lo hace sola cuando se abre desde la app de Play (`lib/app-play.ts`):
+  para eso el paquete debe abrir la dirección `/?app=play` (paso 2).
 
 Esta decisión cambia cuánto ganas por cliente: tómala antes de publicar y, si puedes, con tu contador.
 
@@ -48,9 +49,11 @@ Esta decisión cambia cuánto ganas por cliente: tómala antes de publicar y, si
 
 1. Abre https://www.pwabuilder.com y escribe `https://innovationtech-studio.netlify.app`.
 2. Elige **Package for stores → Android**.
-3. Anota el **Package ID** que propone (por ejemplo `app.netlify.innovationtech_studio.twa`) o escribe uno
+3. Abre las opciones del paquete y en **Start URL** escribe `/?app=play`. Es lo que le dice a Studio que
+   está dentro de la app de Play y debe ocultar las compras. **No lo omitas.**
+4. Anota el **Package ID** que propone (por ejemplo `app.netlify.innovationtech_studio.twa`) o escribe uno
    propio. No se puede cambiar después de publicar.
-4. Descarga el archivo. Trae el `.aab` (lo que se sube a Google) y un archivo de firma con sus contraseñas:
+5. Descarga el archivo. Trae el `.aab` (lo que se sube a Google) y un archivo de firma con sus contraseñas:
    **guárdalo en un lugar seguro**; sin él no podrás publicar actualizaciones del paquete.
 
 ### Paso 3. Crear la app en la Play Console y subir el paquete

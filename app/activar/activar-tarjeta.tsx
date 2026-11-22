@@ -219,7 +219,7 @@ export default function ActivarTarjeta() {
         {aviso && <div className="error">{aviso}</div>}
       </section>
 
-      <section className="card">
+      <section className="card solo-web">
         <h2>2. Paga con Cash App</h2>
         <p className="hint">Paga el plan que viene con tu tarjeta. Si ya pagaste, pasa al paso 3.</p>
         {CASH_APP ? (
