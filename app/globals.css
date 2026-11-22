@@ -1138,3 +1138,19 @@ body.acct-con-aviso .rail { top: var(--acct-espacio, var(--acct-aviso)); }
   .sec-opciones { grid-template-columns: 1fr 1fr; }
   .sec-lista { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
 }
+
+/* Activar con tarjeta */
+.activar .card { margin-top: 18px; }
+.activar .card h2 { margin-top: 0; }
+.activar-opciones { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.activar-opciones .btn, .activar-escribir .btn { margin-top: 0; min-height: 48px; }
+.activar-escribir { display: flex; gap: 10px; flex-wrap: wrap; align-items: stretch; }
+.activar-escribir input { flex: 1 1 160px; margin: 0; min-height: 48px; font-size: 18px; letter-spacing: 0.08em; text-transform: uppercase; }
+.activar label { display: flex; align-items: center; gap: 6px; }
+.activar-codigo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 17px; color: var(--go); }
+.activar-codigo strong { font-size: 22px; letter-spacing: 0.08em; color: var(--paper); }
+.activar .activar-cashtag { margin: 12px 0 0; }
+/* App de Google Play «solo para usar» (lib/app-play.ts): sin precios, compras ni instrucciones de pago */
+html[data-app-play="1"] .solo-web { display: none !important; }
+.solo-play { display: none; }
+html[data-app-play="1"] .solo-play { display: block; }

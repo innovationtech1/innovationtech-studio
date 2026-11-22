@@ -80,7 +80,7 @@ export function PausaBanner({ onPagar, ocupado }: { onPagar: () => void; ocupado
       <span>
         <CirclePause size={16} aria-hidden /> <strong>Tu cuenta está en pausa.</strong>
       </span>
-      <button className="btn small" onClick={onPagar} disabled={ocupado}>
+      <button className="btn small solo-web" onClick={onPagar} disabled={ocupado}>
         Pagar para reactivar
       </button>
     </div>
