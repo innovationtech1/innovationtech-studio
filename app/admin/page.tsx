@@ -6,6 +6,7 @@ import type { FilaNegocio } from "@/lib/admin-api";
 import type { MovimientoPaquete, PagoManual } from "@/lib/account-store";
 import { resumenNegocios } from "@/lib/admin-resumen";
 import { DEFAULT_CONFIG, diaChicago, type Contador, type Negocio, type PaqueteId, type Saldo } from "@/lib/plans";
+import { DIAS_PRUEBA } from "@/lib/prueba-gratis";
 
 // Panel mínimo del administrador: activar planes pagados a mano, pausar y reactivar negocios.
 // El permiso se vuelve a revisar en el servidor en cada /api/admin/*; aquí solo se oculta la pantalla.
@@ -131,6 +132,10 @@ function Lista() {
         <PrepararStripe />
       </section>
 
+      <section className="adm-tarjeta">
+        <h2>Prueba gratis</h2>
+        <PruebaGratis />
+      </section>
       <section className="adm-tarjeta">
         <h2>Video con IA</h2>
         <ResumenVideo />
@@ -430,6 +435,50 @@ function PrepararStripe() {
           </label>
           <p className="adm-vacio">Déjalo apagado hasta tener tu permiso de impuestos y Stripe Tax configurado.</p>
         </div>
+      )}
+    </>
+  );
+}
+
+// Cuánto dura la prueba gratis de una cuenta nueva: 7, 15 o 30 días (lib/prueba-gratis.ts)
+function PruebaGratis() {
+  const [dias, setDias] = useState<number | null | undefined>(undefined);
+  const [ocupado, setOcupado] = useState(false);
+  const [resultado, setResultado] = useState<{ ok: boolean; texto: string } | null>(null);
+  useEffect(() => {
+    void pedir("/api/admin/prueba", { cache: "no-store" }).then((r) => r.ok && setDias(typeof r.datos.dias === "number" ? r.datos.dias : null));
+  }, []);
+  async function cambiar(nuevo: number) {
+    setOcupado(true);
+    setResultado(null);
+    const r = await pedir("/api/admin/prueba", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dias: nuevo }) });
+    setOcupado(false);
+    if (r.ok && typeof r.datos.dias === "number") {
+      setDias(r.datos.dias);
+      setResultado({ ok: true, texto: `Listo: las cuentas nuevas tendrán ${r.datos.dias} días de prueba.` });
+    } else setResultado({ ok: false, texto: String(r.datos.error ?? "No se pudo cambiar la duración de la prueba.") });
+  }
+  if (dias === undefined) return null;
+  return (
+    <>
+      <p className="adm-vacio">
+        Cuánto tiempo puede usar Studio una cuenta nueva antes de necesitar un plan. Solo cambia para las cuentas que se creen desde ahora.
+      </p>
+      <label className="adm-prueba">
+        Duración de la prueba gratis
+        <select value={dias ?? ""} disabled={ocupado} onChange={(e) => void cambiar(Number(e.target.value))}>
+          {dias === null && <option value="">Sin elegir (hoy dura unos minutos)</option>}
+          {DIAS_PRUEBA.map((d) => (
+            <option key={d} value={d}>
+              {d} días
+            </option>
+          ))}
+        </select>
+      </label>
+      {resultado && (
+        <p className={resultado.ok ? "adm-ok" : "adm-error"} role="status">
+          {resultado.texto}
+        </p>
       )}
     </>
   );

@@ -1629,6 +1629,13 @@ export const EN: Record<string, string> = {
   "Volver al video anterior": "Go back to the previous video",
   "La foto se creó, pero no se pudo guardar en este dispositivo: si recargas la página se perderá. Descárgala o libera espacio.": "The photo was created, but it couldn't be saved on this device: if you reload the page it will be lost. Download it or free up space.",
   "Desde esta app no se contratan ni se cambian planes. Aquí usas lo que tu plan ya incluye.": "Plans can't be purchased or changed from this app. Here you use what your plan already includes.",
+  "Tu prueba terminó": "Your trial ended",
+  "Esta cuenta no tiene un plan activo. Desde esta app no se contratan ni se cambian planes.": "This account doesn't have an active plan. Plans can't be purchased or changed from this app.",
+  "Prueba gratis": "Free trial",
+  "Cuánto tiempo puede usar Studio una cuenta nueva antes de necesitar un plan. Solo cambia para las cuentas que se creen desde ahora.": "How long a new account can use Studio before it needs a plan. It only changes for accounts created from now on.",
+  "Duración de la prueba gratis": "Free trial length",
+  "Sin elegir (hoy dura unos minutos)": "Not set (it lasts a few minutes today)",
+  "No se pudo cambiar la duración de la prueba.": "The trial length could not be changed.",
 };
 
 // Textos con números u otras partes que cambian
@@ -1771,4 +1778,7 @@ export const EN_PATTERNS: [RegExp, string][] = [
   [/^Generar la voz usa 1 voz en off de tu plan \(te quedan (\d+)\)\. ¿La genero\?$/, "Generating the voice uses 1 voice-over from your plan ($1 left). Generate it?"],
   [/^Generar la voz usa 1 voz en off de tu plan\. ¿La genero\?$/, "Generating the voice uses 1 voice-over from your plan. Generate it?"],
   [/^Ya tienes (\d+) videos guardados: solo se puede reemplazar el abierto \(o borra alguno\)\.$/, "You already have $1 saved videos: you can only replace the open one (or delete one)."],
+  [/^(\d+) días$/, "$1 days"],
+  [/^Listo: las cuentas nuevas tendrán (\d+) días de prueba\.$/, "Done: new accounts will get a $1-day trial."],
+  [/^Elige una duración de prueba: (.+) días\.$/, "Choose a trial length: $1 days."],
 ];

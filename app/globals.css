@@ -1077,6 +1077,8 @@ body.acct-con-aviso .rail { top: var(--acct-espacio, var(--acct-aviso)); }
 .adm-codigos ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; overflow-wrap: anywhere; }
 .adm-impuestos { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line-soft); display: grid; gap: 6px; }
 .adm-impuestos .adm-vacio { margin: 0; }
+.adm-prueba { display: grid; gap: 6px; max-width: 320px; font-weight: 600; }
+.adm-prueba select { font: inherit; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line-soft); background: var(--deck); color: var(--paper); }
 .adm-limites { border-top: 0; padding-top: 0; margin-bottom: 12px; }
 .adm-tarjeta .adm-acciones { margin-bottom: 4px; }
 .adm-fallos { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13.5px; overflow-wrap: anywhere; }
