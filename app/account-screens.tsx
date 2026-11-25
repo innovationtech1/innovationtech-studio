@@ -7,6 +7,7 @@ import { mensajeAuth, mensajeReenvio, REENVIO_OK } from "@/lib/auth-mensajes";
 import { textoPaquete } from "@/lib/aviso-uso";
 import { confirmacionCambio, confirmacionPasarATarjeta, type DatosCambio } from "@/lib/confirmar-plan";
 import type { PaqueteId } from "@/lib/plans";
+import { TEXTO_SIN_PLAN_PLAY, TITULO_SIN_PLAN_PLAY } from "@/lib/prueba-gratis";
 import type { PersonaEquipo } from "@/lib/account-api";
 import { CloudflareCuenta } from "./setup-wizard";
 
@@ -465,6 +466,8 @@ export function ElegirPlan({
   titulo?: string;
   texto?: string;
 }) {
+  // Sin `cuenta` y con «Cerrar sesión»: es la pantalla que tapa la app cuando no hay plan
+  const sinPlan = !cuenta && !!onSalir;
   const [ocupado, setOcupado] = useState<"" | "basico" | "pro">("");
   const [error, setError] = useState("");
   const [pregunta, setPregunta] = useState<{ plan: "basico" | "pro"; mensaje: string; boton: string } | null>(null);
@@ -497,9 +500,17 @@ export function ElegirPlan({
               <X size={20} aria-hidden />
             </button>
           )}
-          <h2>{titulo}</h2>
+          {/* Sin plan en la app de Google Play: no se invita a elegir ni a comprar (lib/prueba-gratis.ts) */}
+          <h2 className={sinPlan ? "solo-web" : undefined}>{titulo}</h2>
           <p className="muted acct-pitch solo-web">{texto}</p>
-          <SoloPlay />
+          {sinPlan ? (
+            <>
+              <h2 className="solo-play">{TITULO_SIN_PLAN_PLAY}</h2>
+              <p className="muted solo-play">{TEXTO_SIN_PLAN_PLAY}</p>
+            </>
+          ) : (
+            <SoloPlay />
+          )}
           <div className="acct-planes solo-web">
             <PlanCard nombre="Básico" precio={precios.basico} incluye={INCLUYE_BASICO}>
               <button className="btn ghost acct-ancho" disabled={!!ocupado} onClick={() => elegir("basico")}>
