@@ -88,7 +88,7 @@ export function mensajeNova(e: EstadoGuiado, o: { tomasQuedan?: number; sobraron
     const base = "Escribe en pocas palabras qué se ve en cada foto. Con eso escribo el guion.";
     return o.tomasQuedan === 0 ? `${base} Hoy no te quedan animaciones con IA.` : base;
   }
-  return "Estoy armando tu video.";
+  return "Listo. Tu video ya está en el editor.";
 }
 
 const unaLinea = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "");

@@ -86,7 +86,7 @@ test("mensajeNova: una instrucción corta por paso", () => {
   assert.equal(mensajeNova(con(0)), "Sube las fotos de tu video, en el orden en que quieres que salgan.");
   assert.equal(mensajeNova(con(2, { paso: 2 })), "Cuéntame en una frase de qué es el video.");
   assert.equal(mensajeNova(con(2, { paso: 3 })), "Escribe en pocas palabras qué se ve en cada foto. Con eso escribo el guion.");
-  assert.equal(mensajeNova(con(2, { paso: 4 })), "Estoy armando tu video.");
+  assert.equal(mensajeNova(con(2, { paso: 4 })), "Listo. Tu video ya está en el editor.");
 });
 
 test("mensajeNova: avisa del máximo de fotos y de que no quedan animaciones", () => {
