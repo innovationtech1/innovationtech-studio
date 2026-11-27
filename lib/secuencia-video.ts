@@ -7,7 +7,8 @@ import { DURACIONES_SECUENCIA, MAX_FOTOS, MAX_MOMENTO } from "./secuencia";
 import type { ReelFormat } from "./reel";
 
 export type DuracionSecuencia = (typeof DURACIONES_SECUENCIA)[number];
-export type SecuenciaEntrante = { tema: string; momentos: string[]; fotos: string[]; formato: ReelFormat; n: number };
+// `animar`: las fotos que llegan marcadas para animarse con IA (del creador guiado), una por foto
+export type SecuenciaEntrante = { tema: string; momentos: string[]; fotos: string[]; formato: ReelFormat; n: number; animar?: boolean[] };
 
 export const DURACION_DEFECTO: DuracionSecuencia = 15;
 export const MIN_POR_FOTO = 2; // segundos: menos que eso no se alcanza a ver la foto
@@ -31,9 +32,9 @@ export function segundosPorFoto(total: number, n: number): number {
 }
 
 // Un clip de foto por foto, en orden. El momento queda como descripción (sirve para «Crear con IA»).
-export function clipsDeSecuencia(fotos: string[], momentos: string[], total: number): Clip[] {
+export function clipsDeSecuencia(fotos: string[], momentos: string[], total: number, animar?: boolean[]): Clip[] {
   const segundos = segundosPorFoto(total, fotos.length);
-  return fotos.map((image, i) => nuevoClip({ image, prompt: momentos[i] ?? "", segundos }));
+  return fotos.map((image, i) => nuevoClip({ image, prompt: momentos[i] ?? "", segundos, ...(animar?.[i] === true ? { tipo: "toma" as const } : {}) }));
 }
 
 // Otra duración: se reparte entre las fotos (las tomas con IA y los videos no cambian)
@@ -63,6 +64,7 @@ export function limpiarEntrante(x: unknown): SecuenciaEntrante | null {
   const fotos = (Array.isArray(s.fotos) ? s.fotos : []).filter((f): f is string => typeof f === "string" && !!f).slice(0, MAX_FOTOS);
   if (fotos.length < 2) return null;
   const momentos = Array.isArray(s.momentos) ? s.momentos : [];
+  const marcas = Array.isArray(s.animar) && s.animar.every((a) => typeof a === "boolean") ? (s.animar as boolean[]) : null;
   return {
     tema: typeof s.tema === "string" ? s.tema.trim() : "",
     momentos: fotos.map((_, i) => {
@@ -72,6 +74,7 @@ export function limpiarEntrante(x: unknown): SecuenciaEntrante | null {
     fotos,
     formato: FORMATOS.includes(s.formato as ReelFormat) ? (s.formato as ReelFormat) : "9:16",
     n: typeof s.n === "number" ? s.n : 0,
+    ...(marcas ? { animar: fotos.map((_, i) => marcas[i] === true) } : {}),
   };
 }
 

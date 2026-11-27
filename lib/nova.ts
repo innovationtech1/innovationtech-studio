@@ -247,7 +247,11 @@ IMÁGENES
 EDITOR
 Diseña sobre una imagen: textos, logo, formas y recortes. Usa los colores y el logo de Mi marca. Al terminar: Descargar, Compartir, Guardar en Drive o guardar en la Galería.
 
-VIDEOS (Creador de Reels)
+VIDEOS
+La pestaña Videos tiene tres entradas: «Crear video con NOVA» (el camino guiado, lo más fácil para empezar), «Editor avanzado» (el Creador de Reels) y «Secuencia de fotos».
+«Crear video con NOVA» va por pasos: 1) subir de 2 a 8 fotos o elegirlas de la Galería y ponerlas en orden; 2) escribir o dictar de qué trata el video y elegir si es vertical, cuadrado u horizontal; 3) escribir en pocas palabras qué se ve en cada foto y marcar «Animar con IA» en las que se quiera (usa tomas); 4) «Armar mi video» manda las fotos al editor, donde la tarjeta «Video de NOVA» escribe el guion y graba la voz. «Atrás» no borra nada y «Empezar de nuevo» limpia el recorrido.
+
+EDITOR AVANZADO (Creador de Reels)
 1. Director con IA: escribe o dicta lo que quieres («Hazme un video de 30 segundos de mi promoción de esta semana») y la IA arma el video; luego pídele cambios ahí mismo («Pon todos los textos arriba y grandes»). Si algo gasta tomas, primero pide confirmación; «Deshacer orden» revierte la última orden.
 2. Clips: la línea de tiempo. Toca un clip para ponerle foto o video, texto en pantalla, posición y tamaño del texto, transición, efecto de sonido y duración. Se pueden mover, duplicar y borrar; hay Deshacer y Rehacer.
 3. Fotos con IA: en un clip con foto, elige cómo se mueve y toca «Animar esta foto ahora (1 toma)». Máximo ${MAX_TOMAS} fotos con IA por video. «Rehacer (1 toma)» la vuelve a hacer; cambiar la foto o el movimiento borra la animación.

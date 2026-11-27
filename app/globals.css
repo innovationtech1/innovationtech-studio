@@ -1156,3 +1156,32 @@ body.acct-con-aviso .rail { top: var(--acct-espacio, var(--acct-aviso)); }
 html[data-app-play="1"] .solo-web { display: none !important; }
 .solo-play { display: none; }
 html[data-app-play="1"] .solo-play { display: block; }
+
+/* «Crear video con NOVA»: el camino guiado de la pestaña Videos (app/video-guiado.tsx) */
+.guiado { display: grid; gap: 14px; }
+.guiado-nova { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line-soft); border-radius: var(--radius-inner); background: var(--console); }
+.guiado-nova p { margin: 0; font: 500 15px/1.4 var(--body); color: var(--paper); }
+.guiado-paso { margin: 0; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; color: var(--fog); font-size: 13px; }
+.guiado-paso strong { color: var(--paper); font-size: 17px; }
+.guiado-barra { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.guiado-barra span { height: 4px; border-radius: 2px; background: var(--line-soft); }
+.guiado-barra span.hecho { background: var(--signal); }
+.guiado-fotos { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; }
+.guiado-fotos li { position: relative; border-radius: var(--radius-inner); overflow: hidden; background: #000; border: 1px solid var(--line-soft); }
+.guiado-fotos img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; }
+.guiado-num { position: absolute; top: 6px; left: 6px; min-width: 22px; height: 22px; padding: 0 6px; display: grid; place-items: center; border-radius: 11px; background: var(--signal); color: #fff; font: 700 12px var(--body); }
+.guiado-mover { display: flex; justify-content: space-between; gap: 2px; padding: 4px; background: var(--deck); }
+.guiado-mover .btn { margin: 0; padding: 6px 8px; min-width: 0; }
+.guiado-tema { display: flex; gap: 8px; align-items: flex-start; }
+.guiado-tema textarea { flex: 1; }
+.guiado-lineas { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.guiado-lineas li { display: grid; grid-template-columns: 84px 1fr; gap: 12px; align-items: start; padding: 10px; border: 1px solid var(--line-soft); border-radius: var(--radius-inner); background: var(--deck); }
+.guiado-lineas img { width: 84px; aspect-ratio: 1; object-fit: cover; border-radius: 8px; display: block; }
+.guiado-lineas label { margin: 0 0 4px; }
+.guiado-lineas input[type="text"] { width: 100%; }
+.guiado-animar { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px !important; font-size: 13px; color: var(--fog); cursor: pointer; }
+.guiado-listo p { margin: 0 0 10px; }
+.guiado-pie { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding-top: 6px; border-top: 1px solid var(--line-soft); }
+.guiado-pie .btn { margin-top: 8px; }
+.guiado-reinicio { margin-left: auto; }
+label.btn.disabled { opacity: 0.6; pointer-events: none; }

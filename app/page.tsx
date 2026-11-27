@@ -17,7 +17,7 @@ import MicButton from "./mic-button";
 import Director from "./director";
 import { AJUSTES_RAPIDOS, confirmarImagen, plataformaDe } from "@/lib/director-secciones";
 import { MAX_ORDEN } from "@/lib/orden";
-import { Bot, Undo2, CalendarDays, GalleryHorizontal, Clapperboard, Download, Eraser, Film, FolderOpen, ImageIcon, ImagePlus, Images, Palette, Pencil, PenLine, Plug, RefreshCw, Rocket, Scissors, Settings as SettingsIcon, Shapes, Trash2, type LucideIcon, Wand2 } from "lucide-react";
+import { Bot, Undo2, CalendarDays, GalleryHorizontal, Clapperboard, Download, Eraser, Film, FolderOpen, ImageIcon, ImagePlus, Images, Palette, Pencil, PenLine, Plug, RefreshCw, Rocket, Scissors, Settings as SettingsIcon, Shapes, Sparkles, Trash2, type LucideIcon, Wand2 } from "lucide-react";
 import { CheckList, CloudflareCuenta, CloudflareWizard, testCloudflare, Welcome } from "./setup-wizard";
 import { EVENTO_AJUSTES } from "@/lib/limpiar-dispositivo";
 import { formatBytes, storageUsage, toDataUrl } from "@/lib/media-store";
@@ -41,6 +41,11 @@ const ShapeCrop = dynamic(() => import("./shape-crop"), { ssr: false });
 const ReelProyectos = dynamic(() => import("./reel-proyectos"), {
   ssr: false,
   loading: () => <section className="card">Cargando el creador de videos…</section>,
+});
+// «Crear video con NOVA» (pestaña Videos)
+const VideoGuiado = dynamic(() => import("./video-guiado"), {
+  ssr: false,
+  loading: () => <section className="card">Cargando…</section>,
 });
 // Secuencia de fotos (pestaña Videos)
 const SecuenciaFotos = dynamic(() => import("./secuencia-fotos"), {
@@ -146,8 +151,8 @@ export default function Home() {
   // Diapositiva editada que vuelve al carrusel
   const [slideUpdate, setSlideUpdate] = useState<{ slide: number; url: string; n: number } | null>(null);
   const [imageMode, setImageMode] = usePersistentState<"ia" | "carrusel">("imagen:modo", "ia");
-  // Pestaña Videos: el Creador de Reels o «Secuencia de fotos»
-  const [videoMode, setVideoMode] = usePersistentState<"video" | "secuencia">("video:modo", "video");
+  // Pestaña Videos: «Crear video con NOVA» (camino guiado), el editor avanzado o «Secuencia de fotos»
+  const [videoMode, setVideoMode] = usePersistentState<"guiado" | "video" | "secuencia">("video:modo", "guiado");
   // Fotos de la secuencia que van al Creador de Reels con «Hacer el video con NOVA» (n cambia en cada envío)
   const [secuenciaVideo, setSecuenciaVideo] = useState<(SecuenciaParaVideo & { n: number }) | null>(null);
   // Lo que llega al Creador de Reels desde otra sección (o desde la secuencia) abre «Video»
@@ -226,7 +231,7 @@ export default function Home() {
   };
   // Las secciones pesadas se montan la primera vez que se abren y después se quedan (no se pierde nada al cambiar de pestaña)
   const [abiertas, setAbiertas] = useState<string[]>([]);
-  const marca = `${tab}|${tab === "video" ? (videoMode === "secuencia" ? "secuencia" : "reel") : tab === "texto" ? textMode : ""}`;
+  const marca = `${tab}|${tab === "video" ? (videoMode === "secuencia" ? "secuencia" : videoMode === "guiado" ? "guiado" : "reel") : tab === "texto" ? textMode : ""}`;
   useEffect(() => setAbiertas((a) => (a.includes(marca) ? a : [...a, marca])), [marca]);
   const abierta = (m: string) => abiertas.includes(m) || marca === m;
   const go = (id: Tab) => {
@@ -410,12 +415,28 @@ export default function Home() {
       </div>
       <div hidden={tab !== "video"}>
         <div className="mode-switch" role="tablist">
+          <button role="tab" aria-selected={videoMode === "guiado"} className={videoMode === "guiado" ? "active" : ""} onClick={() => setVideoMode("guiado")}>
+            <Sparkles size={16} aria-hidden /> Crear video con NOVA
+          </button>
           <button role="tab" aria-selected={videoMode === "video"} className={videoMode === "video" ? "active" : ""} onClick={() => setVideoMode("video")}>
-            <Clapperboard size={16} aria-hidden /> Video
+            <Clapperboard size={16} aria-hidden /> Editor avanzado
           </button>
           <button role="tab" aria-selected={videoMode === "secuencia"} className={videoMode === "secuencia" ? "active" : ""} onClick={() => setVideoMode("secuencia")}>
             <Images size={16} aria-hidden /> Secuencia de fotos
           </button>
+        </div>
+        <div hidden={videoMode !== "guiado"}>
+          {abierta("video|guiado") && (
+            <VideoGuiado
+              settings={settings}
+              gallery={gallery}
+              onArmar={(s) => {
+                setSecuenciaVideo((v) => ({ ...s, n: (v?.n || 0) + 1 }));
+                go("video");
+              }}
+              onEditor={() => setVideoMode("video")}
+            />
+          )}
         </div>
         <div hidden={videoMode !== "secuencia"}>
           {abierta("video|secuencia") && (
