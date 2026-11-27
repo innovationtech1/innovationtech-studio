@@ -236,7 +236,7 @@ export const MANUAL_STUDIO = `Studio tiene estas secciones en el menú: Textos, 
 
 TEXTOS
 - Asistente: este chat. Recuerda la conversación; toca «Hazlo más corto», «Más formal», «Dame 3 variantes» u «Otra respuesta» para ajustar. Botones de cada respuesta: Copiar, Escuchar, Llevar al editor (elige una frase para tu diseño) y Crear la imagen.
-- Una publicación: escribe el tema, elige la red social y genera el texto listo para publicar; desde ahí se puede pasar a imagen o a video. Debajo del texto, «Publicar» deja subir una imagen o un video (o elegirlo de la Galería) y «Compartir» lo manda junto con el texto a WhatsApp, Instagram, Facebook y demás; sin archivo, «Compartir texto» manda solo el texto.
+- Una publicación: escribe el tema, elige la red social y genera el texto listo para publicar; desde ahí se puede pasar a imagen o a video. Debajo, «Publicar» comparte el texto solo o junto con una imagen o video (subido o de la Galería).
 - Calendario de 30 días: arma un mes de ideas de contenido; cada día se puede llevar a imagen, al editor o a un reel.
 
 IMÁGENES
@@ -248,8 +248,8 @@ EDITOR
 Diseña sobre una imagen: textos, logo, formas y recortes. Usa los colores y el logo de Mi marca. Al terminar: Descargar, Compartir, Guardar en Drive o guardar en la Galería.
 
 VIDEOS
-La pestaña Videos tiene tres entradas: «Crear video con NOVA» (el camino guiado, lo más fácil para empezar), «Editor avanzado» (el Creador de Reels) y «Secuencia de fotos».
-«Crear video con NOVA» va por pasos: 1) subir de 2 a 8 fotos o elegirlas de la Galería y ponerlas en orden; 2) escribir o dictar de qué trata el video y elegir si es vertical, cuadrado u horizontal; 3) escribir en pocas palabras qué se ve en cada foto y marcar «Animar con IA» en las que se quiera (usa tomas); 4) «Armar mi video» manda las fotos al editor, donde la tarjeta «Video de NOVA» escribe el guion y graba la voz. «Atrás» no borra nada y «Empezar de nuevo» limpia el recorrido.
+Tres entradas: «Crear video con NOVA» (guiado, lo más fácil), «Editor avanzado» y «Secuencia de fotos».
+«Crear video con NOVA»: 1) subir de 2 a 8 fotos en orden; 2) decir de qué trata y el formato; 3) escribir qué se ve en cada foto y marcar «Animar con IA» si se quiere (usa tomas); 4) «Armar mi video» las manda al editor, donde «Video de NOVA» escribe el guion y graba la voz.
 
 EDITOR AVANZADO (Creador de Reels)
 1. Director con IA: escribe o dicta lo que quieres («Hazme un video de 30 segundos de mi promoción de esta semana») y la IA arma el video; luego pídele cambios ahí mismo («Pon todos los textos arriba y grandes»). Si algo gasta tomas, primero pide confirmación; «Deshacer orden» revierte la última orden.
