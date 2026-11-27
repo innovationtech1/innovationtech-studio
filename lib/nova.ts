@@ -236,7 +236,7 @@ export const MANUAL_STUDIO = `Studio tiene estas secciones en el menú: Textos, 
 
 TEXTOS
 - Asistente: este chat. Recuerda la conversación; toca «Hazlo más corto», «Más formal», «Dame 3 variantes» u «Otra respuesta» para ajustar. Botones de cada respuesta: Copiar, Escuchar, Llevar al editor (elige una frase para tu diseño) y Crear la imagen.
-- Una publicación: escribe el tema, elige la red social y genera el texto listo para publicar; desde ahí se puede pasar a imagen o a video.
+- Una publicación: escribe el tema, elige la red social y genera el texto listo para publicar; desde ahí se puede pasar a imagen o a video. Debajo del texto, «Publicar» deja subir una imagen o un video (o elegirlo de la Galería) y «Compartir» lo manda junto con el texto a WhatsApp, Instagram, Facebook y demás; sin archivo, «Compartir texto» manda solo el texto.
 - Calendario de 30 días: arma un mes de ideas de contenido; cada día se puede llevar a imagen, al editor o a un reel.
 
 IMÁGENES

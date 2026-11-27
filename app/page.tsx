@@ -28,6 +28,8 @@ import { extract, phrases } from "@/lib/phrases";
 import { BotonCuenta, CUENTAS_ON, MejorarPro, ProTag, useCuenta } from "./account-context";
 import Camara from "./camara";
 import CompartirBotones from "./compartir-botones";
+import PublicarTexto from "./texto-adjunto";
+import { textoParaPublicar } from "@/lib/texto-adjunto";
 import VerificarNfc from "./verificar-nfc";
 import { dataUrlReducida } from "@/lib/resize";
 
@@ -336,6 +338,7 @@ export default function Home() {
         </div>
         <div hidden={textMode !== "post"}>
           <TextStudio
+            gallery={gallery}
             settings={settings}
             brand={brand}
             onUseImage={(p) => (setImagePrompt(p), setTab("imagen"))}
@@ -550,12 +553,14 @@ export default function Home() {
 function TextStudio({
   settings,
   brand,
+  gallery,
   onUseImage,
   onUseVideo,
   onToEditor,
 }: {
   settings: Settings;
   brand: Brand;
+  gallery: Item[];
   onUseImage: (p: string) => void;
   onUseVideo: (p: string) => void;
   onToEditor: (text: string) => void;
@@ -741,6 +746,7 @@ function TextStudio({
               ))}
             </div>
           )}
+          <PublicarTexto texto={textoParaPublicar(result)} gallery={gallery} />
         </>
       )}
     </section>

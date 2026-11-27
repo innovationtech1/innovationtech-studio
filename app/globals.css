@@ -1185,3 +1185,13 @@ html[data-app-play="1"] .solo-play { display: block; }
 .guiado-pie .btn { margin-top: 8px; }
 .guiado-reinicio { margin-left: auto; }
 label.btn.disabled { opacity: 0.6; pointer-events: none; }
+
+/* Textos: «Publicar» con imagen o video (app/texto-adjunto.tsx) */
+.adj { background: var(--navy-900); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 12px 0 4px; display: grid; gap: 10px; }
+.adj-titulo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.adj-titulo svg { color: var(--red); }
+.adj .actions .btn { margin-top: 0; }
+.adj-previa { display: flex; align-items: flex-start; gap: 10px; }
+.adj-previa img, .adj-previa video { width: 132px; max-height: 190px; object-fit: cover; border-radius: 10px; background: #000; border: 1px solid var(--line-soft); display: block; }
+.adj .picker { grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); }
+.adj .notice, .adj .error { margin: 0; }

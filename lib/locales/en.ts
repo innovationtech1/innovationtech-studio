@@ -1669,6 +1669,18 @@ export const EN: Record<string, string> = {
   "Sube al menos 2 fotos.": "Upload at least 2 photos.",
   "Escribe de qué trata el video.": "Write what the video is about.",
   "No pude leer 1 foto. Las demás ya están.": "I couldn't read 1 photo. The rest are in.",
+  "Publicar": "Publish",
+  "Agrega una imagen o un video, o comparte solo el texto.": "Add an image or a video, or share just the text.",
+  "Imagen para publicar": "Image to publish",
+  "Cambiar archivo": "Change file",
+  "Subir imagen o video": "Upload image or video",
+  "Compartir texto": "Share text",
+  "Usar esta imagen": "Use this image",
+  "Se copió el texto: pégalo donde lo vas a publicar.": "The text was copied: paste it where you're going to publish.",
+  "No se pudo compartir ni copiar el texto. Selecciónalo y cópialo a mano.": "The text couldn't be shared or copied. Select it and copy it by hand.",
+  "Todavía no hay texto para compartir.": "There's no text to share yet.",
+  "Ese archivo no es una imagen ni un video.": "That file isn't an image or a video.",
+  "Ese archivo está vacío.": "That file is empty.",
 };
 
 // Textos con números u otras partes que cambian
@@ -1815,4 +1827,5 @@ export const EN_PATTERNS: [RegExp, string][] = [
   [/^Listo: las cuentas nuevas tendrán (\d+) días de prueba\.$/, "Done: new accounts will get a $1-day trial."],
   [/^Elige una duración de prueba: (.+) días\.$/, "Choose a trial length: $1 days."],
   [/^No pude leer (\d+) fotos\. Las demás ya están\.$/, "I couldn't read $1 photos. The rest are in."],
+  [/^Esa imagen pesa más de (\d+) MB\.$/, "That image is larger than $1 MB."],
 ];
