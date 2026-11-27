@@ -1468,7 +1468,7 @@ export default function ReelStudio({
     antesDeSecuencia.current = tieneContenido(viejos, script) ? { clips: viejos, ajustes: ajustesActuales(), voice } : null;
     setHayVolverSecuencia(!!antesDeSecuencia.current);
     const total = duracionParaFotos(s.fotos.length);
-    editar(() => clipsDeSecuencia(s.fotos, s.momentos, total)); // se puede deshacer
+    editar(() => clipsDeSecuencia(s.fotos, s.momentos, total, s.animar)); // se puede deshacer
     // Las fotos del video anterior se quitan del aparato (si se deshace, se vuelven a guardar solas)
     for (const c of viejos) if (c.imageId && !clipsRef.current.some((x) => x.imageId === c.imageId)) olvidarFoto(c.imageId);
     setElegido(-1);
