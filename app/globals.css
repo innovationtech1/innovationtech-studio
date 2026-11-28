@@ -1195,3 +1195,7 @@ label.btn.disabled { opacity: 0.6; pointer-events: none; }
 .adj-previa img, .adj-previa video { width: 132px; max-height: 190px; object-fit: cover; border-radius: 10px; background: #000; border: 1px solid var(--line-soft); display: block; }
 .adj .picker { grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); }
 .adj .notice, .adj .error { margin: 0; }
+.guiado-ver { display: grid; gap: 8px; }
+.guiado-ver .notice { margin: 0; }
+.guiado-ver .actions .btn { margin-top: 0; }
+.guiado-privado { margin: 0; font-size: 13px; }

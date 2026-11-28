@@ -137,6 +137,10 @@ function Lista() {
         <PruebaGratis />
       </section>
       <section className="adm-tarjeta">
+        <h2>NOVA ve tus fotos</h2>
+        <ActivarVision />
+      </section>
+      <section className="adm-tarjeta">
         <h2>Video con IA</h2>
         <ResumenVideo />
       </section>
@@ -475,6 +479,35 @@ function PruebaGratis() {
           ))}
         </select>
       </label>
+      {resultado && (
+        <p className={resultado.ok ? "adm-ok" : "adm-error"} role="status">
+          {resultado.texto}
+        </p>
+      )}
+    </>
+  );
+}
+
+// Acepta, una sola vez, la licencia del modelo que describe fotos (lib/ver-fotos.ts)
+function ActivarVision() {
+  const [ocupado, setOcupado] = useState(false);
+  const [resultado, setResultado] = useState<{ ok: boolean; texto: string } | null>(null);
+  async function activar() {
+    setOcupado(true);
+    setResultado(null);
+    const r = await pedir("/api/admin/vision", { method: "POST" });
+    setOcupado(false);
+    setResultado(r.ok ? { ok: true, texto: "Listo: NOVA ya puede ver fotos." } : { ok: false, texto: String(r.datos.error ?? "No se pudo activar.") });
+  }
+  return (
+    <>
+      <p className="adm-vacio">
+        Para que NOVA describa las fotos, Cloudflare pide aceptar una sola vez la licencia de uso del modelo Llama 3.2 Vision de Meta. Al tocar el
+        botón la aceptas en tu cuenta de Cloudflare. Puedes tocarlo otra vez sin problema.
+      </p>
+      <button className="btn" disabled={ocupado} onClick={() => void activar()}>
+        {ocupado ? "Activando…" : "Activar NOVA ve tus fotos"}
+      </button>
       {resultado && (
         <p className={resultado.ok ? "adm-ok" : "adm-error"} role="status">
           {resultado.texto}

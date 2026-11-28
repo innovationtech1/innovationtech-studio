@@ -78,17 +78,46 @@ export function alternarAnimar(e: EstadoGuiado, id: string, tomasQuedan?: number
 }
 
 // Lo que NOVA dice arriba de cada paso
-export function mensajeNova(e: EstadoGuiado, o: { tomasQuedan?: number; sobraron?: number } = {}): string {
+export type EstadoVision = "viendo" | "lista" | "parcial" | "fallo";
+const DE_VISION: Record<EstadoVision, string> = {
+  viendo: "Estoy viendo tus fotos…",
+  lista: "Vi tus fotos y escribí lo que se ve en cada una. Cambia lo que no te guste.",
+  parcial: "Vi casi todas tus fotos. Escribe tú las que quedaron vacías.",
+  fallo: "No pude ver tus fotos. Escribe en pocas palabras qué se ve en cada una.",
+};
+
+export function mensajeNova(e: EstadoGuiado, o: { tomasQuedan?: number; sobraron?: number; vision?: EstadoVision } = {}): string {
   if (e.paso === 1) {
     const base = "Sube las fotos de tu video, en el orden en que quieres que salgan.";
     return o.sobraron && o.sobraron > 0 ? `${base} El máximo son ${MAX_FOTOS} fotos.` : base;
   }
   if (e.paso === 2) return "Cuéntame en una frase de qué es el video.";
   if (e.paso === 3) {
-    const base = "Escribe en pocas palabras qué se ve en cada foto. Con eso escribo el guion.";
+    if (o.vision === "viendo") return DE_VISION.viendo;
+    const base = o.vision ? DE_VISION[o.vision] : "Escribe en pocas palabras qué se ve en cada foto. Con eso escribo el guion.";
     return o.tomasQuedan === 0 ? `${base} Hoy no te quedan animaciones con IA.` : base;
   }
   return "Listo. Tu video ya está en el editor.";
+}
+
+// Las fotos que todavía no tienen escrito qué se ve
+export const fotosSinLinea = (e: EstadoGuiado): FotoGuiada[] => e.fotos.filter((f) => !e.lineas[f.id]?.trim());
+
+// Lo que NOVA vio en las fotos (`ids` y `descripciones` van a la par). Nunca pisa lo que la persona
+// ya escribió, ni revive una foto que quitó mientras NOVA miraba.
+export function llenarLineas(e: EstadoGuiado, ids: string[], descripciones: (string | null)[]): { estado: EstadoGuiado; llenas: number; faltaron: number } {
+  const lineas = { ...e.lineas };
+  let llenas = 0;
+  let faltaron = 0;
+  ids.forEach((id, i) => {
+    if (!e.fotos.some((f) => f.id === id) || lineas[id]?.trim()) return;
+    const d = descripciones[i];
+    if (typeof d === "string" && d.trim()) {
+      lineas[id] = d.trim().slice(0, MAX_LINEA_GUIADA);
+      llenas++;
+    } else faltaron++;
+  });
+  return { estado: { ...e, lineas }, llenas, faltaron };
 }
 
 const unaLinea = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "");

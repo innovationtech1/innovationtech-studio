@@ -113,3 +113,35 @@ test("limpiarTextoGuiado: lo guardado que no sirve vuelve a lo de fábrica, sin 
   assert.deepEqual(limpiarTextoGuiado({ tema: "Promo", formato: "16:9" }), { tema: "Promo", formato: "16:9" });
   assert.equal(limpiarTextoGuiado({ tema: "x".repeat(500), formato: "1:1" }).tema.length, 200);
 });
+
+import { fotosSinLinea, llenarLineas } from "./video-guiado";
+
+test("fotosSinLinea: las fotos que todavía no tienen escrito qué se ve", () => {
+  assert.deepEqual(fotosSinLinea(con(3, { lineas: { f1: "torta", f2: "   " } })).map((f) => f.id), ["f2", "f3"]);
+  assert.deepEqual(fotosSinLinea(con(2, { lineas: { f1: "a", f2: "b" } })), []);
+});
+
+test("llenarLineas: pone lo que NOVA vio solo donde la persona no había escrito nada", () => {
+  const e = con(3, { lineas: { f1: "Lo que yo escribí" } });
+  const r = llenarLineas(e, ["f1", "f2", "f3"], ["Otra cosa", "Una torta en la mesa", null]);
+  assert.deepEqual(r.estado.lineas, { f1: "Lo que yo escribí", f2: "Una torta en la mesa" });
+  assert.equal(r.llenas, 1);
+  assert.equal(r.faltaron, 1);
+});
+
+test("llenarLineas: ignora fotos que ya no están y respuestas que no son texto", () => {
+  const r = llenarLineas(con(2), ["f1", "se-fue", "f2"], ["Un local", "Fantasma", 5 as unknown as string]);
+  assert.deepEqual(r.estado.lineas, { f1: "Un local" });
+  assert.equal(r.llenas, 1);
+  assert.equal(r.faltaron, 1);
+});
+
+test("mensajeNova: en el paso 3 cuenta cómo le fue viendo las fotos", () => {
+  const e = con(2, { paso: 3 });
+  assert.equal(mensajeNova(e, { vision: "viendo" }), "Estoy viendo tus fotos…");
+  assert.equal(mensajeNova(e, { vision: "lista" }), "Vi tus fotos y escribí lo que se ve en cada una. Cambia lo que no te guste.");
+  assert.equal(mensajeNova(e, { vision: "parcial" }), "Vi casi todas tus fotos. Escribe tú las que quedaron vacías.");
+  assert.equal(mensajeNova(e, { vision: "fallo" }), "No pude ver tus fotos. Escribe en pocas palabras qué se ve en cada una.");
+  assert.match(mensajeNova(e, { vision: "lista", tomasQuedan: 0 }), /Hoy no te quedan animaciones con IA\.$/);
+  assert.equal(mensajeNova(con(2, { paso: 2 }), { vision: "viendo" }), "Cuéntame en una frase de qué es el video.");
+});
