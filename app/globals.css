@@ -782,19 +782,34 @@ h3.step { font-size: 18px; margin: 28px 0 8px; }
 .nova-id h2 { margin: 0; line-height: 1.1; }
 .nova-online { display: flex; align-items: center; gap: 6px; margin: 2px 0 0; font-size: 12.5px; color: var(--fog); }
 .nova-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--go); box-shadow: 0 0 0 2px rgba(47, 194, 138, 0.2); flex: none; }
-.nova-avatar { flex: none; display: grid; place-items: center; border-radius: 50%; overflow: hidden; background: var(--ink); border: 2px solid var(--signal); box-shadow: 0 0 0 0 rgba(229, 36, 59, 0); }
-.nova-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.nova-avatar.pensando, .nova-avatar.hablando { animation: nova-respira 2.4s ease-in-out infinite; }
-.nova-avatar.hablando { animation-duration: 1.6s; }
-.nova-avatar.aviso { animation: nova-late 1.1s ease-out 3; }
-@keyframes nova-respira {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(229, 36, 59, 0.15); transform: scale(1); }
-  50% { box-shadow: 0 0 14px 4px rgba(229, 36, 59, 0.45); transform: scale(1.04); }
-}
-@keyframes nova-late {
-  0% { box-shadow: 0 0 0 0 rgba(229, 36, 59, 0.6); transform: scale(1); }
-  30% { transform: scale(1.08); }
-  100% { box-shadow: 0 0 0 12px rgba(229, 36, 59, 0); transform: scale(1); }
+/* NOVA con vida: un aro de luz que gira, la cara que flota y ondas que salen de ella. Cada estado
+   se mueve distinto: quieta (respira y de vez en cuando suelta una onda), pensando (el aro gira
+   rápido), hablando (late y emite ondas seguidas) y aviso (da saltitos para llamar la atención). */
+.nova-avatar { position: relative; flex: none; display: grid; place-items: center; border-radius: 50%; isolation: isolate; animation: nova-flota 5s ease-in-out infinite; }
+.nova-cara { position: relative; z-index: 1; width: 100%; height: 100%; border-radius: 50%; overflow: hidden; background: var(--ink); box-shadow: 0 0 0 2px var(--ink); }
+.nova-cara img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.nova-avatar::before { content: ""; position: absolute; inset: -3px; z-index: 0; border-radius: 50%; background: conic-gradient(from 0deg, var(--signal), #ff7a59, #4f7cff, #9b5cff, var(--signal)); animation: nova-gira 7s linear infinite; }
+.nova-avatar::after { content: ""; position: absolute; inset: -3px; z-index: 0; border-radius: 50%; border: 2px solid var(--signal); opacity: 0; animation: nova-onda 6s ease-out infinite; }
+.nova-avatar.pensando { animation: nova-respira 1.8s ease-in-out infinite; }
+.nova-avatar.pensando::before { animation-duration: 1.1s; }
+.nova-avatar.pensando::after { animation: none; }
+.nova-avatar.hablando { animation: nova-habla 0.9s ease-in-out infinite; }
+.nova-avatar.hablando::before { animation-duration: 3s; }
+.nova-avatar.hablando::after { animation: nova-onda 1.3s ease-out infinite; }
+.nova-avatar.aviso { animation: nova-salta 1.4s ease-in-out infinite; }
+.nova-avatar.aviso::after { animation: nova-onda 1.4s ease-out infinite; }
+@keyframes nova-gira { to { transform: rotate(360deg); } }
+@keyframes nova-flota { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+@keyframes nova-onda { 0% { transform: scale(1); opacity: 0.7; } 60%, 100% { transform: scale(1.55); opacity: 0; } }
+@keyframes nova-respira { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+@keyframes nova-habla { 0%, 100% { transform: scale(1); } 30% { transform: scale(1.07); } 60% { transform: scale(0.98); } }
+@keyframes nova-salta { 0%, 55%, 100% { transform: translateY(0); } 20% { transform: translateY(-6px); } 35% { transform: translateY(0); } 45% { transform: translateY(-3px); } }
+/* El punto verde de «En línea» también late */
+.nova-dot { animation: nova-punto 2.4s ease-in-out infinite; }
+@keyframes nova-punto { 0%, 100% { box-shadow: 0 0 0 2px rgba(47, 194, 138, 0.2); } 50% { box-shadow: 0 0 0 6px rgba(47, 194, 138, 0); } }
+/* Quien pidió menos movimiento ve a NOVA quieta, con su aro de color */
+@media (prefers-reduced-motion: reduce) {
+  .nova-avatar, .nova-avatar::before, .nova-avatar::after, .nova-dot { animation: none !important; }
 }
 .nova-burbuja { position: relative; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0 4px; padding: 10px 12px; border-radius: 14px; background: var(--console); border: 1px solid var(--signal); }
 .nova-burbuja::before { content: ""; position: absolute; top: -7px; left: 16px; width: 12px; height: 12px; background: var(--console); border-left: 1px solid var(--signal); border-top: 1px solid var(--signal); transform: rotate(45deg); }

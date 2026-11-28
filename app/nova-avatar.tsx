@@ -7,7 +7,10 @@ export type EstadoNova = "quieta" | "pensando" | "hablando" | "aviso";
 export default function NovaAvatar({ estado, tamano = 40 }: { estado: EstadoNova; tamano?: number }) {
   return (
     <span className={`nova-avatar ${estado}`} style={{ width: tamano, height: tamano }} aria-hidden>
-      <img src="/icons/nova-96.png" alt="" width={tamano} height={tamano} />
+      {/* El aro de luz y las ondas son de CSS (::before y ::after); la cara va recortada aparte */}
+      <span className="nova-cara">
+        <img src="/icons/nova-96.png" alt="" width={tamano} height={tamano} />
+      </span>
     </span>
   );
 }
