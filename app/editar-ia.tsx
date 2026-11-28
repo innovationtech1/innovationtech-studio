@@ -42,6 +42,11 @@ export default function EditarIA({
     reloj.current = null;
   };
   useEffect(() => soltar, []);
+  // El panel sale debajo del lienzo: al abrirse, la pantalla baja hasta él y el cursor queda listo para escribir.
+  const caja = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    caja.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
 
   async function editar(texto = pedido) {
     const limpio = limpiarPedido(texto);
@@ -71,7 +76,7 @@ export default function EditarIA({
   const listo = estado.paso === "listo";
 
   return (
-    <div className="props editar-ia">
+    <div className="props editar-ia" ref={caja}>
       <div className="card-head">
         <strong>
           <Sparkles size={16} aria-hidden /> Editar con IA
