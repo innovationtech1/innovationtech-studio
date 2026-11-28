@@ -1202,6 +1202,11 @@ label.btn.disabled { opacity: 0.6; pointer-events: none; }
 
 /* NOVA en todas las secciones: botón flotante y panel sobre la sección abierta (lib/nova-flotante.ts) */
 .nova-fab { position: fixed; right: 22px; bottom: 22px; z-index: 70; display: flex; align-items: center; gap: 10px; padding: 6px 18px 6px 6px; border-radius: 999px; border: 1px solid var(--line); background: var(--console); color: var(--paper); font: 650 14.5px var(--body); cursor: pointer; box-shadow: 0 12px 34px rgba(0, 0, 0, 0.5); transition: transform 0.15s, border-color 0.15s; }
+/* Compacto para no tapar lo que se escribe: el letrero sale al pasar el cursor o al enfocar */
+.nova-fab > span:not(.nova-avatar) { max-width: 0; overflow: hidden; white-space: nowrap; opacity: 0; transition: max-width 0.2s, opacity 0.15s; }
+.nova-fab { padding: 6px; gap: 0; }
+.nova-fab:hover, .nova-fab:focus-visible { padding-right: 18px; gap: 10px; }
+.nova-fab:hover > span:not(.nova-avatar), .nova-fab:focus-visible > span:not(.nova-avatar) { max-width: 200px; opacity: 1; }
 .nova-fab:hover { transform: translateY(-2px); border-color: var(--signal); }
 .nova-fab:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
 .nova-velo { position: fixed; inset: 0; z-index: 80; background: rgba(3, 6, 15, 0.6); }
