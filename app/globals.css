@@ -1252,3 +1252,13 @@ label.btn.disabled { opacity: 0.6; pointer-events: none; }
 .foto-adj.redondo .foto-adj-error { position: absolute; bottom: 48px; right: 0; width: 220px; background: var(--console); border: 1px solid var(--line); padding: 4px 10px; border-radius: 8px; }
 .texto-foto { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0 2px; font-size: 13px; }
 .chat-foto-estado { margin: 6px 2px 0; font-size: 13px; }
+
+/* Galería: tamaño de las miniaturas (lib/galeria-vista.ts) */
+.gal-tamano { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0 0 12px; font-size: 13px; }
+.gal-tamano button { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--fog); font: 600 13px var(--body); cursor: pointer; }
+.gal-tamano button.active { background: var(--console); color: var(--paper); border-color: var(--signal); }
+.gallery-grid.chico { gap: 6px; }
+.gallery-grid.chico .gallery-meta { display: none; } /* en chico solo la imagen: se toca para verla en grande y ahí están las acciones */
+.gallery-grid.chico .gallery-item { border-radius: 8px; }
+.gallery-grid.chico .badge-video { font-size: 10px; padding: 2px 6px; }
+.gallery-grid.grande { gap: 14px; }

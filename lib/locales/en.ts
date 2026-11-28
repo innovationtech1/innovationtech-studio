@@ -1718,6 +1718,11 @@ export const EN: Record<string, string> = {
   "No pude ver la foto, así que escribí el texto sin ella.": "I couldn't see the photo, so I wrote the text without it.",
   "No pude ver la foto. Escribe qué quieres publicar.": "I couldn't see the photo. Write what you want to publish.",
   "¿Qué puedo publicar con esta foto?": "What can I post with this photo?",
+  "Mediano": "Medium",
+  "Tamaño de las miniaturas": "Thumbnail size",
+  "No se pudo guardar en la galería en este momento. Descarga lo que quieras conservar y vuelve a intentarlo.": "It couldn't be saved to the gallery right now. Download anything you want to keep and try again.",
+  "No se pudo guardar en la galería: el disco de tu dispositivo está casi lleno. Descarga lo que quieras conservar y libera espacio en el dispositivo (no solo en Studio).": "It couldn't be saved to the gallery: your device's disk is almost full. Download anything you want to keep and free up space on the device (not just in Studio).",
+  "¿Borrar este elemento de la galería?": "Delete this item from the gallery?",
 };
 
 // Textos con números u otras partes que cambian
