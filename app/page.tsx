@@ -431,6 +431,7 @@ export default function Home() {
         {abierta("editor|") && (
         <ImageEditor
           incoming={toEditor}
+          cfHeaders={{ "x-cf-account": settings.cfAccountId, "x-cf-token": settings.cfToken }}
           brand={brand}
           onOpenBrand={() => go("marca")}
           onReturn={(url, to) => {
