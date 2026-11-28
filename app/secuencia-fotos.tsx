@@ -34,7 +34,7 @@ import CompartirBotones from "./compartir-botones";
 type Actual = { tema: string; titulo: string; ideas: IdeaSecuencia[] };
 const VACIA: Actual = { tema: "", titulo: "", ideas: [] };
 
-export type SecuenciaParaVideo = { tema: string; momentos: string[]; fotos: string[]; formato: ReelFormat; animar?: boolean[] };
+export type SecuenciaParaVideo = { tema: string; momentos: string[]; fotos: string[]; formato: ReelFormat; animar?: boolean[]; nuevo?: boolean };
 
 const blobToDataUrl = (b: Blob) =>
   new Promise<string>((res, rej) => {
