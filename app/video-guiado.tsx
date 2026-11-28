@@ -5,8 +5,8 @@
 // lib/video-guiado.ts; aquí solo se pinta. Al armar, las fotos entran al editor por el mismo camino que
 // «Secuencia de fotos», y ahí NOVA escribe el guion y graba la voz (tarjeta «Video de NOVA»).
 
-import { useState } from "react";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Clapperboard, ImagePlus, Images, Loader2, RotateCcw, Sparkles, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Clapperboard, Eye, ImagePlus, Images, Loader2, PenLine, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { tr } from "@/lib/i18n";
 import { usePersistentState } from "@/lib/persist";
 import type { ReelFormat } from "@/lib/reel";
@@ -14,6 +14,7 @@ import { dataUrlReducida, fileToResizedDataUrl } from "@/lib/resize";
 import { MAX_FOTOS } from "@/lib/secuencia";
 import { quedanDe } from "@/lib/secuencia-pantalla";
 import type { Item, Settings } from "@/lib/types";
+import { pedirDescripciones } from "@/lib/ver-fotos-cliente";
 import {
   GUIADO_VACIO,
   MAX_LINEA_GUIADA,
@@ -24,12 +25,15 @@ import {
   alternarAnimar,
   avanzar,
   faltaPara,
+  fotosSinLinea,
   limpiarTextoGuiado,
+  llenarLineas,
   mensajeNova,
   moverFoto,
   quitarFoto,
   regresar,
   type EstadoGuiado,
+  type EstadoVision,
   type FotoGuiada,
 } from "@/lib/video-guiado";
 import { useCuenta } from "./account-context";
@@ -44,6 +48,7 @@ const FORMATOS: { id: ReelFormat; nombre: string }[] = [
   { id: "16:9", nombre: "Horizontal (YouTube)" },
 ];
 const TITULOS = ["Tus fotos", "De qué trata", "Qué se ve en cada foto", "Tu video"];
+const AVISO_LENTO = 12_000; // a partir de aquí se ofrece volver a intentar o escribirlas a mano
 
 let cuenta = 0;
 const idFoto = () => `g${Date.now().toString(36)}-${++cuenta}`;
@@ -71,7 +76,15 @@ export default function VideoGuiado({
   const [galeria, setGaleria] = useState(false);
   const [intento, setIntento] = useState(false); // ya tocó «Siguiente»: se muestra lo que falta
 
+  // NOVA ve las fotos al llegar al paso 3
+  const [vision, setVision] = useState<EstadoVision | undefined>(undefined);
+  const [lento, setLento] = useState(false);
+  const [motivo, setMotivo] = useState("");
+  const viendo = useRef<AbortController | null>(null);
+
   const estado: EstadoGuiado = { ...resto, ...limpiarTextoGuiado(texto) };
+  const ultimo = useRef(estado); // lo más reciente, para cuando NOVA termina de ver
+  ultimo.current = estado;
   const cambiar = (fn: (e: EstadoGuiado) => EstadoGuiado) => {
     const { tema, formato, ...r } = fn(estado);
     setResto(r);
@@ -120,16 +133,54 @@ export default function VideoGuiado({
     setOcupado(false);
   }
 
+  const dejarDeVer = () => {
+    viendo.current?.abort();
+    viendo.current = null;
+    setLento(false);
+  };
+  useEffect(() => () => viendo.current?.abort(), []);
+
+  // NOVA mira las fotos que aún no tienen línea y la escribe. Nunca pisa lo que la persona ya puso,
+  // y si falla o tarda siempre se puede seguir a mano.
+  async function ver() {
+    const pendientes = fotosSinLinea(ultimo.current);
+    if (!pendientes.length) return;
+    dejarDeVer();
+    const control = new AbortController();
+    viendo.current = control;
+    setVision("viendo");
+    setMotivo("");
+    const reloj = setTimeout(() => setLento(true), AVISO_LENTO);
+    const r = await pedirDescripciones(pendientes.map((f) => f.src), cfHeaders, control.signal);
+    clearTimeout(reloj);
+    if (viendo.current !== control) return; // se canceló o se volvió a intentar
+    viendo.current = null;
+    setLento(false);
+    const lleno = llenarLineas(ultimo.current, pendientes.map((f) => f.id), r.descripciones);
+    setResto((r) => ({ ...r, lineas: lleno.estado.lineas }));
+    setVision(lleno.llenas === 0 ? "fallo" : lleno.faltaron > 0 ? "parcial" : "lista");
+    setMotivo(lleno.llenas === 0 && r.error ? r.error : "");
+  }
+
+  function escribirlasYo() {
+    dejarDeVer();
+    setVision(undefined);
+    setMotivo("");
+  }
+
   function siguiente() {
     if (falta) return setIntento(true);
     setIntento(false);
     setAviso("");
     setSobraron(0);
     setGaleria(false);
+    const alPaso3 = estado.paso === 2;
     cambiar(avanzar);
+    if (alPaso3) void ver();
   }
 
   function armar() {
+    dejarDeVer();
     onArmar(aSecuencia(estado));
     cambiar((e) => ({ ...e, paso: 4 })); // las fotos se conservan aquí por si el editor no las tomó
   }
@@ -137,6 +188,7 @@ export default function VideoGuiado({
   function empezarDeNuevo() {
     const hay = estado.fotos.length > 0 || !!estado.tema.trim();
     if (hay && !confirm(tr("¿Empezar de nuevo? Se quitan las fotos y lo que escribiste."))) return;
+    escribirlasYo();
     setResto(RESTO_VACIO);
     setTexto({ tema: "", formato: estado.formato });
     setAviso("");
@@ -148,8 +200,8 @@ export default function VideoGuiado({
   return (
     <section className="card guiado">
       <div className="guiado-nova" role="status" aria-live="polite">
-        <NovaAvatar estado={ocupado ? "pensando" : "hablando"} tamano={44} />
-        <p>{mensajeNova(estado, { tomasQuedan, sobraron })}</p>
+        <NovaAvatar estado={ocupado || vision === "viendo" ? "pensando" : "hablando"} tamano={44} />
+        <p>{mensajeNova(estado, { tomasQuedan, sobraron, vision })}</p>
       </div>
       <p className="guiado-paso">
         <span data-no-translate>
@@ -250,6 +302,22 @@ export default function VideoGuiado({
         </>
       )}
 
+      {estado.paso === 3 && (vision === "viendo" ? lento : vision === "fallo" || vision === "parcial") && (
+        <div className="guiado-ver">
+          {motivo && <p className="notice">{motivo}</p>}
+          <div className="actions">
+            <button className="btn ghost small" onClick={() => void ver()}>
+              <Eye size={15} aria-hidden /> Volver a intentar
+            </button>
+            {vision === "viendo" && (
+              <button className="btn ghost small" onClick={escribirlasYo}>
+                <PenLine size={15} aria-hidden /> Escribirlas yo
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+      {estado.paso === 3 && <p className="muted guiado-privado">NOVA ve tus fotos para escribir el guion. No se guardan.</p>}
       {estado.paso === 3 && (
         <ol className="guiado-lineas">
           {estado.fotos.map((f, i) => (
@@ -264,7 +332,7 @@ export default function VideoGuiado({
                   type="text"
                   maxLength={MAX_LINEA_GUIADA}
                   value={estado.lineas[f.id] ?? ""}
-                  placeholder={tr("Ejemplo: la torta recién hecha")}
+                  placeholder={vision === "viendo" && !estado.lineas[f.id] ? tr("NOVA está viendo esta foto…") : tr("Ejemplo: la torta recién hecha")}
                   onChange={(e) => cambiar((x) => ({ ...x, lineas: { ...x.lineas, [f.id]: e.target.value } }))}
                 />
                 <label className="guiado-animar">
@@ -305,7 +373,7 @@ export default function VideoGuiado({
 
       <div className="guiado-pie">
         {estado.paso > 1 && (
-          <button className="btn ghost" onClick={() => (setIntento(false), cambiar(regresar))}>
+          <button className="btn ghost" onClick={() => (setIntento(false), estado.paso === 3 && escribirlasYo(), cambiar(regresar))}>
             <ArrowLeft size={16} aria-hidden /> Atrás
           </button>
         )}
