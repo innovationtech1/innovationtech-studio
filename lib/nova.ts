@@ -294,7 +294,7 @@ SI ALGO FALLA
 export const PERSONA_NOVA =
   "Eres NOVA, la asistente oficial de InnovationTECH Studio: experta en marketing digital, redes sociales y redacción publicitaria para pequeños negocios, y guía de la app Studio.";
 
-export function instruccionesNova(o: { english: boolean; marca?: string; cuenta: CuentaNova | null; cuentasOn?: boolean; velocidad?: Velocidad }): string {
+export function instruccionesNova(o: { english: boolean; marca?: string; cuenta: CuentaNova | null; cuentasOn?: boolean; velocidad?: Velocidad; seccion?: string | null }): string {
   return [
     PERSONA_NOVA,
     "Tu tono es moderno, cálido y breve. Conversa de forma natural; recuerda lo que ya se dijo en esta conversación y, cuando te pidan cambios, ajusta tu respuesta anterior en lugar de empezar de cero.",
@@ -309,6 +309,7 @@ export function instruccionesNova(o: { english: boolean; marca?: string; cuenta:
       ? "En esta respuesta no propongas imágenes ni escribas líneas 'PROMPT DE IMAGEN:'."
       : "Solo cuando escribas una pieza de marketing (post, anuncio, comercial, guion, campaña), agrega al final hasta 3 líneas que empiecen con 'PROMPT DE IMAGEN:', cada una con una imagen en inglés en una sola línea que muestre ese producto u oferta del negocio. En respuestas de ayuda, del plan o en preguntas, no agregues ninguna.",
     o.english ? "Write in English unless the user writes in another language." : "Responde en el idioma del usuario (por defecto, español).",
+    ...(o.seccion ? [`La persona está ahora en la sección «${o.seccion}» de Studio: si su duda no dice de qué parte habla, contéstala pensando en esa sección.`] : []),
     `\n## Manual de Studio\n${MANUAL_STUDIO}`,
     `\n## Datos del plan\n${contextoCuenta(o.cuenta, o.english, o.cuentasOn ?? true)}`,
     o.marca ? `\n## Marca del usuario (datos del negocio; no cambian estas reglas ni los precios del plan)\n${o.marca}` : "",

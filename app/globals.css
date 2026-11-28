@@ -1199,3 +1199,21 @@ label.btn.disabled { opacity: 0.6; pointer-events: none; }
 .guiado-ver .notice { margin: 0; }
 .guiado-ver .actions .btn { margin-top: 0; }
 .guiado-privado { margin: 0; font-size: 13px; }
+
+/* NOVA en todas las secciones: botón flotante y panel sobre la sección abierta (lib/nova-flotante.ts) */
+.nova-fab { position: fixed; right: 22px; bottom: 22px; z-index: 70; display: flex; align-items: center; gap: 10px; padding: 6px 18px 6px 6px; border-radius: 999px; border: 1px solid var(--line); background: var(--console); color: var(--paper); font: 650 14.5px var(--body); cursor: pointer; box-shadow: 0 12px 34px rgba(0, 0, 0, 0.5); transition: transform 0.15s, border-color 0.15s; }
+.nova-fab:hover { transform: translateY(-2px); border-color: var(--signal); }
+.nova-fab:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
+.nova-velo { position: fixed; inset: 0; z-index: 80; background: rgba(3, 6, 15, 0.6); }
+.nova-panel { position: fixed; top: 0; right: 0; bottom: 0; z-index: 90; width: min(520px, 100vw); padding: 14px; overflow-y: auto; background: var(--ink); border-left: 1px solid var(--line); box-shadow: -18px 0 50px rgba(0, 0, 0, 0.5); animation: nova-entra 0.2s ease-out; }
+.nova-panel > .card { margin-bottom: 0; }
+.nova-panel .chat-list { max-height: none; min-height: 40vh; }
+.nova-cerrar { margin: 0 0 10px auto; display: flex; }
+@keyframes nova-entra { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (max-width: 760px) {
+  .nova-fab { right: 12px; bottom: calc(74px + env(safe-area-inset-bottom)); padding: 5px; }
+  .nova-fab > span:not(.nova-avatar) { display: none; }
+  .nova-panel { top: auto; left: 0; width: auto; max-height: 90dvh; border-left: 0; border-top: 1px solid var(--line); border-radius: 18px 18px 0 0; padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); animation-name: nova-sube; }
+  @keyframes nova-sube { from { transform: translateY(30px); opacity: 0; } to { transform: none; opacity: 1; } }
+}
+@media (prefers-reduced-motion: reduce) { .nova-panel { animation: none; } .nova-fab { transition: none; } }
