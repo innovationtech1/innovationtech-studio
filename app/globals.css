@@ -1156,3 +1156,69 @@ body.acct-con-aviso .rail { top: var(--acct-espacio, var(--acct-aviso)); }
 html[data-app-play="1"] .solo-web { display: none !important; }
 .solo-play { display: none; }
 html[data-app-play="1"] .solo-play { display: block; }
+
+/* «Crear video con NOVA»: el camino guiado de la pestaña Videos (app/video-guiado.tsx) */
+.guiado { display: grid; gap: 14px; }
+.guiado-nova { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line-soft); border-radius: var(--radius-inner); background: var(--console); }
+.guiado-nova p { margin: 0; font: 500 15px/1.4 var(--body); color: var(--paper); }
+.guiado-paso { margin: 0; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; color: var(--fog); font-size: 13px; }
+.guiado-paso strong { color: var(--paper); font-size: 17px; }
+.guiado-barra { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.guiado-barra span { height: 4px; border-radius: 2px; background: var(--line-soft); }
+.guiado-barra span.hecho { background: var(--signal); }
+.guiado-fotos { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; }
+.guiado-fotos li { position: relative; border-radius: var(--radius-inner); overflow: hidden; background: #000; border: 1px solid var(--line-soft); }
+.guiado-fotos img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; }
+.guiado-num { position: absolute; top: 6px; left: 6px; min-width: 22px; height: 22px; padding: 0 6px; display: grid; place-items: center; border-radius: 11px; background: var(--signal); color: #fff; font: 700 12px var(--body); }
+.guiado-mover { display: flex; justify-content: space-between; gap: 2px; padding: 4px; background: var(--deck); }
+.guiado-mover .btn { margin: 0; padding: 6px 8px; min-width: 0; }
+.guiado-tema { display: flex; gap: 8px; align-items: flex-start; }
+.guiado-tema textarea { flex: 1; }
+.guiado-lineas { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.guiado-lineas li { display: grid; grid-template-columns: 84px 1fr; gap: 12px; align-items: start; padding: 10px; border: 1px solid var(--line-soft); border-radius: var(--radius-inner); background: var(--deck); }
+.guiado-lineas img { width: 84px; aspect-ratio: 1; object-fit: cover; border-radius: 8px; display: block; }
+.guiado-lineas label { margin: 0 0 4px; }
+.guiado-lineas input[type="text"] { width: 100%; }
+.guiado-animar { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px !important; font-size: 13px; color: var(--fog); cursor: pointer; }
+.guiado-listo p { margin: 0 0 10px; }
+.guiado-pie { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding-top: 6px; border-top: 1px solid var(--line-soft); }
+.guiado-pie .btn { margin-top: 8px; }
+.guiado-reinicio { margin-left: auto; }
+label.btn.disabled { opacity: 0.6; pointer-events: none; }
+
+/* Textos: «Publicar» con imagen o video (app/texto-adjunto.tsx) */
+.adj { background: var(--navy-900); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 12px 0 4px; display: grid; gap: 10px; }
+.adj-titulo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.adj-titulo svg { color: var(--red); }
+.adj .actions .btn { margin-top: 0; }
+.adj-previa { display: flex; align-items: flex-start; gap: 10px; }
+.adj-previa img, .adj-previa video { width: 132px; max-height: 190px; object-fit: cover; border-radius: 10px; background: #000; border: 1px solid var(--line-soft); display: block; }
+.adj .picker { grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); }
+.adj .notice, .adj .error { margin: 0; }
+.guiado-ver { display: grid; gap: 8px; }
+.guiado-ver .notice { margin: 0; }
+.guiado-ver .actions .btn { margin-top: 0; }
+.guiado-privado { margin: 0; font-size: 13px; }
+
+/* NOVA en todas las secciones: botón flotante y panel sobre la sección abierta (lib/nova-flotante.ts) */
+.nova-fab { position: fixed; right: 22px; bottom: 22px; z-index: 70; display: flex; align-items: center; gap: 10px; padding: 6px 18px 6px 6px; border-radius: 999px; border: 1px solid var(--line); background: var(--console); color: var(--paper); font: 650 14.5px var(--body); cursor: pointer; box-shadow: 0 12px 34px rgba(0, 0, 0, 0.5); transition: transform 0.15s, border-color 0.15s; }
+/* Compacto para no tapar lo que se escribe: el letrero sale al pasar el cursor o al enfocar */
+.nova-fab > span:not(.nova-avatar) { max-width: 0; overflow: hidden; white-space: nowrap; opacity: 0; transition: max-width 0.2s, opacity 0.15s; }
+.nova-fab { padding: 6px; gap: 0; }
+.nova-fab:hover, .nova-fab:focus-visible { padding-right: 18px; gap: 10px; }
+.nova-fab:hover > span:not(.nova-avatar), .nova-fab:focus-visible > span:not(.nova-avatar) { max-width: 200px; opacity: 1; }
+.nova-fab:hover { transform: translateY(-2px); border-color: var(--signal); }
+.nova-fab:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
+.nova-velo { position: fixed; inset: 0; z-index: 80; background: rgba(3, 6, 15, 0.6); }
+.nova-panel { position: fixed; top: 0; right: 0; bottom: 0; z-index: 90; width: min(520px, 100vw); padding: 14px; overflow-y: auto; background: var(--ink); border-left: 1px solid var(--line); box-shadow: -18px 0 50px rgba(0, 0, 0, 0.5); animation: nova-entra 0.2s ease-out; }
+.nova-panel > .card { margin-bottom: 0; }
+.nova-panel .chat-list { max-height: none; min-height: 40vh; }
+.nova-cerrar { margin: 0 0 10px auto; display: flex; }
+@keyframes nova-entra { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (max-width: 760px) {
+  .nova-fab { right: 12px; bottom: calc(74px + env(safe-area-inset-bottom)); padding: 5px; }
+  .nova-fab > span:not(.nova-avatar) { display: none; }
+  .nova-panel { top: auto; left: 0; width: auto; max-height: 90dvh; border-left: 0; border-top: 1px solid var(--line); border-radius: 18px 18px 0 0; padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); animation-name: nova-sube; }
+  @keyframes nova-sube { from { transform: translateY(30px); opacity: 0; } to { transform: none; opacity: 1; } }
+}
+@media (prefers-reduced-motion: reduce) { .nova-panel { animation: none; } .nova-fab { transition: none; } }

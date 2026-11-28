@@ -2,6 +2,7 @@ import { jsonError } from "@/lib/replicate";
 import { clavePropiaCF, getCreds, refund } from "@/lib/cf-auth";
 import { cuentasActivas, jsonAcceso, requireAccess } from "@/lib/account";
 import { elegirVelocidad, instruccionesNova, limpiarCuenta, limpiarMarca, modeloCloudflare } from "@/lib/nova";
+import { limpiarSeccion } from "@/lib/nova-flotante";
 
 export const maxDuration = 60;
 
@@ -25,7 +26,7 @@ export async function POST(req: Request) {
   const cuenta = cuentasOn ? limpiarCuenta(nova?.cuenta) : null;
   const atajo = typeof nova?.atajo === "string" ? nova.atajo : undefined;
   const velocidad = elegirVelocidad(history[history.length - 1].content, atajo);
-  const system = instruccionesNova({ english, marca: limpiarMarca(brand), cuenta, cuentasOn, velocidad });
+  const system = instruccionesNova({ english, marca: limpiarMarca(brand), cuenta, cuentasOn, velocidad, seccion: limpiarSeccion(nova?.seccion) });
 
   // Guardián: sesión, plan y límite diario, antes de llamar a cualquier proveedor.
   const acceso = await requireAccess(req, {

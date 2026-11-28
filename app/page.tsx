@@ -12,22 +12,26 @@ import { usePersistentState } from "@/lib/persist";
 import { useGallery } from "@/lib/use-gallery";
 import { useDemo } from "@/lib/use-demo";
 import { getLang, installLangHeader, locale, setLang, startDomTranslation, tr } from "@/lib/i18n";
-import { Bug, Languages, MessagesSquare } from "lucide-react";
+import { Bug, Languages, MessagesSquare, X } from "lucide-react";
 import MicButton from "./mic-button";
 import Director from "./director";
 import { AJUSTES_RAPIDOS, confirmarImagen, plataformaDe } from "@/lib/director-secciones";
 import { MAX_ORDEN } from "@/lib/orden";
-import { Bot, Undo2, CalendarDays, GalleryHorizontal, Clapperboard, Download, Eraser, Film, FolderOpen, ImageIcon, ImagePlus, Images, Palette, Pencil, PenLine, Plug, RefreshCw, Rocket, Scissors, Settings as SettingsIcon, Shapes, Trash2, type LucideIcon, Wand2 } from "lucide-react";
+import { Bot, Undo2, CalendarDays, GalleryHorizontal, Clapperboard, Download, Eraser, Film, FolderOpen, ImageIcon, ImagePlus, Images, Palette, Pencil, PenLine, Plug, RefreshCw, Rocket, Scissors, Settings as SettingsIcon, Shapes, Sparkles, Trash2, type LucideIcon, Wand2 } from "lucide-react";
 import { CheckList, CloudflareCuenta, CloudflareWizard, testCloudflare, Welcome } from "./setup-wizard";
 import { EVENTO_AJUSTES } from "@/lib/limpiar-dispositivo";
 import { formatBytes, storageUsage, toDataUrl } from "@/lib/media-store";
 import type { Item, Settings } from "@/lib/types";
 import type { SecuenciaParaVideo } from "./secuencia-fotos";
 import AssistantChat from "./assistant-chat";
+import NovaAvatar from "./nova-avatar";
+import { lugarDeNova, seccionDeNova } from "@/lib/nova-flotante";
 import { extract, phrases } from "@/lib/phrases";
 import { BotonCuenta, CUENTAS_ON, MejorarPro, ProTag, useCuenta } from "./account-context";
 import Camara from "./camara";
 import CompartirBotones from "./compartir-botones";
+import PublicarTexto from "./texto-adjunto";
+import { textoParaPublicar } from "@/lib/texto-adjunto";
 import VerificarNfc from "./verificar-nfc";
 import { dataUrlReducida } from "@/lib/resize";
 
@@ -41,6 +45,11 @@ const ShapeCrop = dynamic(() => import("./shape-crop"), { ssr: false });
 const ReelProyectos = dynamic(() => import("./reel-proyectos"), {
   ssr: false,
   loading: () => <section className="card">Cargando el creador de videos…</section>,
+});
+// «Crear video con NOVA» (pestaña Videos)
+const VideoGuiado = dynamic(() => import("./video-guiado"), {
+  ssr: false,
+  loading: () => <section className="card">Cargando…</section>,
 });
 // Secuencia de fotos (pestaña Videos)
 const SecuenciaFotos = dynamic(() => import("./secuencia-fotos"), {
@@ -146,8 +155,10 @@ export default function Home() {
   // Diapositiva editada que vuelve al carrusel
   const [slideUpdate, setSlideUpdate] = useState<{ slide: number; url: string; n: number } | null>(null);
   const [imageMode, setImageMode] = usePersistentState<"ia" | "carrusel">("imagen:modo", "ia");
-  // Pestaña Videos: el Creador de Reels o «Secuencia de fotos»
-  const [videoMode, setVideoMode] = usePersistentState<"video" | "secuencia">("video:modo", "video");
+  // NOVA flotante: el chat abierto encima de la sección donde está la persona
+  const [novaPanel, setNovaPanel] = useState(false);
+  // Pestaña Videos: «Crear video con NOVA» (camino guiado), el editor avanzado o «Secuencia de fotos»
+  const [videoMode, setVideoMode] = usePersistentState<"guiado" | "video" | "secuencia">("video:modo", "guiado");
   // Fotos de la secuencia que van al Creador de Reels con «Hacer el video con NOVA» (n cambia en cada envío)
   const [secuenciaVideo, setSecuenciaVideo] = useState<(SecuenciaParaVideo & { n: number }) | null>(null);
   // Lo que llega al Creador de Reels desde otra sección (o desde la secuencia) abre «Video»
@@ -155,6 +166,17 @@ export default function Home() {
     if (handoff || reelTopic || sceneUpdate || secuenciaVideo) setVideoMode("video");
   }, [handoff, reelTopic, sceneUpdate, secuenciaVideo, setVideoMode]);
   const [ready, setReady] = useState(false);
+  const nova = lugarDeNova({ tab, textMode, panel: novaPanel });
+  // Al llegar al chat completo el panel ya no hace falta; Esc lo cierra
+  useEffect(() => {
+    if (nova.chat === "sitio" && novaPanel) setNovaPanel(false);
+  }, [nova.chat, novaPanel]);
+  useEffect(() => {
+    if (!novaPanel) return;
+    const tecla = (e: KeyboardEvent) => e.key === "Escape" && setNovaPanel(false);
+    window.addEventListener("keydown", tecla);
+    return () => window.removeEventListener("keydown", tecla);
+  }, [novaPanel]);
   const { status: demo } = useDemo();
   const [welcomeDone, setWelcomeDone] = usePersistentState("bienvenida", false);
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -226,7 +248,7 @@ export default function Home() {
   };
   // Las secciones pesadas se montan la primera vez que se abren y después se quedan (no se pierde nada al cambiar de pestaña)
   const [abiertas, setAbiertas] = useState<string[]>([]);
-  const marca = `${tab}|${tab === "video" ? (videoMode === "secuencia" ? "secuencia" : "reel") : tab === "texto" ? textMode : ""}`;
+  const marca = `${tab}|${tab === "video" ? (videoMode === "secuencia" ? "secuencia" : videoMode === "guiado" ? "guiado" : "reel") : tab === "texto" ? textMode : ""}`;
   useEffect(() => setAbiertas((a) => (a.includes(marca) ? a : [...a, marca])), [marca]);
   const abierta = (m: string) => abiertas.includes(m) || marca === m;
   const go = (id: Tab) => {
@@ -321,16 +343,9 @@ export default function Home() {
             <CalendarDays size={16} aria-hidden /> Calendario de 30 días
           </button>
         </div>
-        <div hidden={textMode !== "chat"}>
-          <AssistantChat
-            settings={settings}
-            brand={brand}
-            onImage={(p) => (setImagePrompt(p), go("imagen"))}
-            onEditor={textToEditor}
-          />
-        </div>
         <div hidden={textMode !== "post"}>
           <TextStudio
+            gallery={gallery}
             settings={settings}
             brand={brand}
             onUseImage={(p) => (setImagePrompt(p), setTab("imagen"))}
@@ -350,6 +365,28 @@ export default function Home() {
           )}
         </div>
       </div>
+      {/* NOVA: un solo chat. Va en su sitio (Textos → Asistente) o flota sobre la sección abierta (lib/nova-flotante.ts) */}
+      {nova.chat === "panel" && <div className="nova-velo" onClick={() => setNovaPanel(false)} aria-hidden />}
+      <div className={nova.chat === "panel" ? "nova-panel" : undefined} hidden={nova.chat === "oculto"} role={nova.chat === "panel" ? "dialog" : undefined} aria-label={nova.chat === "panel" ? "NOVA" : undefined}>
+        {nova.chat === "panel" && (
+          <button className="btn ghost small nova-cerrar" onClick={() => setNovaPanel(false)}>
+            <X size={16} aria-hidden /> Cerrar
+          </button>
+        )}
+        <AssistantChat
+          settings={settings}
+          brand={brand}
+          seccion={nova.chat === "panel" ? seccionDeNova({ tab, textMode, imageMode, videoMode }) : undefined}
+          onImage={(p) => (setNovaPanel(false), setImagePrompt(p), go("imagen"))}
+          onEditor={(t) => (setNovaPanel(false), textToEditor(t))}
+        />
+      </div>
+      {nova.boton && ready && (
+        <button className="nova-fab" onClick={() => setNovaPanel(true)} aria-label="Pregúntale a NOVA">
+          <NovaAvatar estado="quieta" tamano={40} />
+          <span>Pregúntale a NOVA</span>
+        </button>
+      )}
       <div hidden={tab !== "imagen"}>
         <div className="mode-switch" role="tablist">
           <button className={imageMode === "ia" ? "active" : ""} onClick={() => setImageMode("ia")}>
@@ -410,12 +447,28 @@ export default function Home() {
       </div>
       <div hidden={tab !== "video"}>
         <div className="mode-switch" role="tablist">
+          <button role="tab" aria-selected={videoMode === "guiado"} className={videoMode === "guiado" ? "active" : ""} onClick={() => setVideoMode("guiado")}>
+            <Sparkles size={16} aria-hidden /> Crear video con NOVA
+          </button>
           <button role="tab" aria-selected={videoMode === "video"} className={videoMode === "video" ? "active" : ""} onClick={() => setVideoMode("video")}>
-            <Clapperboard size={16} aria-hidden /> Video
+            <Clapperboard size={16} aria-hidden /> Editor avanzado
           </button>
           <button role="tab" aria-selected={videoMode === "secuencia"} className={videoMode === "secuencia" ? "active" : ""} onClick={() => setVideoMode("secuencia")}>
             <Images size={16} aria-hidden /> Secuencia de fotos
           </button>
+        </div>
+        <div hidden={videoMode !== "guiado"}>
+          {abierta("video|guiado") && (
+            <VideoGuiado
+              settings={settings}
+              gallery={gallery}
+              onArmar={(s) => {
+                setSecuenciaVideo((v) => ({ ...s, n: (v?.n || 0) + 1 }));
+                go("video");
+              }}
+              onEditor={() => setVideoMode("video")}
+            />
+          )}
         </div>
         <div hidden={videoMode !== "secuencia"}>
           {abierta("video|secuencia") && (
@@ -529,12 +582,14 @@ export default function Home() {
 function TextStudio({
   settings,
   brand,
+  gallery,
   onUseImage,
   onUseVideo,
   onToEditor,
 }: {
   settings: Settings;
   brand: Brand;
+  gallery: Item[];
   onUseImage: (p: string) => void;
   onUseVideo: (p: string) => void;
   onToEditor: (text: string) => void;
@@ -720,6 +775,7 @@ function TextStudio({
               ))}
             </div>
           )}
+          <PublicarTexto texto={textoParaPublicar(result)} gallery={gallery} />
         </>
       )}
     </section>

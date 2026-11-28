@@ -118,11 +118,13 @@ export default function AssistantChat({
   brand,
   onImage,
   onEditor,
+  seccion,
 }: {
   settings: Settings;
   brand: Brand;
   onImage: (prompt: string) => void;
   onEditor: (text: string) => void;
+  seccion?: string; // dónde está la persona cuando el chat flota sobre otra sección (lib/nova-flotante.ts)
 }) {
   const valorCuenta = useCuenta();
   const [chats, setChats] = usePersistentState<Chat[]>("chat:conversaciones", []);
@@ -353,7 +355,7 @@ export default function AssistantChat({
           brand: brandContext(brand),
           provider: settings.textProvider,
           model: settings.textProvider === "cloudflare" ? settings.cfTextModel : settings.textModel,
-          nova: { cuenta: cuentaParaNova(valorCuenta), ...(atajo ? { atajo } : {}) },
+          nova: { cuenta: cuentaParaNova(valorCuenta), ...(atajo ? { atajo } : {}), ...(seccion ? { seccion } : {}) },
         }),
       });
       if (!res.ok || !res.body) {

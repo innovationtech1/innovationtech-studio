@@ -137,3 +137,23 @@ test("los textos de «Hacer el video con NOVA» tienen su traducción al inglés
   ];
   for (const s of textos) assert.ok(traducir(s), `Falta la traducción de: ${s}`);
 });
+
+test("clipsDeSecuencia: las fotos marcadas para animar salen como toma con IA; las demás, como foto", () => {
+  const clips = clipsDeSecuencia(["a", "b", "c"], ["uno", "dos", "tres"], 15, [false, true]);
+  assert.deepEqual(clips.map((c) => c.tipo), ["foto", "toma", "foto"]);
+  assert.deepEqual(clips.map((c) => c.image), ["a", "b", "c"]);
+  assert.deepEqual(clips.map((c) => c.prompt), ["uno", "dos", "tres"]);
+});
+
+test("clipsDeSecuencia: sin marcas de animar todo sigue saliendo como foto", () => {
+  assert.deepEqual(clipsDeSecuencia(["a", "b"], ["uno", "dos"], 10).map((c) => c.tipo), ["foto", "foto"]);
+});
+
+test("limpiarEntrante: conserva las marcas de animar, una por foto, y descarta lo que no sea sí o no", () => {
+  const base = { tema: "Promo", momentos: ["uno", "dos"], fotos: ["a", "b"], formato: "9:16", n: 1 };
+  assert.deepEqual(limpiarEntrante({ ...base, animar: [true, false, true] })?.animar, [true, false]);
+  assert.deepEqual(limpiarEntrante({ ...base, animar: [true] })?.animar, [true, false]);
+  assert.equal(limpiarEntrante({ ...base, animar: ["si", 1] })?.animar, undefined);
+  assert.equal(limpiarEntrante({ ...base, animar: "todas" })?.animar, undefined);
+  assert.equal(limpiarEntrante(base)?.animar, undefined);
+});
