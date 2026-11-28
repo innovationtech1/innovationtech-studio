@@ -38,7 +38,10 @@ import {
 import { FRASE_PRUEBA, crearVozNova, vocesNova, vozNova } from "@/lib/nova-voz";
 import { ESTILOS_VOZ, aplicarEstilo, estiloVoz } from "@/lib/estilos-voz";
 import type { Settings } from "@/lib/types";
+import { mensajeConFoto } from "@/lib/foto-contexto";
+import { pedirDescripciones } from "@/lib/ver-fotos-cliente";
 import { useCuenta, type ValorCuenta } from "./account-context";
+import FotoAdjunta from "./foto-adjunta";
 import MicButton from "./mic-button";
 import NovaAvatar, { type EstadoNova } from "./nova-avatar";
 
@@ -133,6 +136,10 @@ export default function AssistantChat({
   const [interim, setInterim] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState("");
+  // Foto adjunta al mensaje: NOVA la ve al enviar (la foto no se guarda en la conversación)
+  const [foto, setFoto] = useState<string | null>(null);
+  const [viendoFoto, setViendoFoto] = useState(false);
+  const [avisoFoto, setAvisoFoto] = useState("");
   const [showHistory, setShowHistory] = useState(false);
   const [speaking, setSpeaking] = useState<number | null>(null); // la respuesta que se está escuchando
   const [copied, setCopied] = useState<number | null>(null);
@@ -325,8 +332,20 @@ export default function AssistantChat({
 
   // atajo: el botón de inicio que lo pidió («studio», «plan», «comercial», «ideas»), para elegir el modelo
   async function send(text: string, base?: Msg[], atajo?: string) {
-    const content = text.trim();
-    if (!content || streaming) return;
+    if (streaming || viendoFoto) return;
+    let content = text.trim();
+    // Con una foto adjunta, NOVA primero la ve y lo que vio viaja con el mensaje (lib/foto-contexto.ts)
+    if (foto && !base) {
+      setViendoFoto(true);
+      setError("");
+      const visto = await pedirDescripciones([foto], cfHeaders);
+      setViendoFoto(false);
+      const descripcion = visto.descripciones[0];
+      if (!descripcion) setAvisoFoto(visto.error || "No pude ver la foto.");
+      content = mensajeConFoto(content, descripcion);
+      setFoto(null);
+    }
+    if (!content) return;
     ultimaActividad.current = Date.now();
     callar(); // una respuesta nueva: lo que estaba sonando se calla
     setSugerencia(null);
@@ -701,17 +720,25 @@ export default function AssistantChat({
             onInterim={setInterim}
             onText={(t) => setInput((v) => (v && !v.endsWith(" ") ? `${v} ${t}` : v + t))}
           />
+          <FotoAdjunta redondo foto={foto} disabled={streaming || viendoFoto} onFoto={(f) => (setFoto(f), setAvisoFoto(""))} />
           {streaming ? (
             <button type="button" className="send-btn stop" onClick={() => abort.current?.abort()} title="Detener" aria-label="Detener">
               <Square size={14} fill="currentColor" aria-hidden />
             </button>
           ) : (
-            <button type="submit" className="send-btn" disabled={!input.trim()} title="Enviar" aria-label="Enviar">
+            <button type="submit" className="send-btn" disabled={viendoFoto || (!input.trim() && !foto)} title="Enviar" aria-label="Enviar">
               <ArrowUp size={18} aria-hidden />
             </button>
           )}
         </div>
       </form>
+      {viendoFoto && (
+        <p className="muted chat-foto-estado" role="status">
+          NOVA está viendo tu foto…
+        </p>
+      )}
+      {foto && !viendoFoto && <p className="muted chat-foto-estado">NOVA va a ver tu foto. No se guarda.</p>}
+      {avisoFoto && <p className="notice chat-foto-estado">{avisoFoto}</p>}
       <p className="muted chat-foot">Enter para enviar · Shift+Enter para otra línea. La IA puede equivocarse: revisa antes de publicar.</p>
     </section>
   );

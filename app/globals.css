@@ -1222,3 +1222,18 @@ label.btn.disabled { opacity: 0.6; pointer-events: none; }
   @keyframes nova-sube { from { transform: translateY(30px); opacity: 0; } to { transform: none; opacity: 1; } }
 }
 @media (prefers-reduced-motion: reduce) { .nova-panel { animation: none; } .nova-fab { transition: none; } }
+
+/* Adjuntar una foto para que NOVA la vea (app/foto-adjunta.tsx) */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.foto-adj { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; position: relative; }
+.foto-adj-boton { display: inline-flex; align-items: center; gap: 8px; margin: 0; padding: 9px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--deck); color: var(--paper); font: 600 14px var(--body); cursor: pointer; transition: border-color 0.15s; }
+.foto-adj-boton:hover { border-color: var(--signal); }
+.foto-adj-boton.disabled { opacity: 0.55; pointer-events: none; }
+.foto-adj.redondo .foto-adj-boton { width: 40px; height: 40px; padding: 0; justify-content: center; border-radius: 50%; }
+.foto-adj-previa { position: relative; display: inline-block; }
+.foto-adj-previa img { width: 44px; height: 44px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); display: block; }
+.foto-adj-previa button { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--line); background: var(--ink); color: var(--paper); cursor: pointer; padding: 0; }
+.foto-adj-error { color: var(--signal); font-size: 13px; flex-basis: 100%; }
+.foto-adj.redondo .foto-adj-error { position: absolute; bottom: 48px; right: 0; width: 220px; background: var(--console); border: 1px solid var(--line); padding: 4px 10px; border-radius: 8px; }
+.texto-foto { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0 2px; font-size: 13px; }
+.chat-foto-estado { margin: 6px 2px 0; font-size: 13px; }

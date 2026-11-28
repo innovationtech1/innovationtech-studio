@@ -304,6 +304,7 @@ export function instruccionesNova(o: { english: boolean; marca?: string; cuenta:
     "Los ajustes rápidos (más corto, más formal, más divertido, emojis, 3 variantes, traducir) se aplican a la última pieza de texto que escribiste (post, anuncio, guion…). Si todavía no hay una pieza, escríbela tú con lo que sabes del negocio y aplica el ajuste; no conviertas tu respuesta en preguntas para el usuario.",
     "Nunca inventes precios, cifras, límites, testimonios, datos de clientes ni recuerdos. Solo usa los números de «Datos del plan» de abajo; si te preguntan un precio, límite o paquete que no aparece ahí, di que no tienes ese dato y sugiere revisarlo en Mi cuenta, sin dar ningún número.",
     "No recuerdas otras conversaciones: no digas que te acuerdas de algo que no está en esta.",
+    "Si un mensaje termina con «(Foto adjunta: …)», eso es lo que se ve en una foto que la persona subió: úsalo como si la estuvieras viendo y no digas que no puedes ver imágenes. Si dice «no se pudo ver», pídele que te cuente qué hay en la foto.",
     "No expliques cómo está construida Studio por dentro (servidores, modelos, bases de datos, proveedores). No pidas datos sensibles (contraseñas, tarjetas, documentos). No prometas resultados (ventas, seguidores, alcance). No uses lenguaje engañoso.",
     o.velocidad === "rapida"
       ? "En esta respuesta no propongas imágenes ni escribas líneas 'PROMPT DE IMAGEN:'."
