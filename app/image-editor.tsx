@@ -1064,6 +1064,9 @@ export default function ImageEditor({
           ))}
         </select>
       </div>
+      {editarIA && doc.photo && !cutout && !shapeTarget && (
+        <EditarIA key={doc.photo.src.slice(-40)} src={doc.photo.src} lienzo={wrapRef.current} cfHeaders={cfHeaders} onApply={applyEdicion} onClose={() => setEditarIA(false)} />
+      )}
       {showGallery && (
         <div className="picker" style={{ marginBottom: 10 }}>
           {galleryImages.length === 0 && <span className="muted">Tu galería está vacía.</span>}
@@ -1121,9 +1124,6 @@ export default function ImageEditor({
             </button>
           </div>
         </div>
-      )}
-      {editarIA && doc.photo && !cutout && !shapeTarget && (
-        <EditarIA key={doc.photo.src.slice(-40)} src={doc.photo.src} cfHeaders={cfHeaders} onApply={applyEdicion} onClose={() => setEditarIA(false)} />
       )}
       {cutout && (cutout === "photo" ? doc.photo : doc.layers.find((l) => l.id === cutout && l.type === "image")) && (
         <BgRemover
