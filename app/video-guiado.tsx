@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Clapperboard, Eye, ImagePlus, Images, Loader2, PenLine, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { tr } from "@/lib/i18n";
 import { usePersistentState } from "@/lib/persist";
+import { TAMANOS_GALERIA, anchoMinimo, limpiarTamano, type TamanoGaleria } from "@/lib/galeria-vista";
 import type { ReelFormat } from "@/lib/reel";
 import { dataUrlReducida, fileToResizedDataUrl } from "@/lib/resize";
 import { MAX_FOTOS } from "@/lib/secuencia";
@@ -74,6 +75,9 @@ export default function VideoGuiado({
   const [aviso, setAviso] = useState("");
   const [sobraron, setSobraron] = useState(0);
   const [galeria, setGaleria] = useState(false);
+  // Tamaño de las miniaturas al elegir de la galería: el mismo ajuste que en la pestaña Galería
+  const [tamanoGuardado, setTamano] = usePersistentState<TamanoGaleria>("galeria:tamano", "mediano");
+  const tamano = limpiarTamano(tamanoGuardado);
   const [intento, setIntento] = useState(false); // ya tocó «Siguiente»: se muestra lo que falta
 
   // NOVA ve las fotos al llegar al paso 3
@@ -237,10 +241,20 @@ export default function VideoGuiado({
               <Images size={16} aria-hidden /> Elegir de mi galería
             </button>
           </div>
+          {galeria && imagenes.length > 0 && (
+            <div className="gal-tamano" role="radiogroup" aria-label="Tamaño de las miniaturas">
+              <span className="muted">Tamaño</span>
+              {TAMANOS_GALERIA.map((t) => (
+                <button key={t} role="radio" aria-checked={tamano === t} className={tamano === t ? "active" : ""} onClick={() => setTamano(t)}>
+                  {t === "chico" ? "Chico" : t === "mediano" ? "Mediano" : "Grande"}
+                </button>
+              ))}
+            </div>
+          )}
           {galeria && (
-            <div className="picker">
+            <div className="picker a-medida" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${anchoMinimo(tamano)}px, 1fr))` }}>
               {imagenes.length === 0 && <span className="muted">Tu galería está vacía.</span>}
-              {imagenes.slice(0, 24).map((g, k) => (
+              {imagenes.slice(0, 60).map((g, k) => (
                 <button key={g.url + k} className="pick-item" disabled={ocupado} onClick={() => void deGaleria(g)} aria-label={tr("Agregar esta foto")}>
                   <img src={g.url} alt="" />
                 </button>
