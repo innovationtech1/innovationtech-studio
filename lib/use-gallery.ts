@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { askPersistence, clearItems, deleteItem, listItems, migrateOldGallery, newId, putItem, StoredItem, toBlob } from "./media-store";
+import { avisoDeGaleria } from "./galeria-vista";
+import { askPersistence, clearItems, deleteItem, listItems, migrateOldGallery, newId, putItem, storageUsage, StoredItem, toBlob } from "./media-store";
 import type { Item } from "./types";
 
 // Galería permanente para toda la app. Cada elemento se muestra con un enlace
@@ -64,11 +65,15 @@ export function useGallery() {
       ]);
       if (!persistent) askPersistence().then(setPersistent);
       for (const p of pending) {
+        const blob = p.source.blob || (p.source.url ? await toBlob(p.source.url) : null);
+        const elemento = { id: p.id, kind: p.kind, prompt: p.prompt, date: p.date, ...(blob ? { blob } : { url: p.source.url }) };
         try {
-          const blob = p.source.blob || (p.source.url ? await toBlob(p.source.url) : null);
-          await putItem({ id: p.id, kind: p.kind, prompt: p.prompt, date: p.date, ...(blob ? { blob } : { url: p.source.url }) });
-        } catch {
-          setError("No se pudo guardar en la galería: el dispositivo se quedó sin espacio. Borra algunos elementos.");
+          // Un tropiezo pasajero del navegador no debe costar el archivo: se intenta una vez más
+          await putItem(elemento).catch(() => putItem(elemento));
+          setError("");
+        } catch (e) {
+          // Se dice la causa real: «sin espacio» solo si de verdad lo es (lib/galeria-vista.ts)
+          setError(avisoDeGaleria(e, await storageUsage()));
         }
       }
     },

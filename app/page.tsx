@@ -31,6 +31,8 @@ import { BotonCuenta, CUENTAS_ON, MejorarPro, ProTag, useCuenta } from "./accoun
 import Camara from "./camara";
 import CompartirBotones from "./compartir-botones";
 import PublicarTexto from "./texto-adjunto";
+import VideoVivo from "./video-vivo";
+import { TAMANOS_GALERIA, anchoMinimo, limpiarTamano, type TamanoGaleria } from "@/lib/galeria-vista";
 import FotoAdjunta from "./foto-adjunta";
 import { temaConFoto } from "@/lib/foto-contexto";
 import { pedirDescripciones } from "@/lib/ver-fotos-cliente";
@@ -1302,6 +1304,9 @@ function Gallery({
   visible: boolean;
 }) {
   const [filter, setFilter] = useState<"todo" | "imagen" | "video">("todo");
+  // Tamaño de las miniaturas: chico (caben más), mediano o grande (lib/galeria-vista.ts)
+  const [guardado, setTamano] = usePersistentState<TamanoGaleria>("galeria:tamano", "mediano");
+  const tamano = limpiarTamano(guardado);
   const [usage, setUsage] = useState<{ used: number; quota: number } | null>(null);
   const [open, setOpen] = useState<Item | null>(null);
   // Cerrar la vista en grande cancela una subida a Drive en curso: se pregunta antes.
@@ -1353,10 +1358,19 @@ function Gallery({
         </button>
       </div>
 
+      <div className="gal-tamano" role="radiogroup" aria-label="Tamaño de las miniaturas">
+        <span className="muted">Tamaño</span>
+        {TAMANOS_GALERIA.map((t) => (
+          <button key={t} role="radio" aria-checked={tamano === t} className={tamano === t ? "active" : ""} onClick={() => setTamano(t)}>
+            {t === "chico" ? "Chico" : t === "mediano" ? "Mediano" : "Grande"}
+          </button>
+        ))}
+      </div>
+
       {!ready && <div className="notice">Cargando galería…</div>}
       {ready && shown.length === 0 && <div className="notice">Aún no hay nada aquí. Lo que crees aparecerá automáticamente.</div>}
 
-      <div className="gallery-grid">
+      <div className={`gallery-grid ${tamano}`} style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${anchoMinimo(tamano)}px, 1fr))` }}>
         {shown.map((it) => (
           <div className="gallery-item" key={it.id || it.url}>
             <button className="gallery-thumb" onClick={() => setOpen(it)} aria-label="Ver en grande">
@@ -1364,7 +1378,7 @@ function Gallery({
                 <img src={it.url} alt={it.prompt} loading="lazy" />
               ) : (
                 <>
-                  <video src={it.url} muted playsInline preload="metadata" />
+                  <VideoVivo src={it.url} />
                   <span className="badge-video">Video</span>
                 </>
               )}
@@ -1423,6 +1437,16 @@ function Gallery({
                 nombre={`innovationtech-${open.kind}.${ext(open)}`}
                 alSubir={(activo) => (subiendoDrive.current = activo)}
               />
+              {/* En tamaño chico las miniaturas no traen acciones: borrar también se puede desde aquí */}
+              <button
+                className="btn ghost small"
+                onClick={() => {
+                  if (!open.id || !confirm(tr("¿Borrar este elemento de la galería?"))) return;
+                  if (cerrarVista()) onRemove(open.id);
+                }}
+              >
+                <Trash2 size={16} aria-hidden /> Borrar
+              </button>
               <button className="btn ghost small" onClick={cerrarVista}>
                 Cerrar
               </button>
