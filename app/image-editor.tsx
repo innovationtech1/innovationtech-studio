@@ -8,6 +8,7 @@ import {
   BadgeLayer,
   adaptDoc,
   Box,
+  changeFormat,
   coverPhoto,
   Doc,
   EMOJIS,
@@ -45,6 +46,8 @@ import { usePersistentState } from "@/lib/persist";
 import { fileToResizedDataUrl } from "@/lib/resize";
 import type { Item } from "@/lib/types";
 import BgRemover from "./bg-remover";
+import EditarIA from "./editar-ia";
+import type { FormatoExtension } from "@/lib/editar-ia";
 import ShapeCrop from "./shape-crop";
 import { toDataUrl } from "@/lib/media-store";
 import { aArchivo, compartirArchivos, descargarArchivo } from "@/lib/compartir";
@@ -221,6 +224,7 @@ export default function ImageEditor({
   brand,
   onOpenBrand,
   onReturn,
+  cfHeaders,
 }: {
   incoming: EditorIncoming | null;
   gallery: Item[];
@@ -228,6 +232,7 @@ export default function ImageEditor({
   brand: Brand;
   onOpenBrand: () => void;
   onReturn: (dataUrl: string, to: ReturnTarget) => void;
+  cfHeaders: Record<string, string>;
 }) {
   const [returnTo, setReturnTo] = useState<ReturnTarget | null>(null);
   const [doc, setDocRaw] = usePersistentState<Doc>("editor:doc", emptyDoc(), (d) => ({
@@ -249,7 +254,11 @@ export default function ImageEditor({
     setEraserMode(eraser);
     setCutoutRaw(t);
     if (t) setShapeTarget(null); // solo un panel a la vez
+    if (t) setEditarIA(false);
   };
+  // Editar con IA (sobre la foto de fondo)
+  const [editarIA, setEditarIA] = useState(false);
+  const wantIA = useRef(false);
   const quickInput = useRef<HTMLInputElement>(null);
   const wantEraser = useRef(false);
   const wantShape = useRef(false);
@@ -796,6 +805,30 @@ export default function ImageEditor({
   // JPG no admite transparencia: con fondo transparente siempre se exporta PNG.
   const outFmt: "png" | "jpg" = doc.transparent ? "png" : exportFmt;
 
+  // Pone la foto editada por la IA en lugar de la original. Un solo paso de historial: «Deshacer» la regresa.
+  async function applyEdicion(url: string, formato?: FormatoExtension) {
+    try {
+      const im = await loadImg(url);
+      images.current.set(url, im);
+      const w = im.naturalWidth;
+      const h = im.naturalHeight;
+      setDoc((d) => {
+        if (!d.photo) return d;
+        if (formato) {
+          // Extendida: el diseño pasa al formato nuevo y la foto lo cubre entero.
+          const n = changeFormat(d, formato);
+          return { ...n, photo: coverPhoto({ ...d.photo, src: url, naturalW: w, naturalH: h, rotation: 0, flipX: false, flipY: false }, n.width, n.height) };
+        }
+        // Mismo lugar y mismo tamaño en el diseño.
+        return { ...d, photo: { ...d.photo, src: url, naturalW: w, naturalH: h, scale: (d.photo.scale * d.photo.naturalW) / w } };
+      });
+      setEditarIA(false);
+      setNotice("Listo, puse la foto editada. Si prefieres la anterior, toca «Deshacer».");
+    } catch {
+      setError("No se pudo abrir la foto editada. Inténtalo de nuevo.");
+    }
+  }
+
   async function applyCutout(target: string, png: string, size: { w: number; h: number }, trimmed = true) {
     try {
       const im = await loadImg(png);
@@ -938,6 +971,23 @@ export default function ImageEditor({
           <FolderOpen size={16} aria-hidden /> De la galería
         </button>
         <button
+          className="btn small editar-ia-boton"
+          onClick={() => {
+            // Editar con IA: sobre la foto de fondo; si no hay, pide una
+            if (doc.photo) {
+              setCutout(null);
+              setShapeTarget(null);
+              setEditarIA(true);
+            } else {
+              wantIA.current = true;
+              quickInput.current?.click();
+            }
+          }}
+          title="Dile a NOVA qué cambiar de la foto"
+        >
+          <Sparkles size={16} aria-hidden /> Editar con IA
+        </button>
+        <button
           className="btn small"
           onClick={() => {
             // Remover fondo: a la imagen seleccionada, o a la foto; si no hay, pide una
@@ -970,6 +1020,7 @@ export default function ImageEditor({
           className="btn ghost small"
           onClick={() => {
             setCutout(null);
+            setEditarIA(false);
             if (sel?.type === "image") setShapeTarget(sel.id);
             else if (doc.photo) setShapeTarget("photo");
             else {
@@ -992,8 +1043,10 @@ export default function ImageEditor({
             if (!f) return;
             const url = await fileToResizedDataUrl(f, 2048, 0.95, f.type === "image/png");
             await openPhoto(url);
-            if (wantShape.current) setShapeTarget("photo");
+            if (wantIA.current) setEditarIA(true);
+            else if (wantShape.current) setShapeTarget("photo");
             else setCutout("photo", wantEraser.current);
+            wantIA.current = false;
             wantEraser.current = false;
             wantShape.current = false;
           }}
@@ -1068,6 +1121,9 @@ export default function ImageEditor({
             </button>
           </div>
         </div>
+      )}
+      {editarIA && doc.photo && !cutout && !shapeTarget && (
+        <EditarIA key={doc.photo.src.slice(-40)} src={doc.photo.src} cfHeaders={cfHeaders} onApply={applyEdicion} onClose={() => setEditarIA(false)} />
       )}
       {cutout && (cutout === "photo" ? doc.photo : doc.layers.find((l) => l.id === cutout && l.type === "image")) && (
         <BgRemover

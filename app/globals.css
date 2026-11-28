@@ -1262,3 +1262,32 @@ label.btn.disabled { opacity: 0.6; pointer-events: none; }
 .gallery-grid.chico .gallery-item { border-radius: 8px; }
 .gallery-grid.chico .badge-video { font-size: 10px; padding: 2px 6px; }
 .gallery-grid.grande { gap: 14px; }
+
+/* Editar con IA (Editor): pedido con palabras y antes/después */
+.editar-ia { display: flex; flex-direction: column; gap: 12px; }
+.editar-ia .card-head strong { display: inline-flex; align-items: center; gap: 6px; }
+.editar-ia-boton { background: linear-gradient(135deg, var(--red), #7a3cff); border-color: transparent; }
+.editar-ia-foto, .editar-ia-marco { position: relative; align-self: center; max-width: 100%; border-radius: 12px; overflow: hidden; line-height: 0; background: var(--navy-800); }
+.editar-ia-foto img { display: block; max-width: 100%; max-height: 32vh; }
+.editar-ia-marco img { display: block; max-width: 100%; max-height: 46vh; }
+.editar-ia-foto.ocupada img { opacity: 0.55; }
+.editar-ia-foto.ocupada::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,0.28) 50%, transparent 70%); background-size: 220% 100%; animation: editar-ia-brillo 1.4s linear infinite; }
+@keyframes editar-ia-brillo { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+.editar-ia-comparar { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.editar-ia-marco .antes { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+.editar-ia-marco .linea { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #fff; box-shadow: 0 0 6px rgba(0,0,0,0.6); pointer-events: none; }
+.editar-ia-marco .rotulo { position: absolute; top: 8px; padding: 3px 8px; border-radius: 99px; background: rgba(0,0,0,0.6); color: #fff; font-size: 12px; line-height: 1.3; pointer-events: none; }
+.editar-ia-marco .rotulo.izq { left: 8px; }
+.editar-ia-marco .rotulo.der { right: 8px; }
+.editar-ia-comparar input[type="range"] { width: min(100%, 420px); }
+.editar-ia-lado { display: flex; gap: 10px; justify-content: center; align-items: flex-end; }
+.editar-ia-lado figure { margin: 0; text-align: center; min-width: 0; }
+.editar-ia-lado img { display: block; max-width: 100%; max-height: 38vh; border-radius: 10px; }
+.editar-ia-lado figcaption { margin-top: 4px; font-size: 13px; color: var(--muted); }
+.editar-ia-pedido { display: flex; gap: 8px; align-items: flex-start; }
+.editar-ia-pedido textarea { flex: 1; min-width: 0; margin: 0; resize: vertical; min-height: 64px; height: 64px; }
+.editar-ia-ejemplos { display: flex; flex-wrap: wrap; gap: 6px; }
+.editar-ia-ejemplos button { background: var(--navy-800); color: var(--text); border: 1px solid var(--navy-600); border-radius: 99px; padding: 8px 12px; font-size: 13.5px; cursor: pointer; min-height: 40px; }
+.editar-ia-ejemplos button:hover { border-color: var(--red); }
+.editar-ia .actions { align-items: center; }
+@media (prefers-reduced-motion: reduce) { .editar-ia-foto.ocupada::after { animation: none; } }

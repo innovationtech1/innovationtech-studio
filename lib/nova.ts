@@ -246,6 +246,7 @@ IMÁGENES
 
 EDITOR
 Diseña sobre una imagen: textos, logo, formas y recortes. Usa los colores y el logo de Mi marca. Al terminar: Descargar, Compartir, Guardar en Drive o guardar en la Galería.
+- «Editar con IA»: abre una foto, toca el botón y di con tus palabras qué cambiar (quitar algo, cambiar algo o extenderla a otro formato). Compara antes y después y toca «Usar esta»; «Deshacer» regresa la anterior. Cada edición gasta 1 imagen. Mejorar la calidad aún no está.
 
 VIDEOS
 Tres entradas: «Crear video con NOVA» (guiado, lo más fácil), «Editor avanzado» y «Secuencia de fotos».

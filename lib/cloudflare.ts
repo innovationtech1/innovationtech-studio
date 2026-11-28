@@ -20,6 +20,7 @@ export type CfOptions = {
   prompt: string;
   aspectRatio: string;
   references: string[]; // data URLs
+  size?: [number, number]; // tamaño exacto (para editar una foto conservando su proporción)
 };
 
 function dataUrlToBlob(dataUrl: string): Blob {
@@ -79,7 +80,7 @@ async function cloudflareImageOnce(o: CfOptions, attempt: number): Promise<strin
     return readImage(res);
   }
 
-  const [w, h] = SIZES[o.aspectRatio] || SIZES["1:1"];
+  const [w, h] = o.size || SIZES[o.aspectRatio] || SIZES["1:1"];
   const form = new FormData();
   form.append("prompt", o.prompt.slice(0, 2048));
   form.append("width", String(w));
