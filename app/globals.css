@@ -1264,7 +1264,7 @@ label.btn.disabled { opacity: 0.6; pointer-events: none; }
 .gallery-grid.grande { gap: 14px; }
 
 /* Editar con IA (Editor): pedido con palabras y antes/después */
-.editar-ia { display: flex; flex-direction: column; gap: 12px; }
+.editar-ia { display: flex; flex-direction: column; gap: 12px; scroll-margin-top: 76px; }
 .editar-ia .card-head strong { display: inline-flex; align-items: center; gap: 6px; }
 .editar-ia-boton { background: linear-gradient(135deg, var(--red), #7a3cff); border-color: transparent; }
 .editar-ia-foto, .editar-ia-marco { position: relative; align-self: center; max-width: 100%; border-radius: 12px; overflow: hidden; line-height: 0; background: var(--navy-800); }
