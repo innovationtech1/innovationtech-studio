@@ -12,7 +12,7 @@ import { usePersistentState } from "@/lib/persist";
 import { useGallery } from "@/lib/use-gallery";
 import { useDemo } from "@/lib/use-demo";
 import { getLang, installLangHeader, locale, setLang, startDomTranslation, tr } from "@/lib/i18n";
-import { Bug, Languages, MessagesSquare } from "lucide-react";
+import { Bug, Languages, MessagesSquare, X } from "lucide-react";
 import MicButton from "./mic-button";
 import Director from "./director";
 import { AJUSTES_RAPIDOS, confirmarImagen, plataformaDe } from "@/lib/director-secciones";
@@ -24,6 +24,8 @@ import { formatBytes, storageUsage, toDataUrl } from "@/lib/media-store";
 import type { Item, Settings } from "@/lib/types";
 import type { SecuenciaParaVideo } from "./secuencia-fotos";
 import AssistantChat from "./assistant-chat";
+import NovaAvatar from "./nova-avatar";
+import { lugarDeNova, seccionDeNova } from "@/lib/nova-flotante";
 import { extract, phrases } from "@/lib/phrases";
 import { BotonCuenta, CUENTAS_ON, MejorarPro, ProTag, useCuenta } from "./account-context";
 import Camara from "./camara";
@@ -153,6 +155,8 @@ export default function Home() {
   // Diapositiva editada que vuelve al carrusel
   const [slideUpdate, setSlideUpdate] = useState<{ slide: number; url: string; n: number } | null>(null);
   const [imageMode, setImageMode] = usePersistentState<"ia" | "carrusel">("imagen:modo", "ia");
+  // NOVA flotante: el chat abierto encima de la sección donde está la persona
+  const [novaPanel, setNovaPanel] = useState(false);
   // Pestaña Videos: «Crear video con NOVA» (camino guiado), el editor avanzado o «Secuencia de fotos»
   const [videoMode, setVideoMode] = usePersistentState<"guiado" | "video" | "secuencia">("video:modo", "guiado");
   // Fotos de la secuencia que van al Creador de Reels con «Hacer el video con NOVA» (n cambia en cada envío)
@@ -162,6 +166,17 @@ export default function Home() {
     if (handoff || reelTopic || sceneUpdate || secuenciaVideo) setVideoMode("video");
   }, [handoff, reelTopic, sceneUpdate, secuenciaVideo, setVideoMode]);
   const [ready, setReady] = useState(false);
+  const nova = lugarDeNova({ tab, textMode, panel: novaPanel });
+  // Al llegar al chat completo el panel ya no hace falta; Esc lo cierra
+  useEffect(() => {
+    if (nova.chat === "sitio" && novaPanel) setNovaPanel(false);
+  }, [nova.chat, novaPanel]);
+  useEffect(() => {
+    if (!novaPanel) return;
+    const tecla = (e: KeyboardEvent) => e.key === "Escape" && setNovaPanel(false);
+    window.addEventListener("keydown", tecla);
+    return () => window.removeEventListener("keydown", tecla);
+  }, [novaPanel]);
   const { status: demo } = useDemo();
   const [welcomeDone, setWelcomeDone] = usePersistentState("bienvenida", false);
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -328,14 +343,6 @@ export default function Home() {
             <CalendarDays size={16} aria-hidden /> Calendario de 30 días
           </button>
         </div>
-        <div hidden={textMode !== "chat"}>
-          <AssistantChat
-            settings={settings}
-            brand={brand}
-            onImage={(p) => (setImagePrompt(p), go("imagen"))}
-            onEditor={textToEditor}
-          />
-        </div>
         <div hidden={textMode !== "post"}>
           <TextStudio
             gallery={gallery}
@@ -358,6 +365,28 @@ export default function Home() {
           )}
         </div>
       </div>
+      {/* NOVA: un solo chat. Va en su sitio (Textos → Asistente) o flota sobre la sección abierta (lib/nova-flotante.ts) */}
+      {nova.chat === "panel" && <div className="nova-velo" onClick={() => setNovaPanel(false)} aria-hidden />}
+      <div className={nova.chat === "panel" ? "nova-panel" : undefined} hidden={nova.chat === "oculto"} role={nova.chat === "panel" ? "dialog" : undefined} aria-label={nova.chat === "panel" ? "NOVA" : undefined}>
+        {nova.chat === "panel" && (
+          <button className="btn ghost small nova-cerrar" onClick={() => setNovaPanel(false)}>
+            <X size={16} aria-hidden /> Cerrar
+          </button>
+        )}
+        <AssistantChat
+          settings={settings}
+          brand={brand}
+          seccion={nova.chat === "panel" ? seccionDeNova({ tab, textMode, imageMode, videoMode }) : undefined}
+          onImage={(p) => (setNovaPanel(false), setImagePrompt(p), go("imagen"))}
+          onEditor={(t) => (setNovaPanel(false), textToEditor(t))}
+        />
+      </div>
+      {nova.boton && ready && (
+        <button className="nova-fab" onClick={() => setNovaPanel(true)} aria-label="Pregúntale a NOVA">
+          <NovaAvatar estado="quieta" tamano={40} />
+          <span>Pregúntale a NOVA</span>
+        </button>
+      )}
       <div hidden={tab !== "imagen"}>
         <div className="mode-switch" role="tablist">
           <button className={imageMode === "ia" ? "active" : ""} onClick={() => setImageMode("ia")}>

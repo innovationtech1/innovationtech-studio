@@ -1704,6 +1704,7 @@ export const EN: Record<string, string> = {
   "Falta la foto.": "The photo is missing.",
   "Una de las fotos no se puede leer.": "One of the photos can't be read.",
   "Una de las fotos pesa demasiado.": "One of the photos is too large.",
+  "Pregúntale a NOVA": "Ask NOVA",
 };
 
 // Textos con números u otras partes que cambian
