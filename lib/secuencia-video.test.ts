@@ -157,3 +157,19 @@ test("limpiarEntrante: conserva las marcas de animar, una por foto, y descarta l
   assert.equal(limpiarEntrante({ ...base, animar: "todas" })?.animar, undefined);
   assert.equal(limpiarEntrante(base)?.animar, undefined);
 });
+
+test("decidirEntrada: lo que llega pidiendo video nuevo (creador guiado) lo crea sin preguntar; el abierto queda guardado", () => {
+  assert.deepEqual(decidirEntrada({ hayContenido: true, proyectos: 3, max: 20, quiereNuevo: true }), { preguntar: false, crearNuevo: true });
+  assert.deepEqual(decidirEntrada({ hayContenido: true, proyectos: 0, max: 20, quiereNuevo: true }), { preguntar: false, crearNuevo: true });
+  // con el editor vacío no hace falta otro video: se carga ahí mismo
+  assert.deepEqual(decidirEntrada({ hayContenido: false, proyectos: 3, max: 20, quiereNuevo: true }), { preguntar: false });
+  // sin lugar para otro video, se pregunta si reemplaza el abierto (nunca se pisa en silencio)
+  assert.deepEqual(decidirEntrada({ hayContenido: true, proyectos: 20, max: 20, quiereNuevo: true }), { preguntar: true, puedeNuevo: false });
+});
+
+test("limpiarEntrante: conserva la intención de video nuevo solo si viene como sí", () => {
+  const base = { tema: "Promo", momentos: ["uno", "dos"], fotos: ["a", "b"], formato: "9:16", n: 1 };
+  assert.equal(limpiarEntrante({ ...base, nuevo: true })?.nuevo, true);
+  assert.equal(limpiarEntrante({ ...base, nuevo: "si" })?.nuevo, undefined);
+  assert.equal(limpiarEntrante(base)?.nuevo, undefined);
+});

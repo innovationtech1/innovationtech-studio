@@ -466,7 +466,7 @@ export default function Home() {
               settings={settings}
               gallery={gallery}
               onArmar={(s) => {
-                setSecuenciaVideo((v) => ({ ...s, n: (v?.n || 0) + 1 }));
+                setSecuenciaVideo((v) => ({ ...s, nuevo: true, n: (v?.n || 0) + 1 })); // su propio video: no pisa el abierto
                 go("video");
               }}
               onEditor={() => setVideoMode("video")}

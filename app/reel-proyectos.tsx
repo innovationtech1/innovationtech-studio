@@ -58,12 +58,23 @@ export default function ReelProyectos(props: Props) {
     } catch {
       /* sin almacenamiento */
     }
-    const d = decidirEntrada({ hayContenido: hay, proyectos: cuantos, max: MAX_PROYECTOS });
-    if (!d.preguntar) {
+    const d = decidirEntrada({ hayContenido: hay, proyectos: cuantos, max: MAX_PROYECTOS, quiereNuevo: s.nuevo });
+    if (d.preguntar) setPregunta({ s, puedeNuevo: d.puedeNuevo });
+    else if (d.crearNuevo) {
+      setPregunta(null);
+      crearCon({ s, puedeNuevo: true }); // el creador guiado: su propio video; el abierto queda guardado
+    } else {
       setPregunta(null);
       setEntrante(s);
-    } else setPregunta({ s, puedeNuevo: d.puedeNuevo });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.incomingSecuencia]);
+
+  // La pregunta no puede pasar inadvertida: se lleva a la vista
+  const cajaPregunta = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (pregunta) cajaPregunta.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [pregunta]);
 
   // Hace un cambio de video: espera el guardado pendiente, aplica el cambio y vuelve a montar
   // Con `secuencia`, el video que se abre la recibe (si fn no devuelve false). Devuelve false si no se hizo.
@@ -117,6 +128,10 @@ export default function ReelProyectos(props: Props) {
     if (!pregunta) return;
     const p = pregunta;
     setPregunta(null);
+    crearCon(p);
+  }
+  // Crea un video nuevo con la secuencia; si no se pudo, la secuencia queda esperando con la pregunta
+  function crearCon(p: { s: SecuenciaEntrante; puedeNuevo: boolean }) {
     void conCambio(() => {
       const r = crearProyecto(localStorage, p.s.tema);
       if (!r.ok) {
@@ -184,7 +199,7 @@ export default function ReelProyectos(props: Props) {
         </div>
       )}
       {pregunta && (
-        <div className="notice" role="alertdialog" aria-label="¿Reemplazo el video abierto o creo uno nuevo?">
+        <div className="notice proy-pregunta" ref={cajaPregunta} role="alertdialog" aria-label="¿Reemplazo el video abierto o creo uno nuevo?">
           <p style={{ margin: "0 0 8px" }}>¿Reemplazo el video abierto o creo uno nuevo?</p>
           {!pregunta.puedeNuevo && proyectos.length >= MAX_PROYECTOS && (
             <p className="muted" style={{ margin: "0 0 8px" }}>{`Ya tienes ${MAX_PROYECTOS} videos guardados: solo se puede reemplazar el abierto (o borra alguno).`}</p>

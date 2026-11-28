@@ -8,7 +8,8 @@ import type { ReelFormat } from "./reel";
 
 export type DuracionSecuencia = (typeof DURACIONES_SECUENCIA)[number];
 // `animar`: las fotos que llegan marcadas para animarse con IA (del creador guiado), una por foto
-export type SecuenciaEntrante = { tema: string; momentos: string[]; fotos: string[]; formato: ReelFormat; n: number; animar?: boolean[] };
+// `nuevo`: llega pidiendo su propio video (no reemplazar el abierto)
+export type SecuenciaEntrante = { tema: string; momentos: string[]; fotos: string[]; formato: ReelFormat; n: number; animar?: boolean[]; nuevo?: boolean };
 
 export const DURACION_DEFECTO: DuracionSecuencia = 15;
 export const MIN_POR_FOTO = 2; // segundos: menos que eso no se alcanza a ver la foto
@@ -52,8 +53,16 @@ export function tieneContenido(clips: unknown, guion: unknown): boolean {
 }
 
 // Qué hacer al llegar una secuencia: cargarla directo, o preguntar (y si se puede crear un video nuevo)
-export function decidirEntrada(o: { hayContenido: boolean; proyectos: number; max: number }): { preguntar: false } | { preguntar: true; puedeNuevo: boolean } {
+// `quiereNuevo` (el creador guiado): se crea un video nuevo sin preguntar, porque el abierto queda
+// guardado; solo si ya no cabe otro se pregunta si se reemplaza el abierto.
+export function decidirEntrada(o: {
+  hayContenido: boolean;
+  proyectos: number;
+  max: number;
+  quiereNuevo?: boolean;
+}): { preguntar: false; crearNuevo?: true } | { preguntar: true; puedeNuevo: boolean } {
   if (!o.hayContenido) return { preguntar: false };
+  if (o.quiereNuevo) return o.proyectos < o.max ? { preguntar: false, crearNuevo: true } : { preguntar: true, puedeNuevo: false };
   return { preguntar: true, puedeNuevo: o.proyectos > 0 && o.proyectos < o.max };
 }
 
@@ -75,6 +84,7 @@ export function limpiarEntrante(x: unknown): SecuenciaEntrante | null {
     formato: FORMATOS.includes(s.formato as ReelFormat) ? (s.formato as ReelFormat) : "9:16",
     n: typeof s.n === "number" ? s.n : 0,
     ...(marcas ? { animar: fotos.map((_, i) => marcas[i] === true) } : {}),
+    ...(s.nuevo === true ? { nuevo: true as const } : {}),
   };
 }
 
