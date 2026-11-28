@@ -12,7 +12,8 @@ import CompartirBotones from "./compartir-botones";
 
 type Adjunto = { tipo: TipoAdjunto; src: Blob | string; vista: string; nombre: string };
 
-export default function PublicarTexto({ texto, gallery }: { texto: string; gallery: Item[] }) {
+// `inicial`: la foto que la persona adjuntó para que NOVA escribiera el texto; queda puesta para publicar
+export default function PublicarTexto({ texto, gallery, inicial }: { texto: string; gallery: Item[]; inicial?: string | null }) {
   const [adjunto, setAdjunto] = useState<Adjunto | null>(null);
   const [galeria, setGaleria] = useState(false);
   const [error, setError] = useState("");
@@ -24,6 +25,13 @@ export default function PublicarTexto({ texto, gallery }: { texto: string; galle
     propia.current = null;
   };
   useEffect(() => soltar, []);
+  const puesta = useRef<string | null>(null);
+  useEffect(() => {
+    if (!inicial || inicial === puesta.current) return;
+    puesta.current = inicial;
+    poner({ tipo: "imagen", src: inicial, vista: inicial, nombre: nombreAdjunto("imagen", inicial.slice(5, inicial.indexOf(";"))) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inicial]);
 
   function poner(a: Adjunto | null, vistaPropia = false) {
     soltar();

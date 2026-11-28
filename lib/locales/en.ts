@@ -1705,6 +1705,19 @@ export const EN: Record<string, string> = {
   "Una de las fotos no se puede leer.": "One of the photos can't be read.",
   "Una de las fotos pesa demasiado.": "One of the photos is too large.",
   "Pregúntale a NOVA": "Ask NOVA",
+  "Foto adjunta": "Attached photo",
+  "Quitar la foto": "Remove the photo",
+  "Adjuntar foto": "Attach photo",
+  "Aquí solo se puede adjuntar una foto.": "Only a photo can be attached here.",
+  "No pude leer esa foto. Prueba con otra.": "I couldn't read that photo. Try another one.",
+  "NOVA está viendo tu foto…": "NOVA is looking at your photo…",
+  "NOVA va a ver tu foto. No se guarda.": "NOVA will look at your photo. It isn't saved.",
+  "No pude ver la foto.": "I couldn't see the photo.",
+  "NOVA va a ver tu foto para escribir sobre ella. No se guarda.": "NOVA will look at your photo to write about it. It isn't saved.",
+  "Viendo la foto y escribiendo…": "Looking at the photo and writing…",
+  "No pude ver la foto, así que escribí el texto sin ella.": "I couldn't see the photo, so I wrote the text without it.",
+  "No pude ver la foto. Escribe qué quieres publicar.": "I couldn't see the photo. Write what you want to publish.",
+  "¿Qué puedo publicar con esta foto?": "What can I post with this photo?",
 };
 
 // Textos con números u otras partes que cambian

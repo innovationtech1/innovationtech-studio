@@ -31,6 +31,9 @@ import { BotonCuenta, CUENTAS_ON, MejorarPro, ProTag, useCuenta } from "./accoun
 import Camara from "./camara";
 import CompartirBotones from "./compartir-botones";
 import PublicarTexto from "./texto-adjunto";
+import FotoAdjunta from "./foto-adjunta";
+import { temaConFoto } from "@/lib/foto-contexto";
+import { pedirDescripciones } from "@/lib/ver-fotos-cliente";
 import { textoParaPublicar } from "@/lib/texto-adjunto";
 import VerificarNfc from "./verificar-nfc";
 import { dataUrlReducida } from "@/lib/resize";
@@ -600,6 +603,9 @@ function TextStudio({
   const [result, setResult] = usePersistentState("texto:resultado", "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // Foto adjunta: NOVA la ve y el texto se escribe sabiendo qué hay en ella (lib/foto-contexto.ts)
+  const [foto, setFoto] = useState<string | null>(null);
+  const [avisoFoto, setAvisoFoto] = useState("");
 
   const encabezados: Record<string, string> =
     settings.textProvider === "cloudflare"
@@ -641,12 +647,20 @@ function TextStudio({
     // Si el texto nombra la red social («para Facebook»), se elige sola
     const red = plataformaDe(prompt, REDES) ?? platform;
     if (red !== platform) setPlatform(red);
+    setAvisoFoto("");
     try {
+      let tema = prompt;
+      if (foto) {
+        const visto = await pedirDescripciones([foto], { "x-cf-account": settings.cfAccountId, "x-cf-token": settings.cfToken });
+        tema = temaConFoto(prompt, visto.descripciones[0]);
+        if (!visto.descripciones[0]) setAvisoFoto(prompt.trim() ? "No pude ver la foto, así que escribí el texto sin ella." : visto.error || "No pude ver la foto. Escribe qué quieres publicar.");
+        if (!tema.trim()) return;
+      }
       const res = await fetch("/api/text", {
         method: "POST",
         headers: encabezados,
         body: JSON.stringify({
-          prompt,
+          prompt: tema,
           platform: red,
           brand: brandContext(brand),
           provider: settings.textProvider,
@@ -670,8 +684,8 @@ function TextStudio({
     <section className="card">
       <div className="card-head">
         <h2>Crear textos de marketing</h2>
-        {(prompt || result) && (
-          <button className="btn ghost small" disabled={loading} onClick={() => (setPrompt(""), setResult(""), setError(""))}>
+        {(prompt || result || foto) && (
+          <button className="btn ghost small" disabled={loading} onClick={() => (setPrompt(""), setResult(""), setError(""), setFoto(null), setAvisoFoto(""))}>
             Limpiar
           </button>
         )}
@@ -702,9 +716,14 @@ function TextStudio({
         onChange={(e) => setPrompt(e.target.value)}
         placeholder="Ej.: Promoción de 2x1 en tortas los martes, para jóvenes y familias de San Antonio"
       />
-      <button className="btn" disabled={loading || !prompt} onClick={generate}>
-        {loading ? "Escribiendo…" : "Generar textos"}
+      <div className="texto-foto">
+        <FotoAdjunta foto={foto} disabled={loading} onFoto={(f) => (setFoto(f), setAvisoFoto(""))} />
+        {foto && <span className="muted">NOVA va a ver tu foto para escribir sobre ella. No se guarda.</span>}
+      </div>
+      <button className="btn" disabled={loading || (!prompt && !foto)} onClick={generate}>
+        {loading ? (foto ? "Viendo la foto y escribiendo…" : "Escribiendo…") : "Generar textos"}
       </button>
+      {avisoFoto && <p className="notice">{avisoFoto}</p>}
       {error && <div className="error">{error}</div>}
       {result && (
         <>
@@ -775,7 +794,7 @@ function TextStudio({
               ))}
             </div>
           )}
-          <PublicarTexto texto={textoParaPublicar(result)} gallery={gallery} />
+          <PublicarTexto texto={textoParaPublicar(result)} gallery={gallery} inicial={foto} />
         </>
       )}
     </section>
