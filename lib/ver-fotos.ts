@@ -29,6 +29,7 @@ export function instruccionesVer(): string {
     "Describe en español, en una sola frase de máximo 15 palabras, lo que se ve en la foto: el producto, el lugar o la acción.",
     "Escribe solo la frase, sin comillas y sin empezar con «En la imagen».",
     "Si aparecen personas, no identifiques a nadie ni adivines su nombre, edad, origen, salud u otros datos: di solo lo que hacen (por ejemplo «dos personas comiendo»).",
+    "No copies nombres de personas que aparezcan escritos en la foto.",
     "No inventes texto, marcas ni precios que no se lean con claridad.",
   ].join(" ");
 }
@@ -53,8 +54,24 @@ export function leerVision(datos: unknown): string {
   return typeof c === "string" ? c : "";
 }
 
-const MULETILLA = /^(?:en\s+)?(?:la|esta)\s+(?:imagen|foto|fotograf[ií]a)\s+(?:se\s+(?:ve|observa|muestra|aprecia)n?|muestra|hay|aparecen?|contiene)\s*:?\s*/i;
+const MULETILLA = /^(?:(?:en\s+)?(?:la|esta)\s+(?:imagen|foto|fotograf[ií]a)\s+(?:se\s+(?:ve|observa|muestra|aprecia)n?|muestra|hay|aparecen?|contiene)|se\s+(?:ve|observa|muestra|aprecia)n?)\s*:?\s*/i;
 const NEGATIVA = /^(?:lo siento|no puedo|no es posible|i can(?:'|’)?t|i cannot|i'm sorry|sorry|i am unable|as an ai)/i;
+
+const CORTES = [", ", "; ", " y ", " que ", " donde "];
+const SUELTAS = /[\s,;:]+(?:y|o|e|u|de|del|la|las|el|los|un|una|unos|unas|con|en|para|por|a|al|que|su|sus|se)$/i;
+
+// Una frase que no cabe se corta donde termina una idea (coma, «y», «que»), no a media frase;
+// si no hay dónde, se le quitan las palabras sueltas del final («…de la», «…y una»).
+function acortar(t: string): string {
+  let corto = t.slice(0, MAX_DESCRIPCION + 1).replace(/\s+\S*$/, "");
+  const corte = Math.max(...CORTES.map((c) => corto.lastIndexOf(c)));
+  if (corte >= MAX_DESCRIPCION / 2) corto = corto.slice(0, corte);
+  for (let antes = ""; antes !== corto; ) {
+    antes = corto;
+    corto = corto.replace(SUELTAS, "").replace(/[\s,;:.]+$/, "");
+  }
+  return corto;
+}
 
 // Una línea lista para usarse; cadena vacía si el modelo se negó o no dijo nada útil
 export function limpiarDescripcion(texto: unknown): string {
@@ -64,8 +81,7 @@ export function limpiarDescripcion(texto: unknown): string {
   t = t.replace(MULETILLA, "").replace(/[.\s]+$/, "").trim();
   if (!t) return "";
   t = t[0].toUpperCase() + t.slice(1);
-  if (t.length > MAX_DESCRIPCION) t = t.slice(0, MAX_DESCRIPCION).replace(/\s+\S*$/, "").trim();
-  return t;
+  return t.length > MAX_DESCRIPCION ? acortar(t) : t;
 }
 
 // Ve un lote: hasta 3 fotos a la vez, un reintento por foto, y la que no se pudo queda en null

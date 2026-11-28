@@ -149,3 +149,38 @@ test("activarVision: Cloudflare confirma la aceptación con forma de error; eso 
     new Response(JSON.stringify({ success: false, errors: [{ message: "AiError: Model Agreement: Thank you for agreeing to this model's terms. You may now use the model. (b744)" }] }), { status: 403 });
   assert.deepEqual(await activarVision({ accountId: "a", token: "t" }, gracias as typeof fetch), { ok: true });
 });
+
+test("limpiarDescripcion: quita también «Se ve…» al inicio", () => {
+  assert.equal(limpiarDescripcion("Se ve un tarjeta de recomendación"), "Un tarjeta de recomendación");
+  assert.equal(limpiarDescripcion("Se observan dos personas comiendo."), "Dos personas comiendo");
+  assert.equal(limpiarDescripcion("Se muestra el logotipo del negocio"), "El logotipo del negocio");
+});
+
+test("limpiarDescripcion: una frase larga se corta en una idea completa, no a media palabra ni colgando", () => {
+  // casos reales del modelo: antes quedaban en «…con el nombre de», «…digital y una», «…a la izquierda de la»
+  assert.equal(
+    limpiarDescripcion("Un escáner de código de barras de un usuario de Cash App, con el nombre de Fulano de Tal en la parte inferior"),
+    "Un escáner de código de barras de un usuario de Cash App",
+  );
+  assert.equal(
+    limpiarDescripcion("Se ve un tarjeta de recomendación, una tarjeta de presentación digital y una tarjeta de pago sobre fondo azul"),
+    "Un tarjeta de recomendación, una tarjeta de presentación digital",
+  );
+  assert.equal(
+    limpiarDescripcion("El logotipo de InnovationTECH Studio, que se encuentra a la izquierda de la pantalla principal de la app"),
+    "El logotipo de InnovationTECH Studio, que se encuentra a la izquierda",
+  );
+  // sin comas: se quitan las palabras sueltas del final
+  const sinComas = limpiarDescripcion("Una mesa larga de madera con muchas tortas recién hechas servidas en platos blancos para toda la familia y los");
+  assert.ok(sinComas.length <= MAX_DESCRIPCION);
+  assert.doesNotMatch(sinComas, /\s(?:y|los|la|de|para|con|en|el|una?)$/i, sinComas);
+  assert.match(sinComas, /^Una mesa larga de madera con muchas tortas/);
+});
+
+test("limpiarDescripcion: una frase corta no se toca", () => {
+  assert.equal(limpiarDescripcion("Dos personas comiendo en la barra del local"), "Dos personas comiendo en la barra del local");
+});
+
+test("instruccionesVer: pide no copiar nombres de personas que aparezcan escritos", () => {
+  assert.match(instruccionesVer(), /nombres? de personas? .*escrit/i);
+});
