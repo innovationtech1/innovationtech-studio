@@ -143,3 +143,9 @@ test("activarVision: si Cloudflare lo rechaza o no hay conexión, lo dice sin ro
   assert.deepEqual(await activarVision({ accountId: "a", token: "t" }, caido as typeof fetch), { ok: false, error: "No se pudo conectar con Cloudflare. Intenta de nuevo." });
   assert.deepEqual(await activarVision({ accountId: "", token: "" }), { ok: false, error: "Faltan las claves de Cloudflare de la plataforma." });
 });
+
+test("activarVision: Cloudflare confirma la aceptación con forma de error; eso cuenta como activado", async () => {
+  const gracias = async () =>
+    new Response(JSON.stringify({ success: false, errors: [{ message: "AiError: Model Agreement: Thank you for agreeing to this model's terms. You may now use the model. (b744)" }] }), { status: 403 });
+  assert.deepEqual(await activarVision({ accountId: "a", token: "t" }, gracias as typeof fetch), { ok: true });
+});

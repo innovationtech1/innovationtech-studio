@@ -111,6 +111,11 @@ export async function activarVision(c: { accountId: string; token: string }, f: 
     return { ok: false, error: "No se pudo conectar con Cloudflare. Intenta de nuevo." };
   }
   const datos = await res.json().catch(() => ({}));
-  if (!res.ok || datos?.success === false) return { ok: false, error: datos?.errors?.[0]?.message || `Cloudflare respondió ${res.status}` };
+  if (!res.ok || datos?.success === false) {
+    const mensaje = String(datos?.errors?.[0]?.message || "");
+    // Cloudflare confirma la aceptación con forma de error: «Thank you for agreeing… You may now use the model.»
+    if (/thank you for agreeing|you may now use the model/i.test(mensaje)) return { ok: true };
+    return { ok: false, error: mensaje || `Cloudflare respondió ${res.status}` };
+  }
   return { ok: true };
 }
