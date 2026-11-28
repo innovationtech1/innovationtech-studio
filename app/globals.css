@@ -1263,31 +1263,42 @@ label.btn.disabled { opacity: 0.6; pointer-events: none; }
 .gallery-grid.chico .badge-video { font-size: 10px; padding: 2px 6px; }
 .gallery-grid.grande { gap: 14px; }
 
-/* Editar con IA (Editor): pedido con palabras y antes/después */
-.editar-ia { display: flex; flex-direction: column; gap: 12px; scroll-margin-top: 76px; }
-.editar-ia .card-head strong { display: inline-flex; align-items: center; gap: 6px; }
+/* Editar con IA (Editor): barra pegada a la foto; el antes/después sale encima de la foto */
+.editar-ia { margin: 0 0 10px; padding: 8px 10px; border: 1px solid var(--signal, var(--red)); border-radius: var(--radius-inner, 12px); background: var(--console, var(--navy-800)); scroll-margin-top: 76px; }
 .editar-ia-boton { background: linear-gradient(135deg, var(--red), #7a3cff); border-color: transparent; }
-.editar-ia-foto, .editar-ia-marco { position: relative; align-self: center; max-width: 100%; border-radius: 12px; overflow: hidden; line-height: 0; background: var(--navy-800); }
-.editar-ia-foto img { display: block; max-width: 100%; max-height: 32vh; }
-.editar-ia-marco img { display: block; max-width: 100%; max-height: 46vh; }
-.editar-ia-foto.ocupada img { opacity: 0.55; }
-.editar-ia-foto.ocupada::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,0.28) 50%, transparent 70%); background-size: 220% 100%; animation: editar-ia-brillo 1.4s linear infinite; }
+.editar-ia-barra { display: flex; align-items: center; gap: 8px; }
+.editar-ia-barra input[type="text"] { flex: 1 1 160px; min-width: 0; margin: 0; min-height: 44px; }
+.editar-ia-barra .btn { margin-top: 0; white-space: nowrap; }
+.editar-ia-acciones { flex: 1; display: flex; flex-wrap: wrap; gap: 8px; }
+.editar-ia-cerrar { flex: none; width: 40px; height: 40px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
+.editar-ia-cerrar:hover { color: var(--text); background: var(--navy-700, rgba(255,255,255,0.08)); }
+.editar-ia-estado { margin: 8px 0 0; font-size: 14px; line-height: 1.4; }
+.editar-ia-ejemplos { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.editar-ia-ejemplos button { background: var(--navy-800); color: var(--text); border: 1px solid var(--navy-600); border-radius: 99px; padding: 6px 12px; font-size: 13.5px; cursor: pointer; min-height: 36px; }
+.editar-ia-ejemplos button:hover { border-color: var(--red); }
+.editar-ia-ejemplos .muted { font-size: 12.5px; margin-left: 4px; }
+.editar-ia-velo { position: absolute; inset: 0; z-index: 3; border-radius: inherit; background: linear-gradient(100deg, rgba(8,12,30,0.45) 30%, rgba(255,255,255,0.3) 50%, rgba(8,12,30,0.45) 70%); background-size: 220% 100%; animation: editar-ia-brillo 1.4s linear infinite; }
 @keyframes editar-ia-brillo { from { background-position: 120% 0; } to { background-position: -120% 0; } }
-.editar-ia-comparar { display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.editar-ia-marco .antes { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+.editar-ia-encima { position: absolute; inset: 0; z-index: 3; display: flex; align-items: center; justify-content: center; border-radius: inherit; background: var(--navy-900, #0a0f24); }
+.editar-ia-marco { position: relative; border-radius: 10px; overflow: hidden; line-height: 0; }
+.editar-ia-marco img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .editar-ia-marco .linea { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #fff; box-shadow: 0 0 6px rgba(0,0,0,0.6); pointer-events: none; }
+.editar-ia-marco .linea::after { content: "⇆"; position: absolute; top: 50%; left: 50%; width: 30px; height: 30px; margin: -15px 0 0 -15px; display: grid; place-items: center; border-radius: 50%; background: #fff; color: #111; font-size: 15px; line-height: 1; box-shadow: 0 2px 8px rgba(0,0,0,0.5); }
 .editar-ia-marco .rotulo { position: absolute; top: 8px; padding: 3px 8px; border-radius: 99px; background: rgba(0,0,0,0.6); color: #fff; font-size: 12px; line-height: 1.3; pointer-events: none; }
 .editar-ia-marco .rotulo.izq { left: 8px; }
 .editar-ia-marco .rotulo.der { right: 8px; }
-.editar-ia-comparar input[type="range"] { width: min(100%, 420px); }
-.editar-ia-lado { display: flex; gap: 10px; justify-content: center; align-items: flex-end; }
-.editar-ia-lado figure { margin: 0; text-align: center; min-width: 0; }
-.editar-ia-lado img { display: block; max-width: 100%; max-height: 38vh; border-radius: 10px; }
-.editar-ia-lado figcaption { margin-top: 4px; font-size: 13px; color: var(--muted); }
-.editar-ia-pedido { display: flex; gap: 8px; align-items: flex-start; }
-.editar-ia-pedido textarea { flex: 1; min-width: 0; margin: 0; resize: vertical; min-height: 64px; height: 64px; }
-.editar-ia-ejemplos { display: flex; flex-wrap: wrap; gap: 6px; }
-.editar-ia-ejemplos button { background: var(--navy-800); color: var(--text); border: 1px solid var(--navy-600); border-radius: 99px; padding: 8px 12px; font-size: 13.5px; cursor: pointer; min-height: 40px; }
-.editar-ia-ejemplos button:hover { border-color: var(--red); }
-.editar-ia .actions { align-items: center; }
-@media (prefers-reduced-motion: reduce) { .editar-ia-foto.ocupada::after { animation: none; } }
+.editar-ia-marco input[type="range"] { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; opacity: 0; cursor: ew-resize; }
+.editar-ia-lado { display: flex; gap: 10px; justify-content: center; align-items: center; max-width: 100%; padding: 0 8px; }
+.editar-ia-lado figure { margin: 0; text-align: center; min-width: 0; max-height: 100%; display: flex; flex-direction: column; align-items: center; }
+.editar-ia-lado img { display: block; max-width: 100%; min-height: 0; max-height: calc(100% - 24px); object-fit: contain; border-radius: 10px; }
+.editar-ia-lado figcaption { margin-top: 4px; font-size: 13px; line-height: 20px; color: var(--muted); }
+@media (max-width: 600px) {
+  .editar-ia-barra { flex-wrap: wrap; }
+  .editar-ia-ejemplos { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-right: -10px; padding-right: 10px; }
+  .editar-ia-ejemplos button, .editar-ia-ejemplos .muted { flex: none; white-space: nowrap; }
+  .editar-ia-barra .nova-avatar { display: none; }
+  .editar-ia-barra input[type="text"] { flex-basis: calc(100% - 48px); order: -1; }
+  .editar-ia-barra:has(input) .editar-ia-cerrar { order: -1; }
+  .editar-ia-acciones { flex: 1 1 0; min-width: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .editar-ia-velo { animation: none; } }

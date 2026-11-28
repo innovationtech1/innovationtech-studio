@@ -1753,6 +1753,8 @@ export const EN: Record<string, string> = {
   "Falta la foto que quieres editar.": "The photo you want to edit is missing.",
   "La foto pesa demasiado para editarla. Prueba con otra.": "The photo is too large to edit. Try another one.",
   "Dime qué quieres cambiar de la foto.": "Tell me what you want to change in the photo.",
+  "¿Qué quieres cambiar? Ej.: quita la servilleta de la mesa": "What do you want to change? E.g.: remove the napkin from the table",
+  "Cerrar Editar con IA": "Close Edit with AI",
 };
 
 // Textos con números u otras partes que cambian
